@@ -11,6 +11,7 @@ from storygraph.demo import PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
 from storygraph.services import (
     AuthorCanonSeedService,
     ContextPackBuilder,
+    GraphQueryService,
     ReviewService,
     RuleBasedContinuityChecker,
     RuleBasedSceneWriter,
@@ -77,6 +78,7 @@ def create_app() -> FastAPI:
     extractor = RuleBasedStateExtractor()
     review = ReviewService(candidate_store, graph)
     canon_seed = AuthorCanonSeedService(graph)
+    graph_query = GraphQueryService(graph)
     scene_workflow = SceneGenerationWorkflow(
         context_builder=context_builder,
         writer=writer,
@@ -109,6 +111,13 @@ def create_app() -> FastAPI:
         except GraphStoreError as exc:
             raise _graph_http_exception(exc) from exc
         return {"project_id": project_id}
+
+    @app.get("/projects/{project_id}")
+    def get_project(project_id: str) -> dict:
+        try:
+            return graph_query.get_node(project_id=project_id, node_id=project_id).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
 
     @app.post("/projects/{project_id}/characters")
     def add_character(project_id: str, request: CharacterSeedRequest) -> dict:
@@ -160,6 +169,27 @@ def create_app() -> FastAPI:
     @app.get("/demo")
     def demo() -> dict:
         return {"project_id": PROJECT_ID, "scene_id": SCENE_ID}
+
+    @app.get("/projects/{project_id}/graph/query")
+    def query_graph(
+        project_id: str,
+        source_id: str,
+        hop_limit: int = 1,
+        edge_labels: str | None = None,
+        node_labels: str | None = None,
+        statuses: str | None = None,
+    ) -> dict:
+        try:
+            return graph_query.query_neighbors(
+                project_id=project_id,
+                source_id=source_id,
+                hop_limit=hop_limit,
+                edge_labels=_csv(edge_labels),
+                node_labels=_csv(node_labels),
+                statuses=_csv(statuses),  # type: ignore[arg-type]
+            )
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/context-pack")
     def build_context(project_id: str, scene_id: str) -> dict:
@@ -295,6 +325,12 @@ def _graph_http_exception(exc: GraphStoreError) -> HTTPException:
         status_code=status_code,
         detail={"category": exc.category, "message": str(exc)},
     )
+
+
+def _csv(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 app = create_app()

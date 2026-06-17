@@ -20,6 +20,7 @@ from storygraph.demo import ITEM_ID, LOCATION_ID, PROJECT_ID, SCENE_ID, build_fa
 from storygraph.services import (
     AuthorCanonSeedService,
     ContextPackBuilder,
+    GraphQueryService,
     ReviewService,
     RuleBasedContinuityChecker,
     RuleBasedSceneWriter,
@@ -76,6 +77,12 @@ def _properties_from_json(properties_json: str | None) -> dict:
     if not isinstance(properties, dict):
         raise ContractError("properties_json must decode to a JSON object")
     return properties
+
+
+def _csv(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def init_workspace(
@@ -149,6 +156,48 @@ def init_workspace(
         "node_count": len(graph.nodes),
         "relationship_count": len(graph.relationships),
     }
+
+
+def get_node_command(
+    *,
+    project_id: str,
+    node_id: str,
+    workspace: str | Path | None = None,
+    include_non_canon: bool = False,
+) -> dict:
+    runtime = _runtime(workspace)
+    try:
+        return GraphQueryService(runtime.graph).get_node(
+            project_id=project_id,
+            node_id=node_id,
+            include_non_canon=include_non_canon,
+        ).model_dump()
+    finally:
+        runtime.close()
+
+
+def query_graph_command(
+    *,
+    project_id: str,
+    source_id: str,
+    workspace: str | Path | None = None,
+    hop_limit: int = 1,
+    edge_labels: str | None = None,
+    node_labels: str | None = None,
+    statuses: str | None = None,
+) -> dict:
+    runtime = _runtime(workspace)
+    try:
+        return GraphQueryService(runtime.graph).query_neighbors(
+            project_id=project_id,
+            source_id=source_id,
+            hop_limit=hop_limit,
+            edge_labels=_csv(edge_labels),
+            node_labels=_csv(node_labels),
+            statuses=_csv(statuses),  # type: ignore[arg-type]
+        )
+    finally:
+        runtime.close()
 
 
 def add_character_command(
@@ -520,6 +569,21 @@ def _main_argparse() -> None:
     init_parser.add_argument("--force", action="store_true")
     init_parser.add_argument("--empty", action="store_true")
 
+    get_node_parser = subparsers.add_parser("get-node")
+    get_node_parser.add_argument("--project", default=PROJECT_ID)
+    get_node_parser.add_argument("--id", required=True)
+    get_node_parser.add_argument("--workspace", default=None)
+    get_node_parser.add_argument("--include-non-canon", action="store_true")
+
+    query_graph_parser = subparsers.add_parser("query-graph")
+    query_graph_parser.add_argument("--project", default=PROJECT_ID)
+    query_graph_parser.add_argument("--source", required=True)
+    query_graph_parser.add_argument("--workspace", default=None)
+    query_graph_parser.add_argument("--hop-limit", type=int, default=1)
+    query_graph_parser.add_argument("--edge-labels", default=None)
+    query_graph_parser.add_argument("--node-labels", default=None)
+    query_graph_parser.add_argument("--statuses", default=None)
+
     character_parser = subparsers.add_parser("add-character")
     character_parser.add_argument("--project", default=PROJECT_ID)
     character_parser.add_argument("--id", default=None)
@@ -596,6 +660,23 @@ def _main_argparse() -> None:
             workspace=args.workspace,
             force=args.force,
             empty=args.empty,
+        )
+    elif args.command == "get-node":
+        payload = get_node_command(
+            project_id=args.project,
+            node_id=args.id,
+            workspace=args.workspace,
+            include_non_canon=args.include_non_canon,
+        )
+    elif args.command == "query-graph":
+        payload = query_graph_command(
+            project_id=args.project,
+            source_id=args.source,
+            workspace=args.workspace,
+            hop_limit=args.hop_limit,
+            edge_labels=args.edge_labels,
+            node_labels=args.node_labels,
+            statuses=args.statuses,
         )
     elif args.command == "add-character":
         payload = add_character_command(
@@ -717,6 +798,52 @@ def main() -> None:
                     workspace=workspace,
                     force=force,
                     empty=empty,
+                )
+            )
+        )
+
+    @app.command("get-node")
+    def get_node_cmd(
+        node_id: str = typer.Option(..., "--id", help="Graph node ID."),
+        project: str = typer.Option(PROJECT_ID, help="Project ID."),
+        workspace: str | None = typer.Option(None, help="Local StoryGraph workspace directory."),
+        include_non_canon: bool = typer.Option(False, help="Allow non-canon node reads."),
+    ) -> None:
+        """Fetch one graph node."""
+
+        typer.echo(
+            _dump(
+                get_node_command(
+                    project_id=project,
+                    node_id=node_id,
+                    workspace=workspace,
+                    include_non_canon=include_non_canon,
+                )
+            )
+        )
+
+    @app.command("query-graph")
+    def query_graph_cmd(
+        source: str = typer.Option(..., help="Source node ID."),
+        project: str = typer.Option(PROJECT_ID, help="Project ID."),
+        workspace: str | None = typer.Option(None, help="Local StoryGraph workspace directory."),
+        hop_limit: int = typer.Option(1, help="Explicit graph hop limit."),
+        edge_labels: str | None = typer.Option(None, help="Comma-separated edge labels."),
+        node_labels: str | None = typer.Option(None, help="Comma-separated node labels."),
+        statuses: str | None = typer.Option(None, help="Comma-separated status filters."),
+    ) -> None:
+        """Query neighboring graph nodes and relationships."""
+
+        typer.echo(
+            _dump(
+                query_graph_command(
+                    project_id=project,
+                    source_id=source,
+                    workspace=workspace,
+                    hop_limit=hop_limit,
+                    edge_labels=edge_labels,
+                    node_labels=node_labels,
+                    statuses=statuses,
                 )
             )
         )

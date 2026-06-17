@@ -89,6 +89,8 @@ Returns one graph node by stable ID.
 
 Returns adjacent nodes and relationships for a source node, filtered by edge labels, node labels, status, and hop limit.
 
+Default behavior must return only `CANON` nodes and relationships. Non-canon states may be returned only when the caller explicitly passes status filters.
+
 ### `query_scene_context`
 
 Returns canon state needed to build a Context Pack for one scene:
@@ -160,8 +162,9 @@ Records the append-only event log entry for every canon mutation.
 
 - Canon reads must exclude non-canon states unless the caller explicitly asks for them.
 - Reads should be deterministic: stable ordering by relevance, timeline, then ID.
-- Hop limits must be explicit.
+- Hop limits must be explicit. MVP API/CLI graph queries are limited to 1-2 hops.
 - No operation may infer new facts unless the result is marked as a hypothesis outside canon.
+- Read-only graph queries must not create events, candidate facts, drafts, or canon mutations.
 
 ## Write Invariants
 
@@ -181,6 +184,23 @@ The v1 author seed surface includes:
 - `POST /projects/{project_id}/relations`
 
 These routes are explicit human canon-entry paths. They must not create pending `CandidateFact` records.
+
+## Read-Only Graph API Surface
+
+The v1 read-only graph query surface includes:
+
+- `GET /projects/{project_id}`
+- `GET /projects/{project_id}/graph/query`
+
+`graph/query` accepts:
+
+- `source_id`
+- `hop_limit`
+- `edge_labels`: comma-separated optional filter
+- `node_labels`: comma-separated optional filter
+- `statuses`: comma-separated optional filter, default `CANON`
+
+The response should include `project_id`, `source`, `nodes`, `relationships`, and `filters`.
 
 ## Error Categories
 

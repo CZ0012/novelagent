@@ -14,6 +14,7 @@ Own Context Pack construction: retrieve the smallest useful set of canon, draft 
 
 - Maintain the Context Pack contract.
 - Define graph traversal and retrieval rules for scene context.
+- Use read-only graph query surfaces for inspection and retrieval diagnostics.
 - Apply context priority ordering from P0 through P7.
 - Record provenance for every included context item.
 - Report missing canon instead of inventing facts.

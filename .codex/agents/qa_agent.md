@@ -18,6 +18,7 @@ Own continuity checking, acceptance criteria, and quality gates for StoryGraph w
 
 - Maintain the Continuity Report contract.
 - Check drafts and plans against Context Packs and canon graph state.
+- Use read-only graph query results as evidence, not as canon mutations.
 - Identify knowledge-boundary violations, timeline conflicts, location conflicts, relationship conflicts, world-rule conflicts, and unsupported new facts.
 - Suggest the smallest practical correction.
 - Define future test and acceptance criteria for each workflow phase.

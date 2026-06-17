@@ -5,7 +5,9 @@ from apps.cli.main import (
     build_context_command,
     check_continuity_command,
     extract_state_command,
+    get_node_command,
     init_workspace,
+    query_graph_command,
     review_facts_command,
     run_scene_command,
     write_scene_command,
@@ -38,6 +40,31 @@ def test_cli_workspace_scene_commands_round_trip(tmp_path):
     run = run_scene_command(workspace=workspace)
     assert run["workflow_run"]["contract_version"] == "workflow_run_v1"
     assert run["workflow_run"]["status"] == "completed"
+
+
+def test_cli_graph_query_commands_read_canon_neighbors(tmp_path):
+    workspace = tmp_path / "storygraph"
+    init_workspace(workspace=workspace, force=True)
+
+    project = get_node_command(
+        workspace=workspace,
+        project_id=PROJECT_ID,
+        node_id=PROJECT_ID,
+    )
+    query = query_graph_command(
+        workspace=workspace,
+        project_id=PROJECT_ID,
+        source_id="character_linj",
+        edge_labels="KNOWS",
+    )
+
+    assert project["id"] == PROJECT_ID
+    assert query["source"]["id"] == "character_linj"
+    assert query["filters"]["statuses"] == ["CANON"]
+    assert [node["id"] for node in query["nodes"]] == ["character_helianya"]
+    assert [relation["id"] for relation in query["relationships"]] == [
+        "rel_linj_knows_helianya"
+    ]
 
 
 def test_cli_init_force_resets_local_state_files(tmp_path):
