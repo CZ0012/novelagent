@@ -124,6 +124,26 @@ Updates node properties with provenance and event logging.
 
 Creates a relationship between existing nodes with edge metadata.
 
+### `seed_canon_node`
+
+Creates a `CANON` node from an explicit human-authored seed action. This is for project setup and story-bible entry, not automated extraction.
+
+Required provenance:
+
+- `source_ref`
+- `reviewer`
+- `rationale`
+
+### `seed_canon_relation`
+
+Creates a `CANON` relationship from an explicit human-authored seed action after verifying both endpoints exist as canon nodes.
+
+Required provenance:
+
+- `source_ref`
+- `reviewer`
+- `rationale`
+
 ### `update_relation`
 
 Updates relationship properties such as strength, public status, private status, or last changed scene.
@@ -147,8 +167,20 @@ Records the append-only event log entry for every canon mutation.
 
 - No write may omit provenance.
 - No automated write may create `CANON` status directly.
+- Human-authored seed operations may create `CANON` only when the action includes reviewer, rationale, source reference, and an event log entry.
+- Generated drafts, summaries, and model hypotheses must still use `CandidateFact`; they may not use seed operations to bypass review.
 - A rejected candidate must not be deleted if it is needed for audit history; mark it rejected or deprecated in the review layer.
 - Graph writes must be idempotent where a request ID or event ID is supplied.
+
+## Human Seed API Surface
+
+The v1 author seed surface includes:
+
+- `POST /projects/{project_id}/characters`
+- `POST /projects/{project_id}/locations`
+- `POST /projects/{project_id}/relations`
+
+These routes are explicit human canon-entry paths. They must not create pending `CandidateFact` records.
 
 ## Error Categories
 

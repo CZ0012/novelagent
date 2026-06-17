@@ -39,6 +39,34 @@ class GraphStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def seed_canon_node(
+        self,
+        *,
+        node_id: str,
+        node_type: str,
+        properties: dict,
+        source_ref: str,
+        reviewer: str,
+        rationale: str,
+    ) -> GraphNode:
+        raise NotImplementedError
+
+    @abstractmethod
+    def seed_canon_relation(
+        self,
+        *,
+        relation_id: str,
+        relation_type: str,
+        source_id: str,
+        target_id: str,
+        properties: dict | None = None,
+        source_ref: str = "manual_seed",
+        reviewer: str = "author",
+        rationale: str = "Manual project seed.",
+    ) -> GraphRelationship:
+        raise NotImplementedError
+
+    @abstractmethod
     def update_relation(
         self,
         relation_id: str,
@@ -82,4 +110,3 @@ class GraphStore(ABC):
         self, candidate: CandidateFact, *, reviewer: str, rationale: str
     ) -> EventLogEntry:
         raise NotImplementedError
-

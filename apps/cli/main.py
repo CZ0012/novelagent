@@ -18,6 +18,7 @@ from storygraph.core.errors import ContractError
 from storygraph.core.ids import slug_id
 from storygraph.demo import ITEM_ID, LOCATION_ID, PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
 from storygraph.services import (
+    AuthorCanonSeedService,
     ContextPackBuilder,
     ReviewService,
     RuleBasedContinuityChecker,
@@ -66,6 +67,15 @@ def _runtime(workspace: str | Path | None = None) -> CliRuntime:
 
 def _dump(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _properties_from_json(properties_json: str | None) -> dict:
+    if not properties_json:
+        return {}
+    properties = json.loads(properties_json)
+    if not isinstance(properties, dict):
+        raise ContractError("properties_json must decode to a JSON object")
+    return properties
 
 
 def init_workspace(
@@ -139,6 +149,94 @@ def init_workspace(
         "node_count": len(graph.nodes),
         "relationship_count": len(graph.relationships),
     }
+
+
+def add_character_command(
+    *,
+    project_id: str,
+    name: str,
+    reviewer: str,
+    rationale: str,
+    source_ref: str,
+    workspace: str | Path | None = None,
+    node_id: str | None = None,
+    properties_json: str | None = None,
+) -> dict:
+    runtime = _runtime(workspace)
+    try:
+        node = AuthorCanonSeedService(runtime.graph).add_character(
+            project_id=project_id,
+            node_id=node_id,
+            name=name,
+            properties=_properties_from_json(properties_json),
+            reviewer=reviewer,
+            rationale=rationale,
+            source_ref=source_ref,
+        )
+        save_json_graph(runtime.graph, runtime.settings.graph_path)
+        return node.model_dump()
+    finally:
+        runtime.close()
+
+
+def add_location_command(
+    *,
+    project_id: str,
+    name: str,
+    reviewer: str,
+    rationale: str,
+    source_ref: str,
+    workspace: str | Path | None = None,
+    node_id: str | None = None,
+    properties_json: str | None = None,
+) -> dict:
+    runtime = _runtime(workspace)
+    try:
+        node = AuthorCanonSeedService(runtime.graph).add_location(
+            project_id=project_id,
+            node_id=node_id,
+            name=name,
+            properties=_properties_from_json(properties_json),
+            reviewer=reviewer,
+            rationale=rationale,
+            source_ref=source_ref,
+        )
+        save_json_graph(runtime.graph, runtime.settings.graph_path)
+        return node.model_dump()
+    finally:
+        runtime.close()
+
+
+def add_relation_command(
+    *,
+    project_id: str,
+    relation_type: str,
+    source_id: str,
+    target_id: str,
+    reviewer: str,
+    rationale: str,
+    source_ref: str,
+    workspace: str | Path | None = None,
+    relation_id: str | None = None,
+    properties_json: str | None = None,
+) -> dict:
+    runtime = _runtime(workspace)
+    try:
+        relation = AuthorCanonSeedService(runtime.graph).add_relation(
+            project_id=project_id,
+            relation_id=relation_id,
+            relation_type=relation_type,
+            source_id=source_id,
+            target_id=target_id,
+            properties=_properties_from_json(properties_json),
+            reviewer=reviewer,
+            rationale=rationale,
+            source_ref=source_ref,
+        )
+        save_json_graph(runtime.graph, runtime.settings.graph_path)
+        return relation.model_dump()
+    finally:
+        runtime.close()
 
 
 def build_context_command(
@@ -422,6 +520,38 @@ def _main_argparse() -> None:
     init_parser.add_argument("--force", action="store_true")
     init_parser.add_argument("--empty", action="store_true")
 
+    character_parser = subparsers.add_parser("add-character")
+    character_parser.add_argument("--project", default=PROJECT_ID)
+    character_parser.add_argument("--id", default=None)
+    character_parser.add_argument("--name", required=True)
+    character_parser.add_argument("--properties-json", default=None)
+    character_parser.add_argument("--workspace", default=None)
+    character_parser.add_argument("--reviewer", required=True)
+    character_parser.add_argument("--rationale", required=True)
+    character_parser.add_argument("--source-ref", required=True)
+
+    location_parser = subparsers.add_parser("add-location")
+    location_parser.add_argument("--project", default=PROJECT_ID)
+    location_parser.add_argument("--id", default=None)
+    location_parser.add_argument("--name", required=True)
+    location_parser.add_argument("--properties-json", default=None)
+    location_parser.add_argument("--workspace", default=None)
+    location_parser.add_argument("--reviewer", required=True)
+    location_parser.add_argument("--rationale", required=True)
+    location_parser.add_argument("--source-ref", required=True)
+
+    relation_parser = subparsers.add_parser("add-relation")
+    relation_parser.add_argument("--project", default=PROJECT_ID)
+    relation_parser.add_argument("--id", default=None)
+    relation_parser.add_argument("--type", required=True)
+    relation_parser.add_argument("--source", required=True)
+    relation_parser.add_argument("--target", required=True)
+    relation_parser.add_argument("--properties-json", default=None)
+    relation_parser.add_argument("--workspace", default=None)
+    relation_parser.add_argument("--reviewer", required=True)
+    relation_parser.add_argument("--rationale", required=True)
+    relation_parser.add_argument("--source-ref", required=True)
+
     for name in ["build-context", "write-scene", "check-continuity", "extract-state", "run-scene"]:
         command_parser = subparsers.add_parser(name)
         command_parser.add_argument("--project", default=PROJECT_ID)
@@ -466,6 +596,41 @@ def _main_argparse() -> None:
             workspace=args.workspace,
             force=args.force,
             empty=args.empty,
+        )
+    elif args.command == "add-character":
+        payload = add_character_command(
+            project_id=args.project,
+            node_id=args.id,
+            name=args.name,
+            properties_json=args.properties_json,
+            workspace=args.workspace,
+            reviewer=args.reviewer,
+            rationale=args.rationale,
+            source_ref=args.source_ref,
+        )
+    elif args.command == "add-location":
+        payload = add_location_command(
+            project_id=args.project,
+            node_id=args.id,
+            name=args.name,
+            properties_json=args.properties_json,
+            workspace=args.workspace,
+            reviewer=args.reviewer,
+            rationale=args.rationale,
+            source_ref=args.source_ref,
+        )
+    elif args.command == "add-relation":
+        payload = add_relation_command(
+            project_id=args.project,
+            relation_id=args.id,
+            relation_type=args.type,
+            source_id=args.source,
+            target_id=args.target,
+            properties_json=args.properties_json,
+            workspace=args.workspace,
+            reviewer=args.reviewer,
+            rationale=args.rationale,
+            source_ref=args.source_ref,
         )
     elif args.command == "build-context":
         payload = build_context_command(
@@ -552,6 +717,94 @@ def main() -> None:
                     workspace=workspace,
                     force=force,
                     empty=empty,
+                )
+            )
+        )
+
+    @app.command("add-character")
+    def add_character_cmd(
+        name: str = typer.Option(..., help="Character display name."),
+        reviewer: str = typer.Option(..., help="Human reviewer/author name."),
+        rationale: str = typer.Option(..., help="Why this canon seed is accepted."),
+        source_ref: str = typer.Option(..., help="Author source reference for provenance."),
+        project: str = typer.Option(PROJECT_ID, help="Project ID."),
+        node_id: str | None = typer.Option(None, "--id", help="Stable character node ID."),
+        properties_json: str | None = typer.Option(None, help="JSON object merged into properties."),
+        workspace: str | None = typer.Option(None, help="Local StoryGraph workspace directory."),
+    ) -> None:
+        """Add a human-authored canon Character node."""
+
+        typer.echo(
+            _dump(
+                add_character_command(
+                    project_id=project,
+                    node_id=node_id,
+                    name=name,
+                    properties_json=properties_json,
+                    workspace=workspace,
+                    reviewer=reviewer,
+                    rationale=rationale,
+                    source_ref=source_ref,
+                )
+            )
+        )
+
+    @app.command("add-location")
+    def add_location_cmd(
+        name: str = typer.Option(..., help="Location display name."),
+        reviewer: str = typer.Option(..., help="Human reviewer/author name."),
+        rationale: str = typer.Option(..., help="Why this canon seed is accepted."),
+        source_ref: str = typer.Option(..., help="Author source reference for provenance."),
+        project: str = typer.Option(PROJECT_ID, help="Project ID."),
+        node_id: str | None = typer.Option(None, "--id", help="Stable location node ID."),
+        properties_json: str | None = typer.Option(None, help="JSON object merged into properties."),
+        workspace: str | None = typer.Option(None, help="Local StoryGraph workspace directory."),
+    ) -> None:
+        """Add a human-authored canon Location node."""
+
+        typer.echo(
+            _dump(
+                add_location_command(
+                    project_id=project,
+                    node_id=node_id,
+                    name=name,
+                    properties_json=properties_json,
+                    workspace=workspace,
+                    reviewer=reviewer,
+                    rationale=rationale,
+                    source_ref=source_ref,
+                )
+            )
+        )
+
+    @app.command("add-relation")
+    def add_relation_cmd(
+        relation_type: str = typer.Option(..., "--type", help="Graph relationship type."),
+        source: str = typer.Option(..., help="Source node ID."),
+        target: str = typer.Option(..., help="Target node ID."),
+        reviewer: str = typer.Option(..., help="Human reviewer/author name."),
+        rationale: str = typer.Option(..., help="Why this canon seed is accepted."),
+        source_ref: str = typer.Option(..., help="Author source reference for provenance."),
+        project: str = typer.Option(PROJECT_ID, help="Project ID."),
+        relation_id: str | None = typer.Option(None, "--id", help="Stable relation ID."),
+        properties_json: str | None = typer.Option(None, help="JSON object merged into properties."),
+        workspace: str | None = typer.Option(None, help="Local StoryGraph workspace directory."),
+    ) -> None:
+        """Add a human-authored canon graph relationship."""
+
+        typer.echo(
+            _dump(
+                add_relation_command(
+                    project_id=project,
+                    relation_id=relation_id,
+                    relation_type=relation_type,
+                    source_id=source,
+                    target_id=target,
+                    properties_json=properties_json,
+                    workspace=workspace,
+                    reviewer=reviewer,
+                    rationale=rationale,
+                    source_ref=source_ref,
                 )
             )
         )

@@ -15,6 +15,7 @@ Own the graph-side design for StoryGraph canon: node labels, edge labels, graph 
 
 - Maintain the Graph Store contract.
 - Define canon-safe graph read and write semantics.
+- Maintain human-authored seed semantics for explicit story-bible canon entry.
 - Map architecture concepts to graph nodes, edges, statuses, and provenance.
 - Support Context Agent queries without exposing draft pollution.
 - Support Canon Agent commits after human review.
@@ -33,6 +34,7 @@ Own the graph-side design for StoryGraph canon: node labels, edge labels, graph 
 - Do not write draft prose.
 - Do not decide literary content.
 - Do not promote candidate facts to canon without the Canon Agent review path.
+- Do not use human seed operations for generated draft facts, summaries, or model hypotheses.
 - Do not store full chapter text in the graph.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.
 

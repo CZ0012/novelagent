@@ -9,6 +9,7 @@ from storygraph.core.errors import ContractError, GraphStoreError
 from storygraph.core.ids import slug_id
 from storygraph.demo import PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
 from storygraph.services import (
+    AuthorCanonSeedService,
     ContextPackBuilder,
     ReviewService,
     RuleBasedContinuityChecker,
@@ -24,6 +25,30 @@ class CreateProjectRequest(BaseModel):
     title: str
     genre: str = "fantasy"
     language: str = "zh-CN"
+
+
+class AuthorSeedRequest(BaseModel):
+    reviewer: str = Field(..., min_length=1)
+    rationale: str = Field(..., min_length=1)
+    source_ref: str = Field(..., min_length=1)
+    properties: dict = Field(default_factory=dict)
+
+
+class CharacterSeedRequest(AuthorSeedRequest):
+    id: str | None = None
+    name: str = Field(..., min_length=1)
+
+
+class LocationSeedRequest(AuthorSeedRequest):
+    id: str | None = None
+    name: str = Field(..., min_length=1)
+
+
+class RelationSeedRequest(AuthorSeedRequest):
+    id: str | None = None
+    type: str = Field(..., min_length=1)
+    source_id: str = Field(..., min_length=1)
+    target_id: str = Field(..., min_length=1)
 
 
 class ReviewRequest(BaseModel):
@@ -51,6 +76,7 @@ def create_app() -> FastAPI:
     checker = RuleBasedContinuityChecker()
     extractor = RuleBasedStateExtractor()
     review = ReviewService(candidate_store, graph)
+    canon_seed = AuthorCanonSeedService(graph)
     scene_workflow = SceneGenerationWorkflow(
         context_builder=context_builder,
         writer=writer,
@@ -81,8 +107,55 @@ def create_app() -> FastAPI:
                 rationale="Author created project through API.",
             )
         except GraphStoreError as exc:
-            raise HTTPException(status_code=409, detail={"category": exc.category, "message": str(exc)})
+            raise _graph_http_exception(exc) from exc
         return {"project_id": project_id}
+
+    @app.post("/projects/{project_id}/characters")
+    def add_character(project_id: str, request: CharacterSeedRequest) -> dict:
+        try:
+            return canon_seed.add_character(
+                project_id=project_id,
+                node_id=request.id,
+                name=request.name,
+                properties=request.properties,
+                reviewer=request.reviewer,
+                rationale=request.rationale,
+                source_ref=request.source_ref,
+            ).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/locations")
+    def add_location(project_id: str, request: LocationSeedRequest) -> dict:
+        try:
+            return canon_seed.add_location(
+                project_id=project_id,
+                node_id=request.id,
+                name=request.name,
+                properties=request.properties,
+                reviewer=request.reviewer,
+                rationale=request.rationale,
+                source_ref=request.source_ref,
+            ).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/relations")
+    def add_relation(project_id: str, request: RelationSeedRequest) -> dict:
+        try:
+            return canon_seed.add_relation(
+                project_id=project_id,
+                relation_id=request.id,
+                relation_type=request.type,
+                source_id=request.source_id,
+                target_id=request.target_id,
+                properties=request.properties,
+                reviewer=request.reviewer,
+                rationale=request.rationale,
+                source_ref=request.source_ref,
+            ).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
 
     @app.get("/demo")
     def demo() -> dict:
@@ -208,6 +281,20 @@ def _ensure_candidate_project(
         raise HTTPException(status_code=404, detail="Candidate fact not found") from exc
     if fact.project_id != project_id:
         raise HTTPException(status_code=404, detail="Candidate fact not found for project")
+
+
+def _contract_http_exception(exc: ContractError | GraphStoreError) -> HTTPException:
+    if isinstance(exc, GraphStoreError):
+        return _graph_http_exception(exc)
+    return HTTPException(status_code=409, detail={"category": "contract_error", "message": str(exc)})
+
+
+def _graph_http_exception(exc: GraphStoreError) -> HTTPException:
+    status_code = 404 if exc.category == "not_found" else 409
+    return HTTPException(
+        status_code=status_code,
+        detail={"category": exc.category, "message": str(exc)},
+    )
 
 
 app = create_app()

@@ -146,6 +146,82 @@ class Neo4jGraphStore(GraphStore):
         )
         return self._relationship_from_entity(created)
 
+    def seed_canon_node(
+        self,
+        *,
+        node_id: str,
+        node_type: str,
+        properties: dict,
+        source_ref: str,
+        reviewer: str,
+        rationale: str,
+    ) -> GraphNode:
+        now = utc_now()
+        node = GraphNode(
+            id=node_id,
+            type=node_type,
+            status="CANON",
+            created_at=now,
+            updated_at=now,
+            source_ref=source_ref,
+            event_id=new_id("evt"),
+            reviewer=reviewer,
+            reviewed_at=now,
+            rationale=rationale,
+            properties=properties,
+        )
+        created = self.create_node(node, allow_canon=True)
+        self._record_event(
+            operation="create_node",
+            target=created.id,
+            source_ref=source_ref,
+            reviewer=reviewer,
+            rationale=rationale,
+            payload=created.model_dump(),
+            event_id=created.event_id,
+        )
+        return created
+
+    def seed_canon_relation(
+        self,
+        *,
+        relation_id: str,
+        relation_type: str,
+        source_id: str,
+        target_id: str,
+        properties: dict | None = None,
+        source_ref: str = "manual_seed",
+        reviewer: str = "author",
+        rationale: str = "Manual project seed.",
+    ) -> GraphRelationship:
+        now = utc_now()
+        relation = GraphRelationship(
+            id=relation_id,
+            type=relation_type,
+            status="CANON",
+            created_at=now,
+            updated_at=now,
+            source_ref=source_ref,
+            event_id=new_id("evt"),
+            reviewer=reviewer,
+            reviewed_at=now,
+            rationale=rationale,
+            source_id=source_id,
+            target_id=target_id,
+            properties=properties or {},
+        )
+        created = self.create_relation(relation, allow_canon=True)
+        self._record_event(
+            operation="create_relation",
+            target=created.id,
+            source_ref=source_ref,
+            reviewer=reviewer,
+            rationale=rationale,
+            payload=created.model_dump(),
+            event_id=created.event_id,
+        )
+        return created
+
     def update_relation(
         self,
         relation_id: str,
@@ -479,4 +555,3 @@ class Neo4jGraphStore(GraphStore):
         if label not in EDGE_LABELS:
             raise GraphStoreError("conflict_detected", f"Unsupported edge label: {label}")
         return label
-

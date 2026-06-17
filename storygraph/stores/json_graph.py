@@ -48,5 +48,6 @@ def save_json_graph(graph: InMemoryGraphStore, path: str | Path) -> None:
         ],
         "event_log": [event.model_dump() for event in graph.event_log.list()],
     }
-    graph_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
+    temp_path = graph_path.with_suffix(f"{graph_path.suffix}.tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(graph_path)

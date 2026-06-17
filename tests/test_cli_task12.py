@@ -1,4 +1,7 @@
 from apps.cli.main import (
+    add_character_command,
+    add_location_command,
+    add_relation_command,
     build_context_command,
     check_continuity_command,
     extract_state_command,
@@ -7,6 +10,7 @@ from apps.cli.main import (
     run_scene_command,
     write_scene_command,
 )
+from storygraph.core.errors import GraphStoreError
 from storygraph.demo import ITEM_ID, LOCATION_ID, PROJECT_ID, SCENE_ID
 from storygraph.stores.json_graph import load_json_graph
 
@@ -46,6 +50,83 @@ def test_cli_init_force_resets_local_state_files(tmp_path):
     init_workspace(workspace=workspace, force=True)
     second = write_scene_command(workspace=workspace)
     assert second["version"] == 1
+
+
+def test_cli_author_seed_commands_persist_canon_with_provenance(tmp_path):
+    workspace = tmp_path / "storygraph"
+    init_result = init_workspace(workspace=workspace, force=True, empty=True, title="Manual Seed")
+    project_id = init_result["project_id"]
+
+    character = add_character_command(
+        workspace=workspace,
+        project_id=project_id,
+        node_id="character_mara",
+        name="Mara",
+        properties_json='{"role":"scout"}',
+        reviewer="editor",
+        rationale="Seeded from story bible.",
+        source_ref="author_seed:story_bible_v1",
+    )
+    location = add_location_command(
+        workspace=workspace,
+        project_id=project_id,
+        node_id="location_harbor",
+        name="Harbor",
+        properties_json='{"type":"port"}',
+        reviewer="editor",
+        rationale="Seeded from story bible.",
+        source_ref="author_seed:story_bible_v1",
+    )
+    relation = add_relation_command(
+        workspace=workspace,
+        project_id=project_id,
+        relation_id="rel_mara_located_at_harbor",
+        relation_type="LOCATED_AT",
+        source_id="character_mara",
+        target_id="location_harbor",
+        properties_json='{"scene_id":"scene_seed"}',
+        reviewer="editor",
+        rationale="Author placed Mara at the harbor.",
+        source_ref="author_seed:story_bible_v1",
+    )
+
+    assert character["status"] == "CANON"
+    assert character["reviewer"] == "editor"
+    assert character["rationale"] == "Seeded from story bible."
+    assert character["source_ref"] == "author_seed:story_bible_v1"
+    assert character["event_id"]
+    assert character["properties"]["project_id"] == project_id
+    assert location["type"] == "Location"
+    assert relation["status"] == "CANON"
+    assert relation["properties"]["project_id"] == project_id
+
+    graph = load_json_graph(workspace / "graph.json")
+    assert graph.get_node("character_mara").properties["role"] == "scout"
+    assert graph.event_log.list()
+    assert review_facts_command(workspace=workspace, project_id=project_id)["facts"] == []
+
+
+def test_cli_author_seed_relation_requires_existing_canon_endpoints(tmp_path):
+    workspace = tmp_path / "storygraph"
+    init_result = init_workspace(workspace=workspace, force=True, empty=True, title="Manual Seed")
+
+    try:
+        add_relation_command(
+            workspace=workspace,
+            project_id=init_result["project_id"],
+            relation_id="rel_missing",
+            relation_type="KNOWS",
+            source_id="character_missing_a",
+            target_id="character_missing_b",
+            reviewer="editor",
+            rationale="Should fail.",
+            source_ref="author_seed:story_bible_v1",
+        )
+    except GraphStoreError as exc:
+        assert exc.category == "not_found"
+        assert "Node not found" in str(exc)
+    else:
+        raise AssertionError("Expected missing relation endpoints to fail")
 
 
 def test_cli_extract_state_and_accept_persists_canon_commit(tmp_path):

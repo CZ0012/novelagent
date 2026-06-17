@@ -22,6 +22,7 @@ Own candidate fact extraction, human review semantics, and canon commit rules. T
 - Require source spans and provenance for every candidate.
 - Route candidates through human review before canon commit.
 - Confirm workflow review pauses resume only after every candidate has a non-pending review decision.
+- Distinguish explicit author story-bible seed operations from automated CandidateFact extraction.
 - Coordinate accepted graph patches with Graph Agent semantics.
 
 ## Expected Outputs
@@ -35,6 +36,7 @@ Own candidate fact extraction, human review semantics, and canon commit rules. T
 ## Boundaries
 
 - Do not mark a fact as canon without explicit human acceptance.
+- Do not route generated draft facts through human seed APIs to bypass CandidateFact review.
 - Do not discard rejected candidates if they are needed for audit history.
 - Do not infer hidden author intent as fact.
 - Do not rewrite draft prose.
