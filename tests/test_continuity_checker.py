@@ -94,6 +94,73 @@ def test_clean_draft_passes_continuity_check():
 
     assert report.status == "pass"
     assert report.issues == []
-    assert {"knowledge_boundary", "timeline", "location_state", "world_rule", "foreshadowing"}.issubset(
+    assert {
+        "knowledge_boundary",
+        "timeline",
+        "location_state",
+        "world_rule",
+        "foreshadowing",
+    }.issubset(set(report.checked_dimensions))
+
+
+def test_phase5_timeline_location_relationship_and_world_rule_conflicts_are_reported():
+    graph = build_fantasy_demo_graph()
+    draft_store = SQLiteDraftStore()
+    pack = ContextPackBuilder(graph, draft_store).build(project_id=PROJECT_ID, scene_id=SCENE_ID)
+    draft = draft_store.create_draft(
+        project_id=PROJECT_ID,
+        scene_id=SCENE_ID,
+        text=(
+            "At one day after the capital coup, the scene records location_far_city. "
+            "character_linj LOVES character_helianya strength=0.9. "
+            "worldrule_secret_reveals does not apply. "
+            "Royal lineage secrets unfold without explicit scene-level reveal events. "
+            "bell rings early. half black wax seal."
+        ),
+        summary="State conflicts draft.",
+    )
+
+    report = RuleBasedContinuityChecker().check(context_pack=pack, draft=draft)
+    issue_types = {issue.issue_type for issue in report.issues}
+
+    assert report.status == "needs_revision"
+    assert {
+        "timeline_conflict",
+        "location_conflict",
+        "relationship_conflict",
+        "world_rule_conflict",
+    }.issubset(issue_types)
+    assert {"timeline", "location_state", "relationship_state", "world_rule"}.issubset(
         set(report.checked_dimensions)
     )
+
+
+def test_phase5_foreshadowing_causality_and_pov_issues_are_reported():
+    graph = build_fantasy_demo_graph()
+    draft_store = SQLiteDraftStore()
+    pack = ContextPackBuilder(graph, draft_store).build(project_id=PROJECT_ID, scene_id=SCENE_ID)
+    pack = pack.model_copy(
+        update={
+            "must_include": ["half black wax seal"],
+            "previous_scene_summary": "Lin Jin escaped the tower guard.",
+            "unresolved_foreshadowing": [
+                "foreshadowing_blue_lantern: blue lantern flickers under the gate"
+            ],
+        }
+    )
+    draft = draft_store.create_draft(
+        project_id=PROJECT_ID,
+        scene_id=SCENE_ID,
+        text=(
+            "half black wax seal. The rescue works for no reason. "
+            "Unbeknownst to character_linj, Helian Ya has resolved foreshadowing_blue_lantern."
+        ),
+        summary="Narrative continuity gaps.",
+    )
+
+    report = RuleBasedContinuityChecker().check(context_pack=pack, draft=draft)
+    issue_types = {issue.issue_type for issue in report.issues}
+
+    assert report.status == "needs_revision"
+    assert {"foreshadowing_mismatch", "causal_gap", "pov_leak"}.issubset(issue_types)
+    assert {"foreshadowing", "causality", "pov"}.issubset(set(report.checked_dimensions))
