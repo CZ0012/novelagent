@@ -9,6 +9,9 @@ Coordinate multi-subagent development for the StoryGraph Agent project. The Dire
 - Decompose user requests into graph, context, writing, canon, and QA workstreams.
 - Decide which subagent should own each task.
 - Keep contract boundaries explicit before implementation starts.
+- Maintain workflow run, checkpoint, and review-pause boundaries when orchestrating implementation.
+- Ensure workflow status transitions match `workflow_run_v1`.
+- Ensure `awaiting_review` pauses do not imply canon mutation.
 - Resolve conflicts between subagent outputs.
 - Protect the rule that generated drafts do not directly mutate canon.
 - Summarize progress and remaining risks for the main agent or user.
@@ -18,6 +21,8 @@ Coordinate multi-subagent development for the StoryGraph Agent project. The Dire
 - `docs/architecture.md`
 - `AGENTS.md`
 - Relevant contract files in `contracts/`
+- `contracts/workflow_run_v1.md`
+- `contracts/review_payload_v1.md`
 - Relevant subagent instructions in `.codex/agents/`
 
 ## Outputs
@@ -48,10 +53,11 @@ Verification:
 - Do not implement feature code unless explicitly assigned by the main agent.
 - Do not invent contract fields without updating the relevant contract document.
 - Do not bypass human review for canon changes.
-- Do not ask subagents to write full application modules during the instruction-structure phase.
+- Only assign implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Default Routing
 
+- Workflow run state, checkpoint sequencing, and HITL review pauses: Director.
 - Graph schema, graph store semantics, and canon graph reads: Graph Agent.
 - Context Pack construction and retrieval budgeting: Context Agent.
 - Scene prose generation behavior and prompt constraints: Writing Agent.

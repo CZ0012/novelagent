@@ -34,7 +34,7 @@ Own the graph-side design for StoryGraph canon: node labels, edge labels, graph 
 - Do not decide literary content.
 - Do not promote candidate facts to canon without the Canon Agent review path.
 - Do not store full chapter text in the graph.
-- Do not add application source files during the instruction-structure phase.
+- Only add implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Key Questions To Answer In Future Work
 

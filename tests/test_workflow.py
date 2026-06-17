@@ -50,8 +50,10 @@ def test_scene_generation_workflow_persists_completed_run_checkpoint():
     result = workflow.run(project_id=PROJECT_ID, scene_id=SCENE_ID)
     stored = workflow_store.get(result.workflow_run.id)
 
+    assert stored.contract_version == "workflow_run_v1"
     assert stored.status == "completed"
     assert stored.current_step == "END"
+    assert stored.review_payload.contract_version == "review_payload_v1"
     assert stored.review_payload.status == "none"
     assert [step.status for step in stored.steps] == [
         "completed",
@@ -81,6 +83,7 @@ def test_scene_generation_workflow_records_review_payload_when_candidates_exist(
 
     assert stored.status == "awaiting_review"
     assert stored.current_step == "human_review"
+    assert stored.review_payload.contract_version == "review_payload_v1"
     assert stored.review_payload.status == "pending"
     assert stored.review_payload.source_draft_id == result.draft.id
     assert stored.review_payload.candidate_ids == [result.candidates[0].id]

@@ -33,7 +33,7 @@ Own Context Pack construction: retrieve the smallest useful set of canon, draft 
 - Do not update canon.
 - Do not treat vector retrieval as canon.
 - Do not include full chapters in a Context Pack.
-- Do not add application source files during the instruction-structure phase.
+- Only add implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Context Priority
 

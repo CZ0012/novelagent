@@ -53,7 +53,7 @@ Use the Director as the coordination layer. The Director should split work, conf
 
 - Prefer precise Markdown over implementation sketches.
 - JSON examples are allowed in contract documents, but they are illustrative unless explicitly marked as required.
-- Avoid adding code files while the project is still in the instruction-structure phase.
+- Avoid unrelated code files; implementation should stay scoped to the MVP architecture and versioned contracts.
 
 ## Shell And File Writing Notes
 

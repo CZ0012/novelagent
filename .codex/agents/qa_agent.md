@@ -10,6 +10,8 @@ Own continuity checking, acceptance criteria, and quality gates for StoryGraph w
 - `contracts/continuity_report_v1.md`
 - `contracts/context_pack_v1.md`
 - `contracts/candidate_fact_v1.md`
+- `contracts/workflow_run_v1.md`
+- `contracts/review_payload_v1.md`
 - `contracts/graph_store_v1.md`
 
 ## Responsibilities
@@ -19,6 +21,7 @@ Own continuity checking, acceptance criteria, and quality gates for StoryGraph w
 - Identify knowledge-boundary violations, timeline conflicts, location conflicts, relationship conflicts, world-rule conflicts, and unsupported new facts.
 - Suggest the smallest practical correction.
 - Define future test and acceptance criteria for each workflow phase.
+- Verify workflow gates: `needs_revision` and `blocked` stop before extraction, and `awaiting_review` does not complete while candidate reviews are pending.
 - Report missing context or inconclusive checks clearly.
 
 ## Expected Outputs
@@ -35,7 +38,7 @@ Own continuity checking, acceptance criteria, and quality gates for StoryGraph w
 - Do not mutate canon.
 - Do not rewrite scenes in place.
 - Do not treat stylistic preferences as canon violations.
-- Do not add application source files during the instruction-structure phase.
+- Only add implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Severity Guidance
 

@@ -12,8 +12,10 @@ def test_api_scene_generation_run_is_checkpointed_and_queryable():
     assert response.status_code == 200
     payload = response.json()
     run = payload["workflow_run"]
+    assert run["contract_version"] == "workflow_run_v1"
     assert run["status"] == "completed"
     assert run["current_step"] == "END"
+    assert run["review_payload"]["contract_version"] == "review_payload_v1"
 
     fetched = client.get(f"/runs/{run['id']}")
     assert fetched.status_code == 200

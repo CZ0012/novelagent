@@ -10,7 +10,7 @@ A Candidate Fact is not canon. It is a proposed state change with evidence, conf
 
 - Primary producer: Canon Agent state extraction flow.
 - Primary consumers: Canon Agent review flow, Graph Agent, QA Agent, Director.
-- Related contracts: `graph_store_v1`, `continuity_report_v1`.
+- Related contracts: `graph_store_v1`, `continuity_report_v1`, `review_payload_v1`, `workflow_run_v1`.
 
 ## Required Top-Level Fields
 
@@ -108,6 +108,22 @@ Allowed v1 candidate statuses:
 - `DEPRECATED`
 
 Only the canon commit path may turn an accepted candidate into `CANON` graph state.
+
+## Workflow Review Pause Integration
+
+`ReviewPayload.candidate_ids` from `review_payload_v1` must reference `CandidateFact.id` values.
+
+A workflow pause with `ReviewPayload.status = pending` is not a review decision and must not mutate canon. Canon commit still requires an explicit `ReviewService` human action.
+
+Accepted or edited candidates require reviewer identity, review timestamp, rationale/provenance, and an event log entry before they become canon graph state. Rejected or deferred candidates must not mutate canon.
+
+Current review API routes governed by this integration:
+
+- `GET /projects/{project_id}/facts/pending`
+- `POST /projects/{project_id}/facts/{fact_id}/accept`
+- `POST /projects/{project_id}/facts/{fact_id}/edit-accept`
+- `POST /projects/{project_id}/facts/{fact_id}/reject`
+- `POST /projects/{project_id}/facts/{fact_id}/defer`
 
 ## Confidence Rules
 

@@ -34,6 +34,7 @@ class WorkflowStep(ContractModel):
 
 
 class ReviewPayload(ContractModel):
+    contract_version: Literal["review_payload_v1"] = "review_payload_v1"
     status: Literal["none", "pending"] = "none"
     candidate_ids: list[str] = Field(default_factory=list)
     source_draft_id: str | None = None
@@ -41,6 +42,7 @@ class ReviewPayload(ContractModel):
 
 
 class WorkflowRun(ContractModel):
+    contract_version: Literal["workflow_run_v1"] = "workflow_run_v1"
     id: str
     workflow_name: str
     project_id: str
