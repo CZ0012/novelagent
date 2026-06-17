@@ -106,3 +106,6 @@ class SQLiteWorkflowStore:
             rows = self._connection.execute(query, params).fetchall()
             return [WorkflowRun.model_validate_json(row["payload_json"]) for row in rows]
 
+    def close(self) -> None:
+        with self._lock:
+            self._connection.close()

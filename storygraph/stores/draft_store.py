@@ -138,6 +138,10 @@ class SQLiteDraftStore:
             self._connection.commit()
             return self.get_draft(draft_id)
 
+    def close(self) -> None:
+        with self._lock:
+            self._connection.close()
+
     def _next_version(self, project_id: str, scene_id: str) -> int:
         row = self._connection.execute(
             "SELECT MAX(version) AS max_version FROM drafts WHERE project_id = ? AND scene_id = ?",
