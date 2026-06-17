@@ -235,7 +235,9 @@ class InMemoryGraphStore(GraphStore):
                     neighbor_id = relation.source_id
                 else:
                     continue
-                neighbor = self.nodes[neighbor_id]
+                neighbor = self.nodes.get(neighbor_id)
+                if neighbor is None:
+                    continue
                 if neighbor.status not in allowed_statuses:
                     continue
                 if allowed_nodes and neighbor.type not in allowed_nodes:
@@ -253,10 +255,24 @@ class InMemoryGraphStore(GraphStore):
         props = scene.properties
         required = list(dict.fromkeys([props.get("pov_character_id"), *props.get("required_characters", [])]))
         required = [item for item in required if item]
-        characters = [self.get_node(character_id) for character_id in required]
-        location = self.get_node(props["location_id"]) if props.get("location_id") else None
+        characters = []
+        for character_id in required:
+            try:
+                characters.append(self.get_node(character_id))
+            except GraphStoreError as exc:
+                if exc.category != "not_found":
+                    raise
+        location = None
+        if props.get("location_id"):
+            try:
+                location = self.get_node(props["location_id"])
+            except GraphStoreError as exc:
+                if exc.category != "not_found":
+                    raise
         active_relationships: list[GraphRelationship] = []
         for character_id in required:
+            if character_id not in self.nodes:
+                continue
             neighbors = self.query_neighbors(
                 character_id,
                 edge_labels=[

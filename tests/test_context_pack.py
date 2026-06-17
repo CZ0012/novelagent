@@ -1,3 +1,5 @@
+import pytest
+
 from storygraph.demo import (
     LOCATION_ID,
     PROJECT_ID,
@@ -6,9 +8,12 @@ from storygraph.demo import (
     POV_CHARACTER_ID,
     build_fantasy_demo_graph,
 )
+
+from storygraph.core.errors import ContractError
 from storygraph.core.time import utc_now
 from storygraph.models.style import StyleSample
 from storygraph.services.context_pack_builder import ContextPackBuilder
+from storygraph.services.scene_writer import RuleBasedSceneWriter
 from storygraph.stores.style_sample_store import SQLiteStyleSampleStore
 
 
@@ -22,6 +27,42 @@ def test_context_pack_matches_contract_and_knowledge_boundary():
     assert pack.budget.priority_order == ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7"]
     assert any(SECRET_ID in boundary.does_not_know for boundary in pack.knowledge_boundaries)
     assert "full chapter" not in pack.model_dump_json().lower()
+
+
+def test_context_pack_records_stable_graph_query_plan():
+    graph = build_fantasy_demo_graph()
+    pack = ContextPackBuilder(graph).build(project_id=PROJECT_ID, scene_id=SCENE_ID)
+
+    assert pack.provenance.graph_query_ids == [
+        f"context_pack_v1:query_scene_context:{SCENE_ID}",
+        f"context_pack_v1:query_world_rules:scene_scope:{SCENE_ID}",
+        f"context_pack_v1:query_foreshadowing:unresolved:{SCENE_ID}",
+        f"context_pack_v1:get_location_state:{LOCATION_ID}",
+        f"context_pack_v1:get_character_state:{POV_CHARACTER_ID}",
+        f"context_pack_v1:get_character_knowledge:{SCENE_ID}:{POV_CHARACTER_ID}",
+        "context_pack_v1:get_character_state:character_helianya",
+        f"context_pack_v1:get_character_knowledge:{SCENE_ID}:character_helianya",
+    ]
+
+
+def test_context_pack_reports_missing_required_canon_without_inventing():
+    graph = build_fantasy_demo_graph()
+    del graph.nodes["character_helianya"]
+    del graph.nodes[LOCATION_ID]
+
+    pack = ContextPackBuilder(graph).build(project_id=PROJECT_ID, scene_id=SCENE_ID)
+
+    missing_refs = {gap.ref for gap in pack.missing_context}
+    assert {"character_helianya", LOCATION_ID}.issubset(missing_refs)
+    assert all(gap.severity == "critical" for gap in pack.missing_context)
+    assert "character_helianya" in pack.required_characters
+    assert not any(
+        boundary.character_id == "character_helianya"
+        for boundary in pack.knowledge_boundaries
+    )
+
+    with pytest.raises(ContractError, match="critical missing context"):
+        RuleBasedSceneWriter().draft(pack)
 
 
 def test_context_pack_budget_trims_style_samples_before_hard_context():
@@ -40,13 +81,13 @@ def test_context_pack_budget_trims_style_samples_before_hard_context():
         source_ref="test_context_pack",
     )
 
-    pack = ContextPackBuilder(graph).build(project_id=PROJECT_ID, scene_id=SCENE_ID, target_tokens=500)
+    pack = ContextPackBuilder(graph).build(project_id=PROJECT_ID, scene_id=SCENE_ID, target_tokens=550)
 
     assert pack.retrieved_style_samples == []
     assert pack.must_include == ["bell rings early", "half black wax seal"]
     assert any(SECRET_ID in boundary.does_not_know for boundary in pack.knowledge_boundaries)
     assert any(item.startswith("P6 dropped style samples") for item in pack.budget.dropped_items)
-    assert pack.budget.estimated_tokens <= 500
+    assert pack.budget.estimated_tokens <= 550
 
 
 def test_context_pack_retrieves_style_samples_from_store():

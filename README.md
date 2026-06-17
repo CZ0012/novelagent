@@ -18,7 +18,7 @@ Current MVP capabilities:
 - Pydantic contract models for graph state, context packs, candidate facts, drafts, and continuity reports.
 - Canon-safe in-memory graph store with explicit provenance and event log entries.
 - SQLite draft store.
-- Context Pack builder with P0-P7 budgeting metadata.
+- Context Pack builder with P0-P7 budgeting metadata, stable retrieval provenance, and `missing_context` gap reports.
 - Rule-based scene writer, continuity checker, and candidate fact extractor for deterministic local testing.
 - Review service that keeps candidate facts pending until a human accept/edit decision commits them to canon.
 - Minimal FastAPI and CLI entry points.

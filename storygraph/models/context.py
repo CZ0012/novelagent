@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from storygraph.models.common import ContractModel
+from storygraph.models.common import ContractModel, Severity
 
 
 DEFAULT_PRIORITY_ORDER = ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7"]
@@ -49,6 +49,14 @@ class ContextBudget(ContractModel):
     dropped_items: list[str] = Field(default_factory=list)
 
 
+class ContextGap(ContractModel):
+    kind: str
+    ref: str
+    severity: Severity = "high"
+    message: str
+    source: str | None = None
+
+
 class ContextPack(ContractModel):
     contract_version: Literal["context_pack_v1"] = "context_pack_v1"
     project_id: str
@@ -69,6 +77,6 @@ class ContextPack(ContractModel):
     previous_scene_summary: str | None = None
     style_constraints: StyleConstraints
     retrieved_style_samples: list[str] = Field(default_factory=list)
+    missing_context: list[ContextGap] = Field(default_factory=list)
     provenance: ContextProvenance
     budget: ContextBudget
-

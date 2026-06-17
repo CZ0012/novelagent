@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from storygraph.core.ids import new_id
+from storygraph.core.errors import GraphStoreError
 from storygraph.core.time import utc_now
 from storygraph.models.context import (
     ContextBudget,
+    ContextGap,
     ContextPack,
     ContextProvenance,
     KnowledgeBoundary,
@@ -35,9 +36,12 @@ class ContextPackBuilder:
         target_tokens: int = 4000,
         author_instruction_refs: list[str] | None = None,
     ) -> ContextPack:
-        scene_context = self.graph_store.query_scene_context(scene_id)
+        missing_context: list[ContextGap] = []
+        scene_context = self._query_scene_context(scene_id, missing_context)
         scene = scene_context["scene"]
         props = scene.properties
+        graph_query_ids = self._graph_query_plan(scene_id=scene_id, props=props)
+        self._check_project_scope(project_id, scene_id, props, missing_context)
 
         required_characters = list(
             dict.fromkeys(
@@ -48,14 +52,23 @@ class ContextPackBuilder:
             )
         )
         required_characters = [character_id for character_id in required_characters if character_id]
-        knowledge = [
-            self.graph_store.get_character_knowledge(
-                character_id,
+        self._report_missing_scene_fields(props, scene_id, missing_context)
+        self._report_missing_nodes(
+            required_characters=required_characters,
+            location_id=props.get("location_id"),
+            scene_context=scene_context,
+            missing_context=missing_context,
+        )
+        knowledge = []
+        for character_id in required_characters:
+            boundary = self._safe_character_knowledge(
+                character_id=character_id,
                 scene_id=scene_id,
                 timeline_position=props.get("timeline_position"),
+                missing_context=missing_context,
             )
-            for character_id in required_characters
-        ]
+            if boundary:
+                knowledge.append(boundary)
 
         active_relationships = [
             self._relationship_text(relation)
@@ -78,6 +91,16 @@ class ContextPackBuilder:
             if draft:
                 previous_scene_summary = draft.summary
                 draft_refs.append(draft.id)
+            else:
+                missing_context.append(
+                    ContextGap(
+                        kind="missing_draft",
+                        ref=previous_scene_id,
+                        severity="medium",
+                        message="Scene references a previous scene, but no draft summary is available.",
+                        source=scene_id,
+                    )
+                )
 
         style_props = props.get("style_constraints", {})
         style = StyleConstraints(
@@ -109,9 +132,9 @@ class ContextPackBuilder:
         pack = ContextPack(
             project_id=project_id,
             scene_id=scene_id,
-            chapter_id=props["chapter_id"],
-            pov_character_id=props["pov_character_id"],
-            location_id=props["location_id"],
+            chapter_id=props.get("chapter_id", ""),
+            pov_character_id=props.get("pov_character_id", ""),
+            location_id=props.get("location_id", ""),
             timeline_position=props.get("timeline_position", ""),
             scene_goal=props.get("goal", ""),
             conflict=props.get("conflict", ""),
@@ -125,8 +148,9 @@ class ContextPackBuilder:
             previous_scene_summary=previous_scene_summary,
             style_constraints=style,
             retrieved_style_samples=retrieved_style_samples,
+            missing_context=missing_context,
             provenance=ContextProvenance(
-                graph_query_ids=[new_id("graph_query")],
+                graph_query_ids=graph_query_ids,
                 draft_refs=draft_refs,
                 style_sample_refs=style_sample_refs,
                 author_instruction_refs=author_instruction_refs or [],
@@ -141,6 +165,159 @@ class ContextPackBuilder:
         strength = relation.properties.get("strength")
         suffix = f" strength={strength}" if strength is not None else ""
         return f"{relation.source_id} {relation.type} {relation.target_id}{suffix}"
+
+    def _query_scene_context(self, scene_id: str, missing_context: list[ContextGap]) -> dict:
+        try:
+            return self.graph_store.query_scene_context(scene_id)
+        except GraphStoreError as exc:
+            if exc.category != "not_found":
+                raise
+            scene = self.graph_store.get_node(scene_id)
+            missing_context.append(
+                ContextGap(
+                    kind="incomplete_graph_context",
+                    ref=scene_id,
+                    severity="high",
+                    message=f"Graph scene-context query was incomplete: {exc}",
+                    source=scene_id,
+                )
+            )
+            return {
+                "scene": scene,
+                "characters": [],
+                "location": None,
+                "active_relationships": [],
+                "world_rules": [],
+                "unresolved_foreshadowing": [],
+            }
+
+    @staticmethod
+    def _graph_query_plan(*, scene_id: str, props: dict) -> list[str]:
+        required_characters = list(
+            dict.fromkeys(
+                [
+                    props.get("pov_character_id"),
+                    *props.get("required_characters", []),
+                ]
+            )
+        )
+        required_characters = [character_id for character_id in required_characters if character_id]
+        plan = [
+            f"context_pack_v1:query_scene_context:{scene_id}",
+            f"context_pack_v1:query_world_rules:scene_scope:{scene_id}",
+            f"context_pack_v1:query_foreshadowing:unresolved:{scene_id}",
+        ]
+        location_id = props.get("location_id")
+        if location_id:
+            plan.append(f"context_pack_v1:get_location_state:{location_id}")
+        for character_id in required_characters:
+            plan.append(f"context_pack_v1:get_character_state:{character_id}")
+            plan.append(
+                f"context_pack_v1:get_character_knowledge:{scene_id}:{character_id}"
+            )
+        return plan
+
+    @staticmethod
+    def _check_project_scope(
+        project_id: str,
+        scene_id: str,
+        props: dict,
+        missing_context: list[ContextGap],
+    ) -> None:
+        scene_project_id = props.get("project_id")
+        if scene_project_id and scene_project_id != project_id:
+            missing_context.append(
+                ContextGap(
+                    kind="project_mismatch",
+                    ref=scene_id,
+                    severity="critical",
+                    message=(
+                        f"Requested project {project_id} does not match scene project "
+                        f"{scene_project_id}."
+                    ),
+                    source=scene_id,
+                )
+            )
+
+    @staticmethod
+    def _report_missing_scene_fields(
+        props: dict,
+        scene_id: str,
+        missing_context: list[ContextGap],
+    ) -> None:
+        for field_name in ["chapter_id", "pov_character_id", "location_id"]:
+            if not props.get(field_name):
+                missing_context.append(
+                    ContextGap(
+                        kind="missing_scene_field",
+                        ref=field_name,
+                        severity="critical",
+                        message=f"Scene {scene_id} is missing required field {field_name}.",
+                        source=scene_id,
+                    )
+                )
+
+    @staticmethod
+    def _report_missing_nodes(
+        *,
+        required_characters: list[str],
+        location_id: str | None,
+        scene_context: dict,
+        missing_context: list[ContextGap],
+    ) -> None:
+        found_characters = {node.id for node in scene_context.get("characters", [])}
+        for character_id in required_characters:
+            if character_id not in found_characters:
+                missing_context.append(
+                    ContextGap(
+                        kind="missing_node",
+                        ref=character_id,
+                        severity="critical",
+                        message=f"Required character {character_id} was not found in canon.",
+                    )
+                )
+        if location_id and scene_context.get("location") is None:
+            missing_context.append(
+                ContextGap(
+                    kind="missing_node",
+                    ref=location_id,
+                    severity="critical",
+                    message=f"Required location {location_id} was not found in canon.",
+                )
+            )
+
+    def _safe_character_knowledge(
+        self,
+        *,
+        character_id: str,
+        scene_id: str,
+        timeline_position: str | None,
+        missing_context: list[ContextGap],
+    ) -> KnowledgeBoundary | None:
+        try:
+            return self.graph_store.get_character_knowledge(
+                character_id,
+                scene_id=scene_id,
+                timeline_position=timeline_position,
+            )
+        except GraphStoreError as exc:
+            if exc.category != "not_found":
+                raise
+            already_reported = any(
+                gap.kind == "missing_node" and gap.ref == character_id
+                for gap in missing_context
+            )
+            if not already_reported:
+                missing_context.append(
+                    ContextGap(
+                        kind="missing_node",
+                        ref=character_id,
+                        severity="critical",
+                        message=f"Cannot build knowledge boundary for missing character {character_id}.",
+                        source=scene_id,
+                    )
+                )
+            return None
 
     @staticmethod
     def _style_query(props: dict, style: StyleConstraints) -> str:

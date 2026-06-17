@@ -37,6 +37,7 @@ Own scene-generation behavior for StoryGraph. The Writing Agent creates or revis
 - Do not ignore `must_not_violate` constraints.
 - Do not reveal secrets that are outside the POV character's knowledge.
 - Do not treat retrieved style samples as canon facts.
+- Do not draft from a Context Pack that has critical `missing_context` gaps; ask the Director for missing canon or scene-plan repair.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Required Drafting Discipline
@@ -44,6 +45,7 @@ Own scene-generation behavior for StoryGraph. The Writing Agent creates or revis
 When writing in future implementation work:
 
 - Treat the Context Pack as the hard boundary.
+- Treat `missing_context` as a gap report, not permission to invent missing canon.
 - Ask the Director for clarification if required context is contradictory.
 - Prefer local revision over wholesale rewrite when responding to QA reports.
 - Keep literary expression flexible while preserving canon constraints.

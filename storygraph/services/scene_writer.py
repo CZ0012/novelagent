@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from storygraph.core.errors import ContractError
 from storygraph.models.context import ContextPack
 from storygraph.models.draft import Draft
 from storygraph.stores.draft_store import SQLiteDraftStore
@@ -23,6 +24,10 @@ class RuleBasedSceneWriter:
         self.draft_store = draft_store
 
     def draft(self, context_pack: ContextPack) -> DraftResult:
+        critical_gaps = [gap for gap in context_pack.missing_context if gap.severity == "critical"]
+        if critical_gaps:
+            refs = ", ".join(gap.ref for gap in critical_gaps)
+            raise ContractError(f"Cannot draft with critical missing context: {refs}")
         required_lines = "\n".join(f"- {item}" for item in context_pack.must_include)
         relationship_hint = "; ".join(context_pack.active_relationships[:3]) or "No active relation note."
         text = (
@@ -58,4 +63,3 @@ class RuleBasedSceneWriter:
             text=result.text,
             summary=result.summary,
         )
-

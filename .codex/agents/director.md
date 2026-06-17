@@ -12,6 +12,7 @@ Coordinate multi-subagent development for the StoryGraph Agent project. The Dire
 - Maintain workflow run, checkpoint, and review-pause boundaries when orchestrating implementation.
 - Ensure workflow status transitions match `workflow_run_v1`.
 - Ensure `awaiting_review` pauses do not imply canon mutation.
+- Treat critical `ContextPack.missing_context` gaps as blockers for drafting until canon or scene planning is repaired.
 - Route explicit story-bible seed work separately from automated extraction/review work.
 - Resolve conflicts between subagent outputs.
 - Protect the rule that generated drafts do not directly mutate canon.

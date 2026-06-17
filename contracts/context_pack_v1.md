@@ -34,6 +34,7 @@ A Context Pack is built from canon graph state, draft metadata, style samples, a
 - `previous_scene_summary`
 - `style_constraints`
 - `retrieved_style_samples`
+- `missing_context`
 - `provenance`
 - `budget`
 
@@ -73,6 +74,20 @@ Minimum fields:
 - `author_instruction_refs`
 - `built_at`
 
+## Missing Context
+
+`missing_context` reports canon or draft context that the Context Agent expected but could not retrieve.
+
+Each item should include:
+
+- `kind`: short machine-readable category such as `missing_node`, `missing_scene_field`, `missing_draft`, `project_mismatch`, or `incomplete_graph_context`
+- `ref`: the missing or conflicting field, node ID, scene ID, or draft ref
+- `severity`: `low`, `medium`, `high`, or `critical`
+- `message`: human-readable gap description
+- `source`: optional scene or context source that exposed the gap
+
+Missing context is a report, not invented canon. A Context Pack may still be emitted with empty strings or empty lists in the affected fields so the Director, Writing Agent, API, or CLI can show the gap and block or ask for human clarification.
+
 ## Budget
 
 `budget` records context sizing decisions.
@@ -104,6 +119,7 @@ The default priority order is:
 - Hard constraints must be explicit in `must_not_violate`.
 - IDs must be stable graph or draft IDs, not display names only.
 - If a required canon fact is missing, the Context Agent must report the gap instead of inventing it.
+- Critical `missing_context` items should block drafting until the author or Director supplies canon or revises the scene plan.
 - Retrieved style samples are soft guidance unless promoted to explicit style constraints by explicit author action.
 - `provenance.style_sample_refs` are refs into the style sample store, not graph canon refs.
 
@@ -138,6 +154,7 @@ The default priority order is:
     "banned_patterns": []
   },
   "retrieved_style_samples": [],
+  "missing_context": [],
   "provenance": {
     "graph_query_ids": [],
     "draft_refs": [],

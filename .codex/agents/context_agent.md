@@ -19,7 +19,7 @@ Own Context Pack construction: retrieve the smallest useful set of canon, draft 
 - Apply context priority ordering from P0 through P7.
 - Record provenance for every included context item.
 - Retrieve style samples as soft P6 guidance with stable style sample refs.
-- Report missing canon instead of inventing facts.
+- Report missing canon through `ContextPack.missing_context` instead of inventing facts.
 - Keep context compact enough for reliable model use.
 
 ## Expected Outputs
@@ -28,6 +28,7 @@ Own Context Pack construction: retrieve the smallest useful set of canon, draft 
 - Retrieval and pruning rules.
 - Context budget recommendations.
 - Missing-context reports.
+- Query-plan provenance through `provenance.graph_query_ids`.
 - Integration notes for Writing Agent and QA Agent.
 
 ## Boundaries
