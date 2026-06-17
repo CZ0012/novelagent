@@ -18,7 +18,7 @@ class StoryGraphSettings:
         self.draft_store_path = root / "drafts.sqlite"
         self.candidate_store_path = root / "candidates.sqlite"
         self.workflow_store_path = root / "workflows.sqlite"
+        self.style_sample_store_path = root / "style_samples.sqlite"
 
     def ensure_workspace(self) -> None:
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
-

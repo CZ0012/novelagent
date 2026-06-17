@@ -6,8 +6,10 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from storygraph.core.errors import ContractError, GraphStoreError
-from storygraph.core.ids import slug_id
+from storygraph.core.ids import new_id, slug_id
+from storygraph.core.time import utc_now
 from storygraph.demo import PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
+from storygraph.models.style import StyleSample
 from storygraph.services import (
     AuthorCanonSeedService,
     ContextPackBuilder,
@@ -17,7 +19,7 @@ from storygraph.services import (
     RuleBasedSceneWriter,
     RuleBasedStateExtractor,
 )
-from storygraph.stores import CandidateStore, SQLiteCandidateStore, SQLiteDraftStore
+from storygraph.stores import CandidateStore, SQLiteCandidateStore, SQLiteDraftStore, SQLiteStyleSampleStore
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
 from storygraph.workflows import SceneGenerationWorkflow
 
@@ -52,6 +54,17 @@ class RelationSeedRequest(AuthorSeedRequest):
     target_id: str = Field(..., min_length=1)
 
 
+class StyleSampleRequest(BaseModel):
+    id: str | None = None
+    text: str = Field(..., min_length=1)
+    source_ref: str = Field(..., min_length=1)
+    pov: str | None = None
+    tone: str | None = None
+    dialogue_style: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    summary: str | None = None
+
+
 class ReviewRequest(BaseModel):
     reviewer: str = "author"
     note: str | None = None
@@ -72,7 +85,8 @@ def create_app() -> FastAPI:
     draft_store = SQLiteDraftStore()
     candidate_store = SQLiteCandidateStore()
     workflow_store = SQLiteWorkflowStore()
-    context_builder = ContextPackBuilder(graph, draft_store)
+    style_sample_store = SQLiteStyleSampleStore()
+    context_builder = ContextPackBuilder(graph, draft_store, style_sample_store)
     writer = RuleBasedSceneWriter(draft_store)
     checker = RuleBasedContinuityChecker()
     extractor = RuleBasedStateExtractor()
@@ -163,6 +177,26 @@ def create_app() -> FastAPI:
                 rationale=request.rationale,
                 source_ref=request.source_ref,
             ).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/style-samples")
+    def add_style_sample(project_id: str, request: StyleSampleRequest) -> dict:
+        try:
+            graph.get_node(project_id)
+            sample = StyleSample(
+                id=request.id or new_id("style_sample"),
+                project_id=project_id,
+                text=request.text,
+                source_ref=request.source_ref,
+                pov=request.pov,
+                tone=request.tone,
+                dialogue_style=request.dialogue_style,
+                tags=request.tags,
+                summary=request.summary,
+                created_at=utc_now(),
+            )
+            return style_sample_store.add(sample).model_dump()
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 

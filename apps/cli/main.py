@@ -15,8 +15,10 @@ from typing import Any
 
 from storygraph.core.config import StoryGraphSettings
 from storygraph.core.errors import ContractError
-from storygraph.core.ids import slug_id
+from storygraph.core.ids import new_id, slug_id
+from storygraph.core.time import utc_now
 from storygraph.demo import ITEM_ID, LOCATION_ID, PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
+from storygraph.models.style import StyleSample
 from storygraph.services import (
     AuthorCanonSeedService,
     ContextPackBuilder,
@@ -26,7 +28,7 @@ from storygraph.services import (
     RuleBasedSceneWriter,
     RuleBasedStateExtractor,
 )
-from storygraph.stores import SQLiteCandidateStore, SQLiteDraftStore
+from storygraph.stores import SQLiteCandidateStore, SQLiteDraftStore, SQLiteStyleSampleStore
 from storygraph.stores.json_graph import load_json_graph, save_json_graph
 from storygraph.stores.memory_graph import InMemoryGraphStore
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
@@ -40,10 +42,16 @@ class CliRuntime:
     draft_store: SQLiteDraftStore
     candidate_store: SQLiteCandidateStore
     workflow_store: SQLiteWorkflowStore
+    style_sample_store: SQLiteStyleSampleStore
     review: ReviewService
 
     def close(self) -> None:
-        for store in [self.draft_store, self.candidate_store, self.workflow_store]:
+        for store in [
+            self.draft_store,
+            self.candidate_store,
+            self.workflow_store,
+            self.style_sample_store,
+        ]:
             with suppress(Exception):
                 store.close()
 
@@ -55,6 +63,7 @@ def _runtime(workspace: str | Path | None = None) -> CliRuntime:
     draft_store = SQLiteDraftStore(settings.draft_store_path)
     candidate_store = SQLiteCandidateStore(settings.candidate_store_path)
     workflow_store = SQLiteWorkflowStore(settings.workflow_store_path)
+    style_sample_store = SQLiteStyleSampleStore(settings.style_sample_store_path)
     review = ReviewService(candidate_store, graph)
     return CliRuntime(
         settings=settings,
@@ -62,6 +71,7 @@ def _runtime(workspace: str | Path | None = None) -> CliRuntime:
         draft_store=draft_store,
         candidate_store=candidate_store,
         workflow_store=workflow_store,
+        style_sample_store=style_sample_store,
         review=review,
     )
 
@@ -117,6 +127,7 @@ def init_workspace(
             settings.draft_store_path,
             settings.candidate_store_path,
             settings.workflow_store_path,
+            settings.style_sample_store_path,
         ]:
             if state_path.exists():
                 state_path.unlink()
@@ -150,12 +161,54 @@ def init_workspace(
         "draft_store_path": str(settings.draft_store_path),
         "candidate_store_path": str(settings.candidate_store_path),
         "workflow_store_path": str(settings.workflow_store_path),
+        "style_sample_store_path": str(settings.style_sample_store_path),
         "created": True,
         "project_id": project_id,
         "demo_seeded": not empty,
         "node_count": len(graph.nodes),
         "relationship_count": len(graph.relationships),
     }
+
+
+def add_style_sample_command(
+    *,
+    project_id: str,
+    text: str | None = None,
+    text_file: str | Path | None = None,
+    sample_id: str | None = None,
+    source_ref: str,
+    workspace: str | Path | None = None,
+    pov: str | None = None,
+    tone: str | None = None,
+    dialogue_style: str | None = None,
+    tags: str | None = None,
+    summary: str | None = None,
+) -> dict:
+    if text and text_file:
+        raise ContractError("Use either text or text_file, not both")
+    if not text and not text_file:
+        raise ContractError("Style sample text or text_file is required")
+    if not source_ref.strip():
+        raise ContractError("StyleSample source_ref is required")
+    runtime = _runtime(workspace)
+    try:
+        runtime.graph.get_node(project_id)
+        sample_text = Path(text_file).read_text(encoding="utf-8") if text_file else text
+        sample = StyleSample(
+            id=sample_id or new_id("style_sample"),
+            project_id=project_id,
+            text=sample_text or "",
+            source_ref=source_ref,
+            pov=pov,
+            tone=tone,
+            dialogue_style=dialogue_style,
+            tags=_csv(tags) or [],
+            summary=summary,
+            created_at=utc_now(),
+        )
+        return runtime.style_sample_store.add(sample).model_dump()
+    finally:
+        runtime.close()
 
 
 def get_node_command(
@@ -297,7 +350,11 @@ def build_context_command(
 ) -> dict:
     runtime = _runtime(workspace)
     try:
-        pack = ContextPackBuilder(runtime.graph, runtime.draft_store).build(
+        pack = ContextPackBuilder(
+            runtime.graph,
+            runtime.draft_store,
+            runtime.style_sample_store,
+        ).build(
             project_id=project_id,
             scene_id=scene_id,
             target_tokens=target_tokens,
@@ -330,7 +387,11 @@ def write_scene_command(
                 summary=summary,
             )
             return draft.model_dump()
-        context_pack = ContextPackBuilder(runtime.graph, runtime.draft_store).build(
+        context_pack = ContextPackBuilder(
+            runtime.graph,
+            runtime.draft_store,
+            runtime.style_sample_store,
+        ).build(
             project_id=project_id,
             scene_id=scene_id,
         )
@@ -350,7 +411,11 @@ def check_continuity_command(
         draft = runtime.draft_store.latest_for_scene(project_id, scene_id)
         if draft is None:
             raise ContractError(f"No draft found for scene: {scene_id}")
-        context_pack = ContextPackBuilder(runtime.graph, runtime.draft_store).build(
+        context_pack = ContextPackBuilder(
+            runtime.graph,
+            runtime.draft_store,
+            runtime.style_sample_store,
+        ).build(
             project_id=project_id,
             scene_id=scene_id,
         )
@@ -386,7 +451,11 @@ def run_scene_command(
     runtime = _runtime(workspace)
     try:
         workflow = SceneGenerationWorkflow(
-            context_builder=ContextPackBuilder(runtime.graph, runtime.draft_store),
+            context_builder=ContextPackBuilder(
+                runtime.graph,
+                runtime.draft_store,
+                runtime.style_sample_store,
+            ),
             writer=RuleBasedSceneWriter(runtime.draft_store),
             checker=RuleBasedContinuityChecker(),
             extractor=RuleBasedStateExtractor(),
@@ -584,6 +653,19 @@ def _main_argparse() -> None:
     query_graph_parser.add_argument("--node-labels", default=None)
     query_graph_parser.add_argument("--statuses", default=None)
 
+    style_sample_parser = subparsers.add_parser("add-style-sample")
+    style_sample_parser.add_argument("--project", default=PROJECT_ID)
+    style_sample_parser.add_argument("--id", default=None)
+    style_sample_parser.add_argument("--text", default=None)
+    style_sample_parser.add_argument("--text-file", default=None)
+    style_sample_parser.add_argument("--source-ref", required=True)
+    style_sample_parser.add_argument("--pov", default=None)
+    style_sample_parser.add_argument("--tone", default=None)
+    style_sample_parser.add_argument("--dialogue-style", default=None)
+    style_sample_parser.add_argument("--tags", default=None)
+    style_sample_parser.add_argument("--summary", default=None)
+    style_sample_parser.add_argument("--workspace", default=None)
+
     character_parser = subparsers.add_parser("add-character")
     character_parser.add_argument("--project", default=PROJECT_ID)
     character_parser.add_argument("--id", default=None)
@@ -677,6 +759,20 @@ def _main_argparse() -> None:
             edge_labels=args.edge_labels,
             node_labels=args.node_labels,
             statuses=args.statuses,
+        )
+    elif args.command == "add-style-sample":
+        payload = add_style_sample_command(
+            project_id=args.project,
+            sample_id=args.id,
+            text=args.text,
+            text_file=args.text_file,
+            source_ref=args.source_ref,
+            pov=args.pov,
+            tone=args.tone,
+            dialogue_style=args.dialogue_style,
+            tags=args.tags,
+            summary=args.summary,
+            workspace=args.workspace,
         )
     elif args.command == "add-character":
         payload = add_character_command(
@@ -844,6 +940,40 @@ def main() -> None:
                     edge_labels=edge_labels,
                     node_labels=node_labels,
                     statuses=statuses,
+                )
+            )
+        )
+
+    @app.command("add-style-sample")
+    def add_style_sample_cmd(
+        source_ref: str = typer.Option(..., help="Author style source reference."),
+        project: str = typer.Option(PROJECT_ID, help="Project ID."),
+        sample_id: str | None = typer.Option(None, "--id", help="Stable style sample ID."),
+        text: str | None = typer.Option(None, help="Style sample text."),
+        text_file: str | None = typer.Option(None, help="UTF-8 file containing style sample text."),
+        pov: str | None = typer.Option(None, help="POV metadata."),
+        tone: str | None = typer.Option(None, help="Tone metadata."),
+        dialogue_style: str | None = typer.Option(None, help="Dialogue style metadata."),
+        tags: str | None = typer.Option(None, help="Comma-separated retrieval tags."),
+        summary: str | None = typer.Option(None, help="Optional sample summary."),
+        workspace: str | None = typer.Option(None, help="Local StoryGraph workspace directory."),
+    ) -> None:
+        """Add an explicit author style sample for local retrieval."""
+
+        typer.echo(
+            _dump(
+                add_style_sample_command(
+                    project_id=project,
+                    sample_id=sample_id,
+                    text=text,
+                    text_file=text_file,
+                    source_ref=source_ref,
+                    pov=pov,
+                    tone=tone,
+                    dialogue_style=dialogue_style,
+                    tags=tags,
+                    summary=summary,
+                    workspace=workspace,
                 )
             )
         )

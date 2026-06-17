@@ -8,6 +8,7 @@ Own scene-generation behavior for StoryGraph. The Writing Agent creates or revis
 
 - `docs/architecture.md`
 - `contracts/context_pack_v1.md`
+- `contracts/style_sample_store_v1.md`
 - `contracts/continuity_report_v1.md`
 - `contracts/workflow_run_v1.md`
 
@@ -27,6 +28,7 @@ Own scene-generation behavior for StoryGraph. The Writing Agent creates or revis
 - Drafting behavior rules.
 - Revision rules based on continuity reports.
 - Notes for style consistency and dialogue voice.
+- Guidance for using retrieved style samples as soft examples.
 
 ## Boundaries
 
@@ -34,6 +36,7 @@ Own scene-generation behavior for StoryGraph. The Writing Agent creates or revis
 - Do not create `CandidateFact` records; that belongs to Canon Agent.
 - Do not ignore `must_not_violate` constraints.
 - Do not reveal secrets that are outside the POV character's knowledge.
+- Do not treat retrieved style samples as canon facts.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Required Drafting Discipline

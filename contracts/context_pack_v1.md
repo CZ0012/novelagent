@@ -11,7 +11,7 @@ A Context Pack is built from canon graph state, draft metadata, style samples, a
 - Primary producer: Context Agent.
 - Primary consumer: Writing Agent.
 - Secondary consumers: QA Agent and Director.
-- Related contracts: `graph_store_v1`, `continuity_report_v1`.
+- Related contracts: `graph_store_v1`, `style_sample_store_v1`, `continuity_report_v1`.
 
 ## Required Top-Level Fields
 
@@ -104,7 +104,8 @@ The default priority order is:
 - Hard constraints must be explicit in `must_not_violate`.
 - IDs must be stable graph or draft IDs, not display names only.
 - If a required canon fact is missing, the Context Agent must report the gap instead of inventing it.
-- Retrieved style samples are soft guidance unless promoted to explicit style constraints.
+- Retrieved style samples are soft guidance unless promoted to explicit style constraints by explicit author action.
+- `provenance.style_sample_refs` are refs into the style sample store, not graph canon refs.
 
 ## Minimal Example
 

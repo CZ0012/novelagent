@@ -8,6 +8,7 @@ Own Context Pack construction: retrieve the smallest useful set of canon, draft 
 
 - `docs/architecture.md`
 - `contracts/context_pack_v1.md`
+- `contracts/style_sample_store_v1.md`
 - `contracts/graph_store_v1.md`
 
 ## Responsibilities
@@ -17,6 +18,7 @@ Own Context Pack construction: retrieve the smallest useful set of canon, draft 
 - Use read-only graph query surfaces for inspection and retrieval diagnostics.
 - Apply context priority ordering from P0 through P7.
 - Record provenance for every included context item.
+- Retrieve style samples as soft P6 guidance with stable style sample refs.
 - Report missing canon instead of inventing facts.
 - Keep context compact enough for reliable model use.
 
@@ -33,6 +35,7 @@ Own Context Pack construction: retrieve the smallest useful set of canon, draft 
 - Do not write scene prose.
 - Do not update canon.
 - Do not treat vector retrieval as canon.
+- Do not promote retrieved style samples into hard constraints without explicit author action.
 - Do not include full chapters in a Context Pack.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.
 

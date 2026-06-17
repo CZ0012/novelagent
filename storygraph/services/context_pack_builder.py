@@ -13,12 +13,19 @@ from storygraph.models.context import (
 )
 from storygraph.stores.draft_store import SQLiteDraftStore
 from storygraph.stores.graph_base import GraphStore
+from storygraph.stores.style_sample_store import StyleSampleStore
 
 
 class ContextPackBuilder:
-    def __init__(self, graph_store: GraphStore, draft_store: SQLiteDraftStore | None = None) -> None:
+    def __init__(
+        self,
+        graph_store: GraphStore,
+        draft_store: SQLiteDraftStore | None = None,
+        style_sample_store: StyleSampleStore | None = None,
+    ) -> None:
         self.graph_store = graph_store
         self.draft_store = draft_store
+        self.style_sample_store = style_sample_store
 
     def build(
         self,
@@ -82,6 +89,22 @@ class ContextPackBuilder:
             dialogue_style=style_props.get("dialogue_style"),
             banned_patterns=style_props.get("banned_patterns", []),
         )
+        retrieved_style_samples = list(props.get("retrieved_style_samples", []))
+        style_sample_refs = list(props.get("style_sample_refs", []))
+        if self.style_sample_store:
+            matches = self.style_sample_store.search(
+                project_id=project_id,
+                query=self._style_query(props, style),
+                pov=style.pov,
+                tone=style.tone,
+                dialogue_style=style.dialogue_style,
+                tags=props.get("style_tags", []),
+                limit=3,
+            )
+            retrieved_style_samples.extend(
+                self._style_sample_text(match.sample) for match in matches
+            )
+            style_sample_refs.extend(match.sample.id for match in matches)
 
         pack = ContextPack(
             project_id=project_id,
@@ -101,11 +124,11 @@ class ContextPackBuilder:
             relevant_world_rules=world_rules,
             previous_scene_summary=previous_scene_summary,
             style_constraints=style,
-            retrieved_style_samples=props.get("retrieved_style_samples", []),
+            retrieved_style_samples=retrieved_style_samples,
             provenance=ContextProvenance(
                 graph_query_ids=[new_id("graph_query")],
                 draft_refs=draft_refs,
-                style_sample_refs=props.get("style_sample_refs", []),
+                style_sample_refs=style_sample_refs,
                 author_instruction_refs=author_instruction_refs or [],
                 built_at=utc_now(),
             ),
@@ -118,6 +141,30 @@ class ContextPackBuilder:
         strength = relation.properties.get("strength")
         suffix = f" strength={strength}" if strength is not None else ""
         return f"{relation.source_id} {relation.type} {relation.target_id}{suffix}"
+
+    @staticmethod
+    def _style_query(props: dict, style: StyleConstraints) -> str:
+        return " ".join(
+            str(value)
+            for value in [
+                props.get("goal", ""),
+                props.get("conflict", ""),
+                props.get("emotional_turn", ""),
+                style.pov,
+                style.tone,
+                style.dialogue_style,
+                style.diction,
+                style.sentence_rhythm,
+            ]
+            if value
+        )
+
+    @staticmethod
+    def _style_sample_text(sample) -> str:
+        snippet = sample.text.strip()
+        if len(snippet) > 1200:
+            snippet = snippet[:1197].rstrip() + "..."
+        return f"{sample.id}: {snippet}"
 
     @staticmethod
     def _estimate_tokens(pack: ContextPack) -> int:

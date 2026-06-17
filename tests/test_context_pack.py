@@ -6,7 +6,10 @@ from storygraph.demo import (
     POV_CHARACTER_ID,
     build_fantasy_demo_graph,
 )
+from storygraph.core.time import utc_now
+from storygraph.models.style import StyleSample
 from storygraph.services.context_pack_builder import ContextPackBuilder
+from storygraph.stores.style_sample_store import SQLiteStyleSampleStore
 
 
 def test_context_pack_matches_contract_and_knowledge_boundary():
@@ -44,6 +47,45 @@ def test_context_pack_budget_trims_style_samples_before_hard_context():
     assert any(SECRET_ID in boundary.does_not_know for boundary in pack.knowledge_boundaries)
     assert any(item.startswith("P6 dropped style samples") for item in pack.budget.dropped_items)
     assert pack.budget.estimated_tokens <= 500
+
+
+def test_context_pack_retrieves_style_samples_from_store():
+    graph = build_fantasy_demo_graph()
+    store = SQLiteStyleSampleStore()
+    store.add(
+        StyleSample(
+            id="style_tower_cold",
+            project_id=PROJECT_ID,
+            text="Cold restrained tower prose with half-seen clues and short lines.",
+            source_ref="author_style:chapter_001",
+            pov="third-person limited",
+            tone="cold and restrained",
+            dialogue_style="short lines with subtext",
+            tags=["tower"],
+            created_at=utc_now(),
+        )
+    )
+    store.add(
+        StyleSample(
+            id="style_wrong_project",
+            project_id="project_other",
+            text="Cold tower prose that belongs to another project.",
+            source_ref="author_style:other",
+            pov="third-person limited",
+            tone="cold and restrained",
+            created_at=utc_now(),
+        )
+    )
+
+    pack = ContextPackBuilder(graph, style_sample_store=store).build(
+        project_id=PROJECT_ID,
+        scene_id=SCENE_ID,
+    )
+
+    assert pack.retrieved_style_samples == [
+        "style_tower_cold: Cold restrained tower prose with half-seen clues and short lines."
+    ]
+    assert pack.provenance.style_sample_refs == ["style_tower_cold"]
 
 
 def test_context_pack_filters_world_rules_and_foreshadowing_by_scene_scope():

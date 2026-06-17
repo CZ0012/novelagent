@@ -2,6 +2,7 @@ from apps.cli.main import (
     add_character_command,
     add_location_command,
     add_relation_command,
+    add_style_sample_command,
     build_context_command,
     check_continuity_command,
     extract_state_command,
@@ -65,6 +66,30 @@ def test_cli_graph_query_commands_read_canon_neighbors(tmp_path):
     assert [relation["id"] for relation in query["relationships"]] == [
         "rel_linj_knows_helianya"
     ]
+
+
+def test_cli_style_sample_ingest_feeds_context_pack(tmp_path):
+    workspace = tmp_path / "storygraph"
+    init_workspace(workspace=workspace, force=True)
+
+    sample = add_style_sample_command(
+        workspace=workspace,
+        project_id=PROJECT_ID,
+        sample_id="style_cli_tower",
+        text="Cold restrained tower prose with short lines and subtext.",
+        source_ref="author_style:chapter_001",
+        pov="third-person limited",
+        tone="cold and restrained",
+        dialogue_style="short lines with subtext",
+        tags="tower,clue",
+    )
+    context = build_context_command(workspace=workspace)
+
+    assert sample["contract_version"] == "style_sample_v1"
+    assert context["retrieved_style_samples"] == [
+        "style_cli_tower: Cold restrained tower prose with short lines and subtext."
+    ]
+    assert context["provenance"]["style_sample_refs"] == ["style_cli_tower"]
 
 
 def test_cli_init_force_resets_local_state_files(tmp_path):
