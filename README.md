@@ -27,6 +27,16 @@ Current MVP capabilities:
 python -m pytest
 ```
 
+Neo4j backend smoke tests are opt-in because they require a running Neo4j service:
+
+```powershell
+$env:STORYGRAPH_RUN_NEO4J_TESTS="1"
+$env:STORYGRAPH_NEO4J_URI="bolt://localhost:7687"
+$env:STORYGRAPH_NEO4J_USER="neo4j"
+$env:STORYGRAPH_NEO4J_PASSWORD="password"
+python -m pytest tests/test_graph_neo4j_integration.py
+```
+
 ## Demo CLI
 
 ```powershell

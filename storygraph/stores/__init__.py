@@ -3,6 +3,7 @@
 from storygraph.stores.candidate_store import CandidateStore, InMemoryCandidateStore, SQLiteCandidateStore
 from storygraph.stores.draft_store import SQLiteDraftStore
 from storygraph.stores.event_log import InMemoryEventLog
+from storygraph.stores.graph_neo4j import Neo4jGraphStore
 from storygraph.stores.memory_graph import InMemoryGraphStore
 
 __all__ = [
@@ -10,6 +11,7 @@ __all__ = [
     "CandidateStore",
     "InMemoryEventLog",
     "InMemoryGraphStore",
+    "Neo4jGraphStore",
     "SQLiteCandidateStore",
     "SQLiteDraftStore",
 ]
