@@ -16,6 +16,8 @@ from storygraph.services import (
     RuleBasedStateExtractor,
 )
 from storygraph.stores import CandidateStore, SQLiteCandidateStore, SQLiteDraftStore
+from storygraph.stores.workflow_store import SQLiteWorkflowStore
+from storygraph.workflows import SceneGenerationWorkflow
 
 
 class CreateProjectRequest(BaseModel):
@@ -43,11 +45,20 @@ def create_app() -> FastAPI:
     graph = build_fantasy_demo_graph()
     draft_store = SQLiteDraftStore()
     candidate_store = SQLiteCandidateStore()
+    workflow_store = SQLiteWorkflowStore()
     context_builder = ContextPackBuilder(graph, draft_store)
     writer = RuleBasedSceneWriter(draft_store)
     checker = RuleBasedContinuityChecker()
     extractor = RuleBasedStateExtractor()
     review = ReviewService(candidate_store, graph)
+    scene_workflow = SceneGenerationWorkflow(
+        context_builder=context_builder,
+        writer=writer,
+        checker=checker,
+        extractor=extractor,
+        workflow_store=workflow_store,
+        review_service=review,
+    )
 
     @app.get("/health")
     def health() -> dict:
@@ -112,6 +123,33 @@ def create_app() -> FastAPI:
         except ContractError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"candidates": [candidate.model_dump() for candidate in candidates]}
+
+    @app.post("/projects/{project_id}/scenes/{scene_id}/runs/scene-generation")
+    def run_scene_generation(project_id: str, scene_id: str) -> dict:
+        result = scene_workflow.run(project_id=project_id, scene_id=scene_id)
+        return {
+            "context_pack": result.context_pack.model_dump(),
+            "draft": result.draft.model_dump(),
+            "continuity_report": result.continuity_report.model_dump(),
+            "candidates": [candidate.model_dump() for candidate in result.candidates],
+            "workflow_run": result.workflow_run.model_dump() if result.workflow_run else None,
+        }
+
+    @app.get("/projects/{project_id}/runs")
+    def list_runs(project_id: str, status: str | None = None) -> dict:
+        return {
+            "runs": [
+                run.model_dump()
+                for run in workflow_store.list(project_id=project_id, status=status)
+            ]
+        }
+
+    @app.get("/runs/{run_id}")
+    def get_run(run_id: str) -> dict:
+        try:
+            return workflow_store.get(run_id).model_dump()
+        except ContractError as exc:
+            raise HTTPException(status_code=404, detail="Workflow run not found") from exc
 
     @app.get("/projects/{project_id}/facts/pending")
     def pending_facts(project_id: str) -> dict:
