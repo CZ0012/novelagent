@@ -410,10 +410,21 @@ class InMemoryGraphStore(GraphStore):
                 source_ref=candidate.source_draft_id,
             )
         elif patch.operation == "create_node":
+            node_type = patch.properties.get("node_type") or patch.properties.get("type")
+            if not isinstance(node_type, str) or not node_type:
+                raise GraphStoreError(
+                    "missing_provenance",
+                    "create_node candidate patches must include properties.node_type",
+                )
+            node_properties = {
+                key: value
+                for key, value in patch.properties.items()
+                if key not in {"node_type", "type"}
+            }
             now = utc_now()
             node = GraphNode(
                 id=candidate.subject_id,
-                type=candidate.fact_type,
+                type=node_type,
                 status="CANON",
                 created_at=now,
                 updated_at=now,
@@ -422,7 +433,7 @@ class InMemoryGraphStore(GraphStore):
                 reviewer=reviewer,
                 reviewed_at=now,
                 rationale=rationale,
-                properties=patch.properties,
+                properties=node_properties,
             )
             self.create_node(node, allow_canon=True)
         return self._record_event(
@@ -470,4 +481,3 @@ class InMemoryGraphStore(GraphStore):
             raise GraphStoreError("conflict_detected", f"Unsupported edge label: {relation.type}")
         if not relation.source_ref:
             raise GraphStoreError("missing_provenance", "Relationship source_ref is required")
-

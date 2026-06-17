@@ -8,9 +8,9 @@ This repository is being prepared for the StoryGraph Agent project: a long-form 
 
 ## Current Phase
 
-The current phase is instruction and contract setup only.
+The project has moved from instruction and contract setup into MVP implementation.
 
-Do not create application source files until explicitly asked. In particular, do not create Python packages, API routes, frontend files, database migrations, or tests during this preparation phase.
+Application source files are allowed when they are explicitly aligned with `docs/architecture.md` and the versioned contracts under `contracts/`. Keep implementation scoped to the StoryGraph Agent architecture and preserve the canon safety rules below.
 
 ## Architecture Source
 

@@ -32,10 +32,11 @@ class RuleBasedStateExtractor:
                 "rationale",
                 "The draft explicitly marked this state change for extraction.",
             )
+            patch_properties = self._patch_properties(raw_fields)
             patch = ProposedGraphPatch(
                 operation=operation,  # type: ignore[arg-type]
                 target=self._target(subject_id, relation, object_id),
-                properties={"value": raw_fields.get("value")} if raw_fields.get("value") else {},
+                properties=patch_properties,
                 source_ref=draft.id,
             )
             candidates.append(
@@ -92,3 +93,16 @@ class RuleBasedStateExtractor:
             return f"{subject_id} -> {relation} -> {object_id}"
         return subject_id
 
+    @staticmethod
+    def _patch_properties(fields: dict[str, str]) -> dict[str, str]:
+        reserved = {
+            "id",
+            "fact_type",
+            "subject",
+            "relation",
+            "object",
+            "confidence",
+            "operation",
+            "rationale",
+        }
+        return {key: value for key, value in fields.items() if key not in reserved}

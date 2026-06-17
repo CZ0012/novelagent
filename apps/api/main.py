@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from storygraph.core.errors import GraphStoreError
+from storygraph.core.errors import ContractError, GraphStoreError
 from storygraph.core.ids import slug_id
 from storygraph.demo import PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
 from storygraph.services import (
@@ -100,16 +100,28 @@ def create_app() -> FastAPI:
 
     @app.post("/projects/{project_id}/facts/{fact_id}/accept")
     def accept_fact(project_id: str, fact_id: str, request: ReviewRequest) -> dict:
+        _ensure_candidate_project(candidate_store, fact_id, project_id)
         fact = review.accept(fact_id, reviewer=request.reviewer, note=request.note)
         return fact.model_dump()
 
     @app.post("/projects/{project_id}/facts/{fact_id}/reject")
     def reject_fact(project_id: str, fact_id: str, request: ReviewRequest) -> dict:
+        _ensure_candidate_project(candidate_store, fact_id, project_id)
         fact = review.reject(fact_id, reviewer=request.reviewer, note=request.note)
         return fact.model_dump()
 
     return app
 
 
-app = create_app()
+def _ensure_candidate_project(
+    candidate_store: InMemoryCandidateStore, fact_id: str, project_id: str
+) -> None:
+    try:
+        fact = candidate_store.get(fact_id)
+    except ContractError as exc:
+        raise HTTPException(status_code=404, detail="Candidate fact not found") from exc
+    if fact.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Candidate fact not found for project")
 
+
+app = create_app()
