@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from storygraph.core.errors import ContractError, GraphStoreError
 from storygraph.core.ids import slug_id
@@ -27,6 +27,15 @@ class CreateProjectRequest(BaseModel):
 class ReviewRequest(BaseModel):
     reviewer: str = "author"
     note: str | None = None
+
+
+class DraftRequest(BaseModel):
+    text: str | None = None
+    summary: str | None = None
+
+
+class EditAcceptRequest(ReviewRequest):
+    patch_properties: dict = Field(default_factory=dict)
 
 
 def create_app() -> FastAPI:
@@ -73,7 +82,14 @@ def create_app() -> FastAPI:
         return context_builder.build(project_id=project_id, scene_id=scene_id).model_dump()
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/draft")
-    def write_draft(project_id: str, scene_id: str) -> dict:
+    def write_draft(project_id: str, scene_id: str, request: DraftRequest | None = None) -> dict:
+        if request and request.text is not None:
+            return draft_store.create_draft(
+                project_id=project_id,
+                scene_id=scene_id,
+                text=request.text,
+                summary=request.summary,
+            ).model_dump()
         context_pack = context_builder.build(project_id=project_id, scene_id=scene_id)
         return writer.write_and_save(context_pack).model_dump()
 
@@ -91,7 +107,10 @@ def create_app() -> FastAPI:
         if draft is None:
             raise HTTPException(status_code=404, detail="No draft for scene")
         candidates = extractor.extract(project_id=project_id, draft=draft)
-        review.submit(candidates)
+        try:
+            review.submit(candidates)
+        except ContractError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"candidates": [candidate.model_dump() for candidate in candidates]}
 
     @app.get("/projects/{project_id}/facts/pending")
@@ -101,13 +120,42 @@ def create_app() -> FastAPI:
     @app.post("/projects/{project_id}/facts/{fact_id}/accept")
     def accept_fact(project_id: str, fact_id: str, request: ReviewRequest) -> dict:
         _ensure_candidate_project(candidate_store, fact_id, project_id)
-        fact = review.accept(fact_id, reviewer=request.reviewer, note=request.note)
+        try:
+            fact = review.accept(fact_id, reviewer=request.reviewer, note=request.note)
+        except ContractError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return fact.model_dump()
+
+    @app.post("/projects/{project_id}/facts/{fact_id}/edit-accept")
+    def edit_accept_fact(project_id: str, fact_id: str, request: EditAcceptRequest) -> dict:
+        _ensure_candidate_project(candidate_store, fact_id, project_id)
+        try:
+            fact = review.edit_and_accept(
+                fact_id,
+                reviewer=request.reviewer,
+                patch_properties=request.patch_properties,
+                note=request.note,
+            )
+        except ContractError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return fact.model_dump()
 
     @app.post("/projects/{project_id}/facts/{fact_id}/reject")
     def reject_fact(project_id: str, fact_id: str, request: ReviewRequest) -> dict:
         _ensure_candidate_project(candidate_store, fact_id, project_id)
-        fact = review.reject(fact_id, reviewer=request.reviewer, note=request.note)
+        try:
+            fact = review.reject(fact_id, reviewer=request.reviewer, note=request.note)
+        except ContractError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return fact.model_dump()
+
+    @app.post("/projects/{project_id}/facts/{fact_id}/defer")
+    def defer_fact(project_id: str, fact_id: str, request: ReviewRequest) -> dict:
+        _ensure_candidate_project(candidate_store, fact_id, project_id)
+        try:
+            fact = review.defer(fact_id, reviewer=request.reviewer, note=request.note)
+        except ContractError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return fact.model_dump()
 
     return app

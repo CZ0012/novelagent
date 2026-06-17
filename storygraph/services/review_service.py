@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from storygraph.core.errors import ContractError
 from storygraph.core.time import utc_now
 from storygraph.models.candidate import CandidateFact, ReviewDecision
 from storygraph.stores.candidate_store import InMemoryCandidateStore
@@ -21,6 +22,7 @@ class ReviewService:
 
     def accept(self, candidate_id: str, *, reviewer: str, note: str | None = None) -> CandidateFact:
         candidate = self.candidate_store.get(candidate_id)
+        self._require_pending(candidate)
         reviewed = candidate.model_copy(
             update={
                 "status": "ACCEPTED_FOR_CANON",
@@ -49,6 +51,7 @@ class ReviewService:
         note: str | None = None,
     ) -> CandidateFact:
         candidate = self.candidate_store.get(candidate_id)
+        self._require_pending(candidate)
         patched_candidate = candidate.model_copy(
             update={
                 "status": "ACCEPTED_FOR_CANON",
@@ -78,6 +81,7 @@ class ReviewService:
 
     def reject(self, candidate_id: str, *, reviewer: str, note: str | None = None) -> CandidateFact:
         candidate = self.candidate_store.get(candidate_id)
+        self._require_pending(candidate)
         rejected = candidate.model_copy(
             update={
                 "status": "REJECTED",
@@ -93,6 +97,7 @@ class ReviewService:
 
     def defer(self, candidate_id: str, *, reviewer: str, note: str | None = None) -> CandidateFact:
         candidate = self.candidate_store.get(candidate_id)
+        self._require_pending(candidate)
         deferred = candidate.model_copy(
             update={
                 "status": "DEFERRED",
@@ -106,3 +111,9 @@ class ReviewService:
         )
         return self.candidate_store.update(deferred)
 
+    @staticmethod
+    def _require_pending(candidate: CandidateFact) -> None:
+        if candidate.review.status != "pending":
+            raise ContractError(
+                f"CandidateFact {candidate.id} is already reviewed: {candidate.review.status}"
+            )

@@ -283,10 +283,16 @@ class InMemoryGraphStore(GraphStore):
             ),
             "world_rules": [
                 node
-                for node in self.nodes.values()
-                if node.type == "WorldRule" and node.status == "CANON"
+                for node in sorted(self.nodes.values(), key=lambda item: item.id)
+                if node.type == "WorldRule"
+                and node.status == "CANON"
+                and self._node_relevant_to_scene(node, scene, required)
             ],
-            "unresolved_foreshadowing": self.get_unresolved_foreshadowing(),
+            "unresolved_foreshadowing": [
+                node
+                for node in self.get_unresolved_foreshadowing()
+                if self._node_relevant_to_scene(node, scene, required)
+            ],
         }
 
     def get_character_knowledge(
@@ -343,6 +349,27 @@ class InMemoryGraphStore(GraphStore):
                 continue
             items.append(node)
         return items
+
+    @staticmethod
+    def _node_relevant_to_scene(node: GraphNode, scene: GraphNode, required_characters: list[str]) -> bool:
+        props = scene.properties
+        node_props = node.properties
+        scoped_keys = {
+            "project_id": props.get("project_id"),
+            "chapter_id": props.get("chapter_id"),
+            "location_id": props.get("location_id"),
+            "scene_id": scene.id,
+            "seed_scene_id": scene.id,
+        }
+        for key, expected in scoped_keys.items():
+            if key in node_props and expected is not None and node_props[key] != expected:
+                return False
+        if "character_id" in node_props and node_props["character_id"] not in required_characters:
+            return False
+        character_ids = node_props.get("character_ids")
+        if isinstance(character_ids, list) and not set(character_ids).intersection(required_characters):
+            return False
+        return True
 
     def commit_candidate_fact(
         self, candidate: CandidateFact, *, reviewer: str, rationale: str

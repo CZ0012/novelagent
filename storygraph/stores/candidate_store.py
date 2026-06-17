@@ -11,6 +11,8 @@ class InMemoryCandidateStore:
         self._facts: dict[str, CandidateFact] = {}
 
     def add(self, candidate: CandidateFact) -> CandidateFact:
+        if candidate.id in self._facts:
+            raise ContractError(f"Duplicate CandidateFact id: {candidate.id}")
         self._facts[candidate.id] = candidate
         return candidate
 
@@ -33,4 +35,3 @@ class InMemoryCandidateStore:
         if pending_only:
             facts = [fact for fact in facts if fact.review.status == "pending"]
         return sorted(facts, key=lambda fact: fact.created_at)
-

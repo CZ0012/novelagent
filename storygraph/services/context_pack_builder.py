@@ -111,15 +111,7 @@ class ContextPackBuilder:
             ),
             budget=ContextBudget(target_tokens=target_tokens),
         )
-        estimated_tokens = self._estimate_tokens(pack)
-        dropped_items = self._budget_drops(pack, estimated_tokens, target_tokens)
-        return pack.model_copy(
-            update={
-                "budget": pack.budget.model_copy(
-                    update={"estimated_tokens": estimated_tokens, "dropped_items": dropped_items}
-                )
-            }
-        )
+        return self._apply_budget(pack, target_tokens)
 
     @staticmethod
     def _relationship_text(relation) -> str:
@@ -132,15 +124,59 @@ class ContextPackBuilder:
         serialized = pack.model_dump_json()
         return max(1, len(serialized) // 4)
 
-    @staticmethod
-    def _budget_drops(pack: ContextPack, estimated_tokens: int, target_tokens: int) -> list[str]:
-        if estimated_tokens <= target_tokens:
-            return []
-        dropped: list[str] = []
-        overage = estimated_tokens - target_tokens
-        if pack.retrieved_style_samples:
-            dropped.append(f"P6 style samples trimmed to satisfy budget; overage={overage}")
-        if pack.unresolved_foreshadowing:
-            dropped.append(f"P4 foreshadowing requires summarization; overage={overage}")
-        return dropped or [f"Context exceeds budget by {overage} estimated tokens"]
+    def _apply_budget(self, pack: ContextPack, target_tokens: int) -> ContextPack:
+        working = pack
+        dropped_items: list[str] = []
+        trim_steps = [
+            (
+                "P6",
+                "retrieved_style_samples",
+                "style samples",
+                lambda current: current.model_copy(update={"retrieved_style_samples": []}),
+            ),
+            (
+                "P4",
+                "unresolved_foreshadowing",
+                "unresolved foreshadowing",
+                lambda current: current.model_copy(update={"unresolved_foreshadowing": []}),
+            ),
+            (
+                "P3",
+                "relevant_world_rules",
+                "world rules",
+                lambda current: current.model_copy(update={"relevant_world_rules": []}),
+            ),
+            (
+                "P5",
+                "previous_scene_summary",
+                "previous scene summary",
+                lambda current: current.model_copy(update={"previous_scene_summary": None}),
+            ),
+        ]
 
+        for priority, field_name, label, trim in trim_steps:
+            estimated_tokens = self._estimate_tokens(working)
+            if estimated_tokens <= target_tokens:
+                break
+            value = getattr(working, field_name)
+            if not value:
+                continue
+            before = estimated_tokens
+            working = trim(working)
+            after = self._estimate_tokens(working)
+            dropped_items.append(
+                f"{priority} dropped {label} to satisfy budget; estimated_tokens {before}->{after}"
+            )
+
+        final_estimate = self._estimate_tokens(working)
+        if final_estimate > target_tokens:
+            dropped_items.append(
+                f"Protected P0-P2 context still exceeds target by {final_estimate - target_tokens} tokens"
+            )
+        return working.model_copy(
+            update={
+                "budget": working.budget.model_copy(
+                    update={"estimated_tokens": final_estimate, "dropped_items": dropped_items}
+                )
+            }
+        )
