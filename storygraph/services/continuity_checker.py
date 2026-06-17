@@ -86,6 +86,29 @@ class RuleBasedContinuityChecker:
                     )
                 )
 
+        for banned_pattern in context_pack.style_constraints.banned_patterns:
+            marker = banned_pattern.lower()
+            if marker and marker in lowered_text:
+                issues.append(
+                    ContinuityIssue(
+                        id=new_id("issue"),
+                        issue_type="style_drift",
+                        severity="medium",
+                        description=f"Draft uses a banned style pattern: {banned_pattern}",
+                        violated_nodes=[context_pack.scene_id],
+                        evidence=[
+                            EvidenceItem(
+                                kind="context_pack",
+                                ref=context_pack.scene_id,
+                                quote=banned_pattern[:120],
+                                note="Pattern listed in style_constraints.banned_patterns.",
+                            )
+                        ],
+                        suggestion="Remove or rewrite the banned pattern while preserving scene facts.",
+                        blocking=False,
+                    )
+                )
+
         status = "pass" if not issues else "needs_revision"
         if any(issue.blocking or issue.severity == "critical" for issue in issues):
             status = "blocked"
@@ -97,7 +120,7 @@ class RuleBasedContinuityChecker:
             status=status,  # type: ignore[arg-type]
             summary="No continuity issues found." if not issues else f"Found {len(issues)} issue(s).",
             issues=issues,
-            checked_dimensions=["knowledge_boundary", "style_constraint"],
+            checked_dimensions=self._checked_dimensions(context_pack),
             provenance=ContinuityProvenance(
                 graph_query_ids=context_pack.provenance.graph_query_ids,
                 context_pack_ref=f"context_{context_pack.scene_id}",
@@ -105,3 +128,17 @@ class RuleBasedContinuityChecker:
             created_at=utc_now(),
         )
 
+    @staticmethod
+    def _checked_dimensions(context_pack: ContextPack) -> list[str]:
+        dimensions: list[str] = ["knowledge_boundary"]
+        if context_pack.timeline_position:
+            dimensions.append("timeline")
+        if context_pack.location_id:
+            dimensions.append("location_state")
+        if context_pack.relevant_world_rules:
+            dimensions.append("world_rule")
+        if context_pack.unresolved_foreshadowing:
+            dimensions.append("foreshadowing")
+        if context_pack.style_constraints.banned_patterns:
+            dimensions.append("style_constraint")
+        return dimensions

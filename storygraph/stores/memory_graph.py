@@ -272,7 +272,15 @@ class InMemoryGraphStore(GraphStore):
                 ],
                 hop_limit=1,
             )
-            active_relationships.extend(neighbors["relationships"])
+            active_relationships.extend(
+                relation
+                for relation in neighbors["relationships"]
+                if self._props_visible_in_scope(
+                    relation.properties,
+                    scene_id=scene.id,
+                    timeline_position=props.get("timeline_position"),
+                )
+            )
         return {
             "scene": scene,
             "characters": characters,
@@ -311,6 +319,12 @@ class InMemoryGraphStore(GraphStore):
         for relation in sorted(self.relationships.values(), key=lambda item: item.id):
             if relation.status != "CANON" or relation.source_id != character_id:
                 continue
+            if not self._props_visible_in_scope(
+                relation.properties,
+                scene_id=scene_id,
+                timeline_position=timeline_position,
+            ):
+                continue
             if relation.type == "KNOWS_SECRET":
                 knows.append(relation.target_id)
             elif relation.type == "BELIEVES_FALSELY":
@@ -326,7 +340,14 @@ class InMemoryGraphStore(GraphStore):
         does_not_know = [
             node.id
             for node in sorted(self.nodes.values(), key=lambda item: item.id)
-            if node.type == "Secret" and node.status == "CANON" and node.id not in knownish
+            if node.type == "Secret"
+            and node.status == "CANON"
+            and node.id not in knownish
+            and self._props_visible_in_scope(
+                node.properties,
+                scene_id=scene_id,
+                timeline_position=timeline_position,
+            )
         ]
         return KnowledgeBoundary(
             character_id=character_id,
@@ -337,6 +358,64 @@ class InMemoryGraphStore(GraphStore):
             hides=hides,
             source_refs=refs,
         )
+
+    def _props_visible_in_scope(
+        self,
+        props: dict,
+        *,
+        scene_id: str | None,
+        timeline_position: str | None,
+    ) -> bool:
+        if scene_id is not None:
+            exact_scene = props.get("scene_id")
+            if exact_scene is not None and exact_scene != scene_id:
+                return False
+            valid_from = props.get("valid_from_scene")
+            if valid_from is not None and not self._scene_at_or_after(scene_id, str(valid_from)):
+                return False
+            valid_until = props.get("valid_until_scene")
+            if valid_until is not None and not self._scene_at_or_before(scene_id, str(valid_until)):
+                return False
+        elif any(key in props for key in ("scene_id", "valid_from_scene", "valid_until_scene")):
+            return False
+        if timeline_position is not None:
+            exact_timeline = props.get("timeline_position")
+            if exact_timeline is not None and exact_timeline != timeline_position:
+                return False
+        elif "timeline_position" in props:
+            return False
+        return True
+
+    def _scene_at_or_after(self, current_scene_id: str, boundary_scene_id: str) -> bool:
+        if current_scene_id == boundary_scene_id:
+            return True
+        return self._scene_reachable(boundary_scene_id, current_scene_id)
+
+    def _scene_at_or_before(self, current_scene_id: str, boundary_scene_id: str) -> bool:
+        if current_scene_id == boundary_scene_id:
+            return True
+        return self._scene_reachable(current_scene_id, boundary_scene_id)
+
+    def _scene_reachable(self, start_scene_id: str, target_scene_id: str) -> bool:
+        if start_scene_id not in self.nodes or target_scene_id not in self.nodes:
+            return False
+        queue: deque[str] = deque([start_scene_id])
+        visited: set[str] = set()
+        while queue:
+            current = queue.popleft()
+            if current in visited:
+                continue
+            visited.add(current)
+            for relation in self.relationships.values():
+                if (
+                    relation.status == "CANON"
+                    and relation.type == "NEXT_SCENE"
+                    and relation.source_id == current
+                ):
+                    if relation.target_id == target_scene_id:
+                        return True
+                    queue.append(relation.target_id)
+        return False
 
     def get_unresolved_foreshadowing(self, **filters: str) -> list[GraphNode]:
         items = []
@@ -350,8 +429,9 @@ class InMemoryGraphStore(GraphStore):
             items.append(node)
         return items
 
-    @staticmethod
-    def _node_relevant_to_scene(node: GraphNode, scene: GraphNode, required_characters: list[str]) -> bool:
+    def _node_relevant_to_scene(
+        self, node: GraphNode, scene: GraphNode, required_characters: list[str]
+    ) -> bool:
         props = scene.properties
         node_props = node.properties
         scoped_keys = {
@@ -369,7 +449,11 @@ class InMemoryGraphStore(GraphStore):
         character_ids = node_props.get("character_ids")
         if isinstance(character_ids, list) and not set(character_ids).intersection(required_characters):
             return False
-        return True
+        return self._props_visible_in_scope(
+            node_props,
+            scene_id=scene.id,
+            timeline_position=props.get("timeline_position"),
+        )
 
     def commit_candidate_fact(
         self, candidate: CandidateFact, *, reviewer: str, rationale: str

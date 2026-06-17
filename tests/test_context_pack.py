@@ -1,4 +1,11 @@
-from storygraph.demo import LOCATION_ID, PROJECT_ID, SCENE_ID, SECRET_ID, build_fantasy_demo_graph
+from storygraph.demo import (
+    LOCATION_ID,
+    PROJECT_ID,
+    SCENE_ID,
+    SECRET_ID,
+    POV_CHARACTER_ID,
+    build_fantasy_demo_graph,
+)
 from storygraph.services.context_pack_builder import ContextPackBuilder
 
 
@@ -92,3 +99,48 @@ def test_context_pack_filters_world_rules_and_foreshadowing_by_scene_scope():
     assert "worldrule_other_place" not in serialized_rules
     assert "foreshadowing_other_place" not in serialized_foreshadowing
     assert "foreshadowing_paid" not in serialized_foreshadowing
+
+
+def test_context_pack_respects_scene_scoped_knowledge_boundaries():
+    graph = build_fantasy_demo_graph()
+    graph.seed_canon_node(
+        node_id="secret_future_password",
+        node_type="Secret",
+        properties={
+            "content": "The tower door password.",
+            "truth_status": "true",
+            "reveal_plan": "Reveal after scene_005.",
+        },
+    )
+    graph.seed_canon_relation(
+        relation_id="rel_linj_knows_future_password",
+        relation_type="KNOWS_SECRET",
+        source_id=POV_CHARACTER_ID,
+        target_id="secret_future_password",
+        properties={"valid_from_scene": "scene_005"},
+    )
+
+    pack = ContextPackBuilder(graph).build(project_id=PROJECT_ID, scene_id=SCENE_ID)
+    linj_boundary = next(
+        boundary for boundary in pack.knowledge_boundaries if boundary.character_id == POV_CHARACTER_ID
+    )
+
+    assert "secret_future_password" not in linj_boundary.knows
+    assert "secret_future_password" in linj_boundary.does_not_know
+    assert "rel_linj_knows_future_password" not in linj_boundary.source_refs
+
+
+def test_context_pack_hides_future_scoped_active_relationships():
+    graph = build_fantasy_demo_graph()
+    graph.seed_canon_relation(
+        relation_id="rel_linj_future_suspects_helianya",
+        relation_type="SUSPECTS",
+        source_id=POV_CHARACTER_ID,
+        target_id="character_helianya",
+        properties={"valid_from_scene": "scene_005"},
+    )
+
+    pack = ContextPackBuilder(graph).build(project_id=PROJECT_ID, scene_id=SCENE_ID)
+
+    assert not any("rel_linj_future_suspects_helianya" in item for item in pack.active_relationships)
+    assert not any("SUSPECTS" in item for item in pack.active_relationships)
