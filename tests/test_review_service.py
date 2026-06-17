@@ -8,6 +8,11 @@ from storygraph.stores.candidate_store import InMemoryCandidateStore
 from storygraph.stores.draft_store import SQLiteDraftStore
 
 
+class FailingGraphStore:
+    def commit_candidate_fact(self, *args, **kwargs):
+        raise RuntimeError("graph commit failed")
+
+
 def test_candidate_fact_requires_review_before_canon_commit():
     graph = build_fantasy_demo_graph()
     draft_store = SQLiteDraftStore()
@@ -112,3 +117,28 @@ def test_rejected_candidate_cannot_later_be_accepted():
 
     with pytest.raises(ContractError, match="already reviewed"):
         review.accept(candidates[0].id, reviewer="author", note="Changed mind.")
+
+
+def test_accept_does_not_persist_review_if_graph_commit_fails():
+    draft_store = SQLiteDraftStore()
+    draft = draft_store.create_draft(
+        project_id=PROJECT_ID,
+        scene_id=SCENE_ID,
+        text=(
+            "The clue fails to commit. "
+            f"[[fact:fact_type=ItemState;subject={ITEM_ID};relation=LOCATED_AT;"
+            f"object={LOCATION_ID};confidence=0.95]]"
+        ),
+        summary="Commit failure.",
+    )
+    candidates = RuleBasedStateExtractor().extract(project_id=PROJECT_ID, draft=draft)
+    candidate_store = InMemoryCandidateStore()
+    review = ReviewService(candidate_store, FailingGraphStore())
+    review.submit(candidates)
+
+    with pytest.raises(RuntimeError, match="graph commit failed"):
+        review.accept(candidates[0].id, reviewer="author", note="Should not persist.")
+
+    stored = candidate_store.get(candidates[0].id)
+    assert stored.status == "DRAFT_FACT"
+    assert stored.review.status == "pending"

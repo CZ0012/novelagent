@@ -5,12 +5,12 @@ from __future__ import annotations
 from storygraph.core.errors import ContractError
 from storygraph.core.time import utc_now
 from storygraph.models.candidate import CandidateFact, ReviewDecision
-from storygraph.stores.candidate_store import InMemoryCandidateStore
+from storygraph.stores.candidate_store import CandidateStore
 from storygraph.stores.graph_base import GraphStore
 
 
 class ReviewService:
-    def __init__(self, candidate_store: InMemoryCandidateStore, graph_store: GraphStore) -> None:
+    def __init__(self, candidate_store: CandidateStore, graph_store: GraphStore) -> None:
         self.candidate_store = candidate_store
         self.graph_store = graph_store
 
@@ -34,12 +34,12 @@ class ReviewService:
                 ),
             }
         )
-        self.candidate_store.update(reviewed)
         self.graph_store.commit_candidate_fact(
             reviewed,
             reviewer=reviewer,
             rationale=note or reviewed.rationale,
         )
+        self.candidate_store.update(reviewed)
         return reviewed
 
     def edit_and_accept(
@@ -71,12 +71,12 @@ class ReviewService:
                 ),
             }
         )
-        self.candidate_store.update(patched_candidate)
         self.graph_store.commit_candidate_fact(
             patched_candidate,
             reviewer=reviewer,
             rationale=note or patched_candidate.rationale,
         )
+        self.candidate_store.update(patched_candidate)
         return patched_candidate
 
     def reject(self, candidate_id: str, *, reviewer: str, note: str | None = None) -> CandidateFact:

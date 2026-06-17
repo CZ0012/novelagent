@@ -31,7 +31,7 @@ python -m pytest
 
 ```powershell
 python -m apps.cli.main demo
+python -m apps.cli.main review-demo --action accept --reviewer editor --note "approved via cli"
 ```
 
 If Typer is installed, the CLI uses Typer. Without Typer, the demo command falls back to `argparse`.
-

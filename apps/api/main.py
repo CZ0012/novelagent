@@ -15,7 +15,7 @@ from storygraph.services import (
     RuleBasedSceneWriter,
     RuleBasedStateExtractor,
 )
-from storygraph.stores import InMemoryCandidateStore, SQLiteDraftStore
+from storygraph.stores import CandidateStore, SQLiteCandidateStore, SQLiteDraftStore
 
 
 class CreateProjectRequest(BaseModel):
@@ -42,7 +42,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="StoryGraph Agent", version="0.1.0")
     graph = build_fantasy_demo_graph()
     draft_store = SQLiteDraftStore()
-    candidate_store = InMemoryCandidateStore()
+    candidate_store = SQLiteCandidateStore()
     context_builder = ContextPackBuilder(graph, draft_store)
     writer = RuleBasedSceneWriter(draft_store)
     checker = RuleBasedContinuityChecker()
@@ -162,7 +162,7 @@ def create_app() -> FastAPI:
 
 
 def _ensure_candidate_project(
-    candidate_store: InMemoryCandidateStore, fact_id: str, project_id: str
+    candidate_store: CandidateStore, fact_id: str, project_id: str
 ) -> None:
     try:
         fact = candidate_store.get(fact_id)
