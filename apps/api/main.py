@@ -83,7 +83,10 @@ class EditAcceptRequest(ReviewRequest):
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     app = FastAPI(title="StoryGraph Agent", version="0.1.0")
+    use_persistent_stores = settings is not None
     settings = settings or StoryGraphSettings()
+    if use_persistent_stores:
+        settings.ensure_workspace()
     configured_graph = open_configured_graph_store(
         settings,
         default_backend="memory",
@@ -93,10 +96,16 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     def persist_graph() -> None:
         save_configured_graph_store(configured_graph, settings)
-    draft_store = SQLiteDraftStore()
-    candidate_store = SQLiteCandidateStore()
-    workflow_store = SQLiteWorkflowStore()
-    style_sample_store = SQLiteStyleSampleStore()
+    draft_store = SQLiteDraftStore(settings.draft_store_path if use_persistent_stores else ":memory:")
+    candidate_store = SQLiteCandidateStore(
+        settings.candidate_store_path if use_persistent_stores else ":memory:"
+    )
+    workflow_store = SQLiteWorkflowStore(
+        settings.workflow_store_path if use_persistent_stores else ":memory:"
+    )
+    style_sample_store = SQLiteStyleSampleStore(
+        settings.style_sample_store_path if use_persistent_stores else ":memory:"
+    )
     context_builder = ContextPackBuilder(graph, draft_store, style_sample_store)
     writer = RuleBasedSceneWriter(draft_store)
     checker = RuleBasedContinuityChecker()
@@ -306,6 +315,21 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         except ContractError as exc:
             raise HTTPException(status_code=404, detail="Workflow run not found") from exc
 
+    @app.get("/runs/{run_id}/events")
+    def get_run_events(run_id: str) -> dict:
+        try:
+            run = workflow_store.get(run_id)
+        except ContractError as exc:
+            raise HTTPException(status_code=404, detail="Workflow run not found") from exc
+        return {"events": _workflow_events(run)}
+
+    @app.post("/runs/{run_id}/resume-review")
+    def resume_review(run_id: str) -> dict:
+        try:
+            return scene_workflow.resume_review(run_id).model_dump()
+        except ContractError as exc:
+            raise HTTPException(status_code=404, detail="Workflow run not found") from exc
+
     @app.get("/projects/{project_id}/facts/pending")
     def pending_facts(project_id: str) -> dict:
         return {"facts": [fact.model_dump() for fact in review.pending(project_id=project_id)]}
@@ -385,6 +409,22 @@ def _csv(value: str | None) -> list[str] | None:
     if value is None:
         return None
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _workflow_events(run) -> list[dict]:
+    return [
+        {
+            "run_id": run.id,
+            "workflow_name": run.workflow_name,
+            "step": step.name,
+            "status": step.status,
+            "started_at": step.started_at,
+            "completed_at": step.completed_at,
+            "artifact_refs": step.artifact_refs,
+            "message": step.message,
+        }
+        for step in run.steps
+    ]
 
 
 app = create_app()

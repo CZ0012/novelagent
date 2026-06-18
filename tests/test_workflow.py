@@ -1,3 +1,5 @@
+import pytest
+
 from storygraph.demo import ITEM_ID, LOCATION_ID, PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
 from storygraph.services import (
     ContextPackBuilder,
@@ -147,6 +149,30 @@ def test_scene_generation_workflow_resume_review_after_human_decision():
     )
 
 
+def test_scene_generation_workflow_persists_failed_step_on_writer_error():
+    graph = build_fantasy_demo_graph()
+    draft_store = SQLiteDraftStore()
+    workflow_store = SQLiteWorkflowStore()
+    workflow = SceneGenerationWorkflow(
+        context_builder=ContextPackBuilder(graph, draft_store),
+        writer=FailingSceneWriter(draft_store),
+        checker=RuleBasedContinuityChecker(),
+        extractor=RuleBasedStateExtractor(),
+        workflow_store=workflow_store,
+    )
+
+    with pytest.raises(RuntimeError, match="writer exploded"):
+        workflow.run(project_id=PROJECT_ID, scene_id=SCENE_ID)
+
+    stored = workflow_store.list(project_id=PROJECT_ID)[0]
+    failed_step = next(step for step in stored.steps if step.name == "write_draft")
+    assert stored.status == "failed"
+    assert stored.current_step == "write_draft"
+    assert failed_step.status == "failed"
+    assert failed_step.message == "RuntimeError: writer exploded"
+    assert next(step for step in stored.steps if step.name == "check_continuity").status == "skipped"
+
+
 class FactMarkerSceneWriter(RuleBasedSceneWriter):
     def draft(self, context_pack):
         marker = (
@@ -171,3 +197,8 @@ class NeedsRevisionSceneWriter(RuleBasedSceneWriter):
             summary="Missing required element while containing a marker.",
             self_check=["This should require revision before extraction."],
         )
+
+
+class FailingSceneWriter(RuleBasedSceneWriter):
+    def draft(self, context_pack):
+        raise RuntimeError("writer exploded")

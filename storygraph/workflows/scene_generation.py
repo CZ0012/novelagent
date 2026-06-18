@@ -52,15 +52,27 @@ class SceneGenerationWorkflow:
 
     def run(self, *, project_id: str, scene_id: str) -> SceneRunResult:
         run = self._start_run(project_id=project_id, scene_id=scene_id)
-        context_pack = self.context_builder.build(project_id=project_id, scene_id=scene_id)
+        try:
+            context_pack = self.context_builder.build(project_id=project_id, scene_id=scene_id)
+        except Exception as exc:
+            self._fail_run(run, current_step="build_context", exc=exc)
+            raise
         run = self._complete_step(
             run,
             "build_context",
             artifact_refs={"context_pack_id": f"context_{scene_id}"},
         )
-        draft = self.writer.write_and_save(context_pack)
+        try:
+            draft = self.writer.write_and_save(context_pack)
+        except Exception as exc:
+            self._fail_run(run, current_step="write_draft", exc=exc)
+            raise
         run = self._complete_step(run, "write_draft", artifact_refs={"draft_id": draft.id})
-        report = self.checker.check(context_pack=context_pack, draft=draft)
+        try:
+            report = self.checker.check(context_pack=context_pack, draft=draft)
+        except Exception as exc:
+            self._fail_run(run, current_step="check_continuity", exc=exc)
+            raise
         run = self._complete_step(
             run,
             "check_continuity",
@@ -72,9 +84,13 @@ class SceneGenerationWorkflow:
         elif report.status == "needs_revision":
             run = self._finish_run(run, status="needs_revision", current_step="check_continuity")
         else:
-            candidates = self.extractor.extract(project_id=project_id, draft=draft)
-            if candidates and self.review_service:
-                candidates = self.review_service.submit(candidates)
+            try:
+                candidates = self.extractor.extract(project_id=project_id, draft=draft)
+                if candidates and self.review_service:
+                    candidates = self.review_service.submit(candidates)
+            except Exception as exc:
+                self._fail_run(run, current_step="extract_state", exc=exc)
+                raise
             run = self._complete_step(
                 run,
                 "extract_state",
@@ -100,6 +116,38 @@ class SceneGenerationWorkflow:
             continuity_report=report,
             candidates=candidates,
             workflow_run=run,
+        )
+
+    def _fail_run(self, run: WorkflowRun, *, current_step: str, exc: Exception) -> WorkflowRun:
+        now = utc_now()
+        steps = []
+        failed_seen = False
+        for step in run.steps:
+            if step.name == current_step:
+                failed_seen = True
+                steps.append(
+                    step.model_copy(
+                        update={
+                            "status": "failed",
+                            "started_at": step.started_at or now,
+                            "completed_at": now,
+                            "message": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+                )
+            elif failed_seen and step.status == "pending":
+                steps.append(step.model_copy(update={"status": "skipped", "completed_at": now}))
+            else:
+                steps.append(step)
+        return self._save(
+            run.model_copy(
+                update={
+                    "status": "failed",
+                    "current_step": current_step,
+                    "steps": steps,
+                    "updated_at": now,
+                }
+            )
         )
 
     def resume_review(self, run_id: str) -> WorkflowRun:

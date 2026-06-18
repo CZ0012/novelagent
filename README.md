@@ -23,6 +23,7 @@ Current MVP capabilities:
 - Review service that keeps candidate facts pending until a human accept/edit decision commits them to canon.
 - Minimal FastAPI and CLI entry points.
 - Local CLI workspace commands for context building, scene drafting, continuity checks, state extraction, workflow runs, and pending fact review.
+- Workflow run checkpoints with API run listing, run event inspection, persisted settings-backed stores, and review-pause resume.
 - Explicit human seed commands and API routes for story-bible Characters, Locations, and graph relationships.
 - Read-only graph query API and CLI surfaces for inspecting canon neighbors and relationships.
 - Local deterministic style sample store feeding `ContextPack.retrieved_style_samples`.

@@ -17,6 +17,8 @@ The MVP stores LangGraph-shaped checkpoints locally so scene generation can be i
 - `POST /projects/{project_id}/scenes/{scene_id}/runs/scene-generation`
 - `GET /projects/{project_id}/runs`
 - `GET /runs/{run_id}`
+- `GET /runs/{run_id}/events`
+- `POST /runs/{run_id}/resume-review`
 
 ## Required Top-Level Fields
 
