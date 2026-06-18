@@ -10,4 +10,12 @@ Hard rules:
 - Include `must_include` elements.
 - Respect `must_not_violate` constraints.
 - Return draft prose, a short scene summary, and self-check notes.
+- Return only JSON:
 
+```json
+{
+  "text": "scene prose only",
+  "summary": "one short scene summary",
+  "self_check": ["checked POV boundary", "checked canon safety"]
+}
+```

@@ -27,6 +27,7 @@ from storygraph.services import (
     RuleBasedContinuityChecker,
     RuleBasedSceneWriter,
     RuleBasedStateExtractor,
+    create_scene_writer,
 )
 from storygraph.stores import SQLiteCandidateStore, SQLiteDraftStore, SQLiteStyleSampleStore
 from storygraph.stores.graph_base import GraphStore
@@ -415,7 +416,9 @@ def write_scene_command(
             project_id=project_id,
             scene_id=scene_id,
         )
-        return RuleBasedSceneWriter(runtime.draft_store).write_and_save(context_pack).model_dump()
+        return create_scene_writer(runtime.settings, runtime.draft_store).write_and_save(
+            context_pack
+        ).model_dump()
     finally:
         runtime.close()
 
@@ -476,7 +479,7 @@ def run_scene_command(
                 runtime.draft_store,
                 runtime.style_sample_store,
             ),
-            writer=RuleBasedSceneWriter(runtime.draft_store),
+            writer=create_scene_writer(runtime.settings, runtime.draft_store),
             checker=RuleBasedContinuityChecker(),
             extractor=RuleBasedStateExtractor(),
             workflow_store=runtime.workflow_store,

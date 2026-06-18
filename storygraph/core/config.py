@@ -21,6 +21,22 @@ class StoryGraphSettings:
         self.workflow_checkpoint_path = root / "langgraph_checkpoints.sqlite"
         self.style_sample_store_path = root / "style_samples.sqlite"
         self.workflow_runtime = os.environ.get("STORYGRAPH_WORKFLOW_RUNTIME", "local").lower()
+        self.scene_writer = os.environ.get("STORYGRAPH_SCENE_WRITER", "rule_based").lower()
+        self.llm_base_url = os.environ.get("STORYGRAPH_LLM_BASE_URL") or os.environ.get(
+            "OPENAI_BASE_URL",
+            "",
+        )
+        self.llm_api_key = os.environ.get("STORYGRAPH_LLM_API_KEY") or os.environ.get(
+            "OPENAI_API_KEY",
+            "",
+        )
+        self.llm_model = os.environ.get("STORYGRAPH_LLM_MODEL", "deepseek-chat")
+        self.llm_timeout_seconds = float(os.environ.get("STORYGRAPH_LLM_TIMEOUT_SECONDS", "60"))
+        self.llm_json_mode = os.environ.get("STORYGRAPH_LLM_JSON_MODE", "1").lower() not in {
+            "0",
+            "false",
+            "no",
+        }
         self.graph_backend_explicit = "STORYGRAPH_GRAPH_BACKEND" in os.environ
         self.graph_backend = os.environ.get("STORYGRAPH_GRAPH_BACKEND", "json").lower()
         self.neo4j_uri = os.environ.get("STORYGRAPH_NEO4J_URI")

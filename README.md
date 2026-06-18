@@ -19,7 +19,7 @@ Current MVP capabilities:
 - Canon-safe in-memory graph store with explicit provenance and event log entries.
 - SQLite draft store.
 - Context Pack builder with P0-P7 budgeting metadata, stable retrieval provenance, and `missing_context` gap reports.
-- Rule-based scene writer, continuity checker, and candidate fact extractor for deterministic local testing.
+- Rule-based scene writer, optional OpenAI-compatible LLM scene writer, continuity checker, and candidate fact extractor.
 - Review service that keeps candidate facts pending until a human accept/edit decision commits them to canon.
 - Minimal FastAPI and CLI entry points.
 - Local CLI workspace commands for context building, scene drafting, continuity checks, state extraction, workflow runs, and pending fact review.
@@ -83,6 +83,17 @@ $env:STORYGRAPH_WORKFLOW_RUNTIME="langgraph"
 ```
 
 LangGraph checkpoints are stored at `langgraph_checkpoints.sqlite` inside the StoryGraph workspace. Public API/CLI run panels still read the stable `workflow_run_v1` projection from `workflows.sqlite`; canon writes remain gated by explicit ReviewService decisions.
+
+Scene drafting uses the deterministic rule-based writer by default. To use a third-party OpenAI-compatible API for draft generation, inject credentials through local environment variables:
+
+```powershell
+$env:STORYGRAPH_SCENE_WRITER="llm"
+$env:STORYGRAPH_LLM_BASE_URL="https://your-provider.example/v1"
+$env:STORYGRAPH_LLM_API_KEY="<your provider key>"
+$env:STORYGRAPH_LLM_MODEL="deepseek-chat"
+```
+
+The LLM writer reads `storygraph/prompts/scene_writer.md`, asks for JSON output, saves only to Draft Store, and locally rejects drafts that omit `must_include` items or contain literal `must_not_violate` constraints. It never receives a Graph Store handle; generated state changes still have to pass through CandidateFact extraction and human review.
 
 ## Demo CLI
 

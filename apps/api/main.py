@@ -17,8 +17,8 @@ from storygraph.services import (
     GraphQueryService,
     ReviewService,
     RuleBasedContinuityChecker,
-    RuleBasedSceneWriter,
     RuleBasedStateExtractor,
+    create_scene_writer,
 )
 from storygraph.stores import CandidateStore, SQLiteCandidateStore, SQLiteDraftStore, SQLiteStyleSampleStore
 from storygraph.stores.graph_factory import open_configured_graph_store, save_configured_graph_store
@@ -107,7 +107,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         settings.style_sample_store_path if use_persistent_stores else ":memory:"
     )
     context_builder = ContextPackBuilder(graph, draft_store, style_sample_store)
-    writer = RuleBasedSceneWriter(draft_store)
+    writer = create_scene_writer(settings, draft_store)
     checker = RuleBasedContinuityChecker()
     extractor = RuleBasedStateExtractor()
     review = ReviewService(candidate_store, graph)
@@ -126,7 +126,12 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok", "workflow_runtime": settings.workflow_runtime}
+        return {
+            "status": "ok",
+            "workflow_runtime": settings.workflow_runtime,
+            "scene_writer": settings.scene_writer,
+            "llm_configured": bool(settings.llm_base_url and settings.llm_api_key),
+        }
 
     @app.post("/projects")
     def create_project(request: CreateProjectRequest) -> dict:
