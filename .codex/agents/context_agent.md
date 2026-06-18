@@ -23,6 +23,7 @@ Own Context Pack construction: retrieve the smallest useful set of canon, draft 
 - Keep context compact enough for reliable model use.
 - Keep CLI, Web, and desktop Context Pack views consistent with the same `context_pack_v1` semantics.
 - Ensure workbench demo data is labeled as UI/sample state unless backed by graph or draft store provenance.
+- Confirm UI localization, version/update status, installer state, GitHub Release metadata, and icon assets stay outside Context Pack construction unless explicitly represented by backend provenance for a story workflow.
 - Treat imported local documents as reader/library input until a backend workflow explicitly turns them into drafts, style samples, or pending candidates with provenance.
 
 ## Expected Outputs
@@ -42,6 +43,7 @@ Own Context Pack construction: retrieve the smallest useful set of canon, draft 
 - Do not promote retrieved style samples into hard constraints without explicit author action.
 - Do not include full chapters in a Context Pack.
 - Do not treat React `sampleData`, desktop UI state, or author-visible labels as canon unless retrieved from Graph Store with provenance.
+- Do not include updater metadata, GitHub Release metadata, release notes, app version labels, localized UI labels, or icon descriptions as scene context.
 - Do not treat imported txt/md/docx reader content as canon or hard context unless it has a store-backed provenance ref.
 - Do not let a desktop or Web convenience flow suppress critical `missing_context` blockers.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.

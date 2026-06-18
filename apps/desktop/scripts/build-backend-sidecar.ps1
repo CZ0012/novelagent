@@ -10,17 +10,30 @@ $entryPath = Join-Path $runDir "desktop_backend_entry.py"
 $distDir = Join-Path $runDir "dist"
 $exePath = Join-Path $distDir "storygraph-backend.exe"
 $targetPath = Join-Path $sidecarDir "storygraph-backend-x86_64-pc-windows-msvc.exe"
+$iconPath = Join-Path $desktopDir "src-tauri\icons\icon.ico"
 
 New-Item -ItemType Directory -Force -Path $sidecarDir | Out-Null
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 New-Item -ItemType Directory -Force -Path $runDir | Out-Null
 
 @'
+import multiprocessing
+import os
+import sys
+
 import uvicorn
 
 from apps.api.desktop import app
 
+def _attach_standard_streams():
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    _attach_standard_streams()
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
 '@ | Set-Content -LiteralPath $entryPath -Encoding utf8
 
@@ -32,7 +45,7 @@ if ($LASTEXITCODE -ne 0) {
     }
 }
 
-python -m PyInstaller --clean --noconfirm --onefile --name storygraph-backend --distpath $distDir --workpath (Join-Path $runDir "build") --specpath $runDir --paths $repoRoot $entryPath
+python -m PyInstaller --clean --noconfirm --onefile --noconsole --name storygraph-backend --icon $iconPath --distpath $distDir --workpath (Join-Path $runDir "build") --specpath $runDir --paths $repoRoot $entryPath
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed to build the StoryGraph backend sidecar."
 }

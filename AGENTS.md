@@ -12,7 +12,11 @@ The project has moved from instruction and contract setup into MVP implementatio
 
 Application source files are allowed when they are explicitly aligned with `docs/architecture.md` and the versioned contracts under `contracts/`. Keep implementation scoped to the StoryGraph Agent architecture and preserve the canon safety rules below.
 
-Current user-facing runtime status must stay explicit: this MVP can be run through the local CLI, FastAPI + React/Vite, and a source-built Tauri desktop package. `apps/desktop` can produce local Windows executable and NSIS installer outputs, but those outputs are not checked-in, signed, or published release artifacts.
+Current user-facing runtime status must stay explicit: this MVP can be run through the local CLI, FastAPI + React/Vite, and a source-built Tauri desktop package. `apps/desktop` can produce local Windows executable, updater artifact, and NSIS installer outputs, but those outputs are not checked-in or published release artifacts.
+
+The desktop MVP should keep a Chinese-first UI, hide the managed backend console window in packaged Windows builds, use the root `VERSION` as the release version source, expose a signed in-app update check/install path for Tauri builds, and ship reproducible icon assets under `apps/desktop/src-tauri/icons/`.
+
+GitHub synchronization in this repository currently means only the software release/update channel: GitHub Release assets, updater signatures, and `latest.json`. It must not be described as synchronization for local novel workspaces, canon, drafts, imported documents, project settings, or review state.
 
 ## Architecture Source
 
@@ -58,6 +62,9 @@ Use the Director as the coordination layer. The Director should split work, conf
 - Avoid unrelated code files; implementation should stay scoped to the MVP architecture and versioned contracts.
 - When changing local usage, runtime startup, or desktop packaging behavior, update `README.md`, `docs/architecture.md`, `apps/desktop/README.md`, and affected subagent instructions in the same task.
 - Keep CLI, API + Web, source-built desktop, and signed release usage instructions distinct. The desktop shell must be documented as a host for the same backend workflow, not as a separate canon-writing path.
+- Keep GitHub Release download fallback, source-built local outputs, Tauri updater artifacts, and published signed updater channels distinct. Do not describe a local artifact as an installed auto-update channel unless the signed `latest.json` release path exists.
+- The verified Windows updater artifact naming is the NSIS setup executable plus `setup.exe.sig`; do not document a `nsis.zip` artifact unless the build actually produces one.
+- Distinguish Tauri updater signing from Windows Authenticode code signing. Tauri updater signatures allow in-app update verification; Authenticode signing is a separate production distribution step.
 
 ## Shell And File Writing Notes
 

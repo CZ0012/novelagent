@@ -28,21 +28,21 @@ The implementation follows:
 - Local CLI workspace commands for context building, scene drafting, continuity checks, state extraction, workflow runs, and pending fact review.
 - Workflow run checkpoints and projections with API run listing, run event inspection, review-pause resume, persisted stores, and optional LangGraph runtime/checkpointer support.
 - FastAPI routes for the authoring workflow plus persisted agent settings for model provider, API key reference, JSON mode, scene writer mode, and API permission level.
-- React/Vite author workbench for scene drafting, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, pending fact review, local txt/md/docx file or folder import, and agent settings through the API.
+- Chinese-localized React/Vite author workbench for scene drafting, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, pending fact review, local txt/md/docx file or folder import, agent settings, and update checks through the API or desktop shell.
 - Desktop-target FastAPI entrypoint (`apps.api.desktop_server`) that uses a persistent local workspace and the JSON graph backend.
-- Buildable Tauri desktop package under `apps/desktop`, including npm scripts, a Rust entrypoint, PyInstaller backend sidecar packaging, backend start/stop/status commands, Tauri capabilities, and NSIS installer configuration.
+- Buildable Tauri desktop package under `apps/desktop`, including npm scripts, a Rust entrypoint, hidden PyInstaller backend sidecar packaging, backend start/stop/status commands, Tauri capabilities, signed-updater configuration, a sci-fi app icon, and NSIS installer configuration.
 - Fantasy demo fixture and regression tests for the canon safety loop.
 
 ## Runtime Status
 
-This MVP can be used through CLI, browser, or a locally built Windows desktop package. The repository does not check in signed release binaries, but `apps/desktop` can build a local Tauri executable and NSIS installer.
+This MVP can be used through CLI, browser, or a locally built Windows desktop package. The repository does not check in signed release binaries, but `apps/desktop` can build a local Tauri executable and NSIS installer. The desktop package is configured for Tauri signed updater artifacts, while published update delivery still depends on a GitHub Release that provides the installer, updater signatures, and `latest.json`.
 
 Use one of these surfaces:
 
 - CLI workspace: best for persistent local MVP runs. It stores JSON and SQLite state under `.storygraph`, `STORYGRAPH_HOME`, or the directory passed with `--workspace`.
 - Persistent FastAPI + React/Vite workbench: best for local authoring through the browser. Start the persistent API backend and the web dev server separately.
 - Seeded demo FastAPI + React/Vite workbench: best for quick UI experiments. The default `apps.api.main:app` uvicorn entrypoint uses in-memory demo stores unless created with explicit settings.
-- Tauri desktop app: best for direct local use after a source build. It hosts the React workbench and starts or connects to the local FastAPI backend.
+- Tauri desktop app: best for direct local use after a source build. It hosts the React workbench, starts or connects to the local FastAPI backend without showing a backend console window, and can check signed desktop updates from the configured release channel.
 
 All examples below are PowerShell commands. They also work in Windows PowerShell unless your local execution policy, Python launcher, or Node installation differs.
 
@@ -108,9 +108,11 @@ Current desktop-related files are:
 - `apps/api/desktop_server.py`: local server entrypoint for that persistent API.
 - `apps/desktop/package.json`: npm scripts for Tauri development, backend sidecar generation, and build.
 - `apps/desktop/scripts/build-backend-sidecar.ps1`: Windows PowerShell script that packages `apps.api.desktop_server` as the Tauri backend sidecar.
+- `apps/desktop/scripts/build-installer.ps1`: Windows PowerShell script that rebuilds web assets, rebuilds the backend sidecar, and runs the signed Tauri installer build.
+- `apps/desktop/scripts/generate-icon.py`: dependency-free icon generator for the sci-fi app icon source PNG and `.ico` file.
 - `apps/desktop/src-tauri/Cargo.toml` and `src/main.rs`: Rust shell with commands for desktop settings, backend status, backend start, backend stop, and local path reporting.
 - `apps/desktop/src-tauri/capabilities/default.json`: Tauri v2 capability boundary for the main window.
-- `apps/desktop/src-tauri/tauri.conf.json`: Tauri configuration pointing at `apps/web` and an NSIS bundle target.
+- `apps/desktop/src-tauri/tauri.conf.json`: Tauri configuration pointing at `apps/web`, an NSIS bundle target, and the signed updater endpoint.
 
 Build and run locally:
 
@@ -118,6 +120,8 @@ Build and run locally:
 npm --prefix apps/desktop install
 npm --prefix apps/desktop run build:installer
 ```
+
+`build:installer` creates updater artifacts and therefore requires a Tauri updater signing key. This workspace keeps the local private key in `apps/desktop/.tauri/storygraph-agent.key`, which is ignored by git. For a new release machine, provide `TAURI_SIGNING_PRIVATE_KEY` or `TAURI_SIGNING_PRIVATE_KEY_PATH` for the private key that matches the public key committed in `apps/desktop/src-tauri/tauri.conf.json`. If the updater key is intentionally rotated, update the committed public key and release process together.
 
 The generated installer is:
 
@@ -143,15 +147,22 @@ apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
 apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.0_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.0_x64-setup.exe.sig
 ```
 
-The full installer build regenerates the PyInstaller backend sidecar, rebuilds the React/Vite workbench, and runs `tauri build`. The generated installer and release executables are local outputs, not checked-in or signed release artifacts.
+The full installer build regenerates the PyInstaller backend sidecar with `--noconsole`, rebuilds the React/Vite workbench, and runs `tauri build`. The Tauri shell also starts the sidecar with Windows `CREATE_NO_WINDOW`, so the packaged app should not show a stray backend terminal window. The generated installer, `setup.exe.sig` updater signature, backend sidecar, and release executables are local outputs, not checked-in release artifacts.
+
+The in-app settings panel includes a `Version & Updates` section. In the Tauri desktop runtime it uses `tauri-plugin-updater` to check the signed endpoint `https://github.com/CZ0012/novelagent/releases/latest/download/latest.json`, stop the managed backend, install the update, and restart the app. In a plain browser runtime it falls back to a GitHub Release check and, when available, links to the Windows installer asset.
+
+Version updates must keep `VERSION`, `pyproject.toml`, `apps/web/package.json`, `apps/web/src/version.ts`, `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, canon, drafts, imported documents, project settings, and review state are not synchronized to GitHub.
+
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.0_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 
-- A signed release installer published outside the repository.
+- A signed release installer and `latest.json` published outside the repository.
 - Automated desktop smoke tests for install, uninstall, backend health, workbench load, and workspace persistence.
-- Production hardening for the generated backend sidecar, including versioning and code signing.
+- Production Authenticode code signing for the generated backend sidecar and installer.
 
 The packaged desktop runtime must host the same React workbench, start or connect to the local FastAPI backend, persist workspace settings, and continue using backend review APIs for all canon-changing operations. The desktop layer must not write canon directly.
 

@@ -90,7 +90,7 @@ class ReviewRequest(BaseModel):
 class DemoSeedRequest(BaseModel):
     reviewer: str = Field("author", min_length=1)
     rationale: str = Field(
-        "Author explicitly initialized the bundled fantasy demo.",
+        "作者明确初始化内置奇幻演示项目。",
         min_length=1,
     )
     source_ref: str = Field("demo:fantasy_project_v1", min_length=1)
@@ -163,8 +163,10 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 detail={
                     "category": "permission_denied",
                     "message": (
-                        f"Agent permission `{agent_config.permission_level}` does not allow "
-                        f"`{required}` operations."
+                        "当前权限为"
+                        f"“{_permission_label(agent_config.permission_level)}"
+                        f"（{agent_config.permission_level}）”，"
+                        f"不允许执行“{_permission_label(required)}（{required}）”级操作。"
                     ),
                 },
             )
@@ -195,8 +197,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 detail={
                     "category": "permission_denied",
                     "message": (
-                        "Permission level cannot be raised through the API. "
-                        "Edit the local agent_config.json or restart with an explicit local reset."
+                        "不能通过 API 自行升高权限。请有意编辑本地 agent_config.json，"
+                        "或通过明确的本地重置重新升权。"
                     ),
                 },
             )
@@ -221,7 +223,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 },
                 source_ref="api:projects",
                 reviewer="author",
-                rationale="Author created project through API.",
+                rationale="作者通过 API 创建项目。",
             )
         except GraphStoreError as exc:
             raise _graph_http_exception(exc) from exc
@@ -413,7 +415,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         context_pack = context_builder.build(project_id=project_id, scene_id=scene_id)
         draft = draft_store.latest_for_scene(project_id, scene_id)
         if draft is None:
-            raise HTTPException(status_code=404, detail="No draft for scene")
+            raise HTTPException(status_code=404, detail="这个场景还没有草稿。")
         return checker.check(context_pack=context_pack, draft=draft).model_dump()
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/extract-state")
@@ -421,7 +423,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         require_permission(AgentPermissionLevel.READ_GENERATE)
         draft = draft_store.latest_for_scene(project_id, scene_id)
         if draft is None:
-            raise HTTPException(status_code=404, detail="No draft for scene")
+            raise HTTPException(status_code=404, detail="这个场景还没有草稿。")
         candidates = extractor.extract(project_id=project_id, draft=draft)
         try:
             review.submit(candidates)
@@ -468,14 +470,14 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         try:
             return workflow_store.get(run_id).model_dump()
         except ContractError as exc:
-            raise HTTPException(status_code=404, detail="Workflow run not found") from exc
+            raise HTTPException(status_code=404, detail="没有找到这次工作流运行。") from exc
 
     @app.get("/runs/{run_id}/events")
     def get_run_events(run_id: str) -> dict:
         try:
             run = workflow_store.get(run_id)
         except ContractError as exc:
-            raise HTTPException(status_code=404, detail="Workflow run not found") from exc
+            raise HTTPException(status_code=404, detail="没有找到这次工作流运行。") from exc
         return {"events": _workflow_events(run)}
 
     @app.post("/runs/{run_id}/resume-review")
@@ -483,7 +485,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         try:
             return scene_workflow.resume_review(run_id).model_dump()
         except ContractError as exc:
-            raise HTTPException(status_code=404, detail="Workflow run not found") from exc
+            raise HTTPException(status_code=404, detail="没有找到这次工作流运行。") from exc
 
     @app.get("/projects/{project_id}/facts/pending")
     def pending_facts(project_id: str) -> dict:
@@ -545,9 +547,9 @@ def _ensure_candidate_project(
     try:
         fact = candidate_store.get(fact_id)
     except ContractError as exc:
-        raise HTTPException(status_code=404, detail="Candidate fact not found") from exc
+        raise HTTPException(status_code=404, detail="没有找到这个候选事实。") from exc
     if fact.project_id != project_id:
-        raise HTTPException(status_code=404, detail="Candidate fact not found for project")
+        raise HTTPException(status_code=404, detail="这个项目中没有找到该候选事实。")
 
 
 def _contract_http_exception(exc: ContractError | GraphStoreError) -> HTTPException:
@@ -573,11 +575,20 @@ def _csv(value: str | None) -> list[str] | None:
 def _agent_settings_payload(config: AgentRuntimeConfig) -> dict:
     response = config_response(config).model_dump()
     response["permission_descriptions"] = {
-        "read_only": "Read canon, drafts, context packs, runs, and pending facts only.",
-        "read_generate": "Read plus generate drafts, checks, extracted candidates, and style samples.",
-        "full": "All local author operations, including human seed and CandidateFact review decisions.",
+        "read_only": "只能读取 canon（正典）、草稿、上下文包、运行记录和待审事实。",
+        "read_generate": "可读取并生成草稿、检查结果、候选事实和风格样本。",
+        "full": "允许完整本地作者操作，包括人工初始化（seed）和 CandidateFact（候选事实）审阅决策。",
     }
     return response
+
+
+def _permission_label(level: AgentPermissionLevel) -> str:
+    labels = {
+        AgentPermissionLevel.READ_ONLY: "仅读取",
+        AgentPermissionLevel.READ_GENERATE: "可读取生成",
+        AgentPermissionLevel.FULL: "完全权限",
+    }
+    return labels[level]
 
 
 def _cors_origins() -> list[str]:

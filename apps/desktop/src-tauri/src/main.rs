@@ -13,7 +13,12 @@ use std::{
     thread,
     time::Duration,
 };
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use tauri::Manager;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Default)]
 struct BackendProcess {
@@ -22,16 +27,11 @@ struct BackendProcess {
 
 impl Drop for BackendProcess {
     fn drop(&mut self) {
-        let mut had_child = false;
         if let Ok(mut guard) = self.child.lock() {
             if let Some(mut child) = guard.take() {
-                had_child = true;
                 let _ = child.kill();
                 let _ = child.wait();
             }
-        }
-        if had_child {
-            stop_sidecar_processes();
         }
     }
 }
@@ -158,6 +158,9 @@ fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatu
         command.current_dir(root);
     }
 
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+
     let child = command
         .spawn()
         .map_err(|error| format!("failed to start FastAPI backend: {error}"))?;
@@ -213,22 +216,18 @@ fn stop_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatus
         .child
         .lock()
         .map_err(|_| "backend process lock was poisoned".to_string())?;
-    let mut had_child = false;
     if let Some(mut child) = guard.take() {
-        had_child = true;
         let _ = child.kill();
         let _ = child.wait();
     }
     drop(guard);
-    if had_child {
-        stop_sidecar_processes();
-    }
     Ok(status_for(&settings, &state))
 }
 
 fn main() {
     tauri::Builder::default()
         .manage(BackendProcess::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let settings = read_settings().unwrap_or_else(|_| DesktopSettings::default());
             if settings.auto_start_backend {
@@ -465,20 +464,3 @@ fn project_root() -> Option<PathBuf> {
 
     None
 }
-
-#[cfg(windows)]
-fn stop_sidecar_processes() {
-    for image_name in [
-        "storygraph-backend.exe",
-        "storygraph-backend-x86_64-pc-windows-msvc.exe",
-    ] {
-        let _ = Command::new("taskkill")
-            .args(["/F", "/IM", image_name])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-}
-
-#[cfg(not(windows))]
-fn stop_sidecar_processes() {}

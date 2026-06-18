@@ -1,17 +1,17 @@
 export const demoProject = {
   projectId: "project_fantasy_demo",
   sceneId: "scene_003",
-  title: "Fantasy Demo",
+  title: "奇幻演示项目",
   chapters: [
     {
       id: "chapter_001",
-      title: "The Old Bell Tower",
+      title: "旧钟楼",
       scenes: [
-        { id: "scene_001", title: "Harbor Ashes", status: "drafted" },
-        { id: "scene_002", title: "Silver Crow Trace", status: "checked" },
-        { id: "scene_003", title: "The Tower Search", status: "active" },
-        { id: "scene_004", title: "The Mother Mark", status: "planned" },
-        { id: "scene_005", title: "Lineage Payoff", status: "planned" }
+        { id: "scene_001", title: "港口余烬", status: "已起草" },
+        { id: "scene_002", title: "银鸦踪迹", status: "已检查" },
+        { id: "scene_003", title: "钟楼搜寻", status: "当前" },
+        { id: "scene_004", title: "母亲印记", status: "计划中" },
+        { id: "scene_005", title: "血脉回收", status: "计划中" }
       ]
     }
   ],
@@ -21,8 +21,8 @@ export const demoProject = {
     { source: "foreshadowing_early_bell", edge: "POINTS_TO", target: "secret_lineage" }
   ],
   timeline: [
-    { label: "Coup", state: "past" },
-    { label: "Scene 003", state: "current" },
-    { label: "Scene 005", state: "payoff" }
+    { label: "政变", state: "past" },
+    { label: "场景 003", state: "current" },
+    { label: "场景 005", state: "payoff" }
   ]
 };

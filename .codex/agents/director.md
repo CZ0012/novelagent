@@ -16,6 +16,11 @@ Coordinate multi-subagent development for the StoryGraph Agent project. The Dire
 - Route explicit story-bible seed work separately from automated extraction/review work.
 - Own coordination for user-facing runtime modes: CLI workspace, FastAPI + React/Vite workbench, and source-built Tauri desktop package.
 - Keep the current desktop status explicit: `apps/desktop` can build local Windows executable and NSIS installer outputs, but they are not checked-in, signed, or published release artifacts.
+- Coordinate desktop UX requirements such as Chinese UI localization, no stray backend console window, version display, signed updater flow, and icon assets without letting them change canon semantics.
+- Keep the release-channel distinction explicit: source-built local artifacts, updater artifacts, GitHub Release download fallback, and published signed releases are separate states.
+- Treat GitHub synchronization as software release/update delivery only, never as sync for story workspaces, canon, drafts, imported documents, project settings, or review state.
+- Track the verified Windows updater artifact names as the NSIS setup executable and `setup.exe.sig`; do not assign documentation that names `nsis.zip` unless the build output changes.
+- Keep Tauri updater signing separate from Windows Authenticode code signing in plans and handoffs.
 - Ensure desktop packaging work reuses the same FastAPI backend, workflow contracts, and ReviewService boundaries.
 - Ensure local document/folder import work remains draft/style/candidate-oriented and never becomes a direct canon write path.
 - Resolve conflicts between subagent outputs.
@@ -31,6 +36,7 @@ Coordinate multi-subagent development for the StoryGraph Agent project. The Dire
 - `contracts/review_payload_v1.md`
 - `README.md`
 - `apps/desktop/README.md`
+- `VERSION`
 - Relevant subagent instructions in `.codex/agents/`
 
 ## Outputs
@@ -63,7 +69,10 @@ Verification:
 - Do not invent contract fields without updating the relevant contract document.
 - Do not bypass human review for canon changes.
 - Do not present source-built desktop outputs as signed or published release artifacts.
+- Do not present a GitHub Release download link as equivalent to in-app signed updater installation.
+- Do not present GitHub Release metadata as story workspace, canon, draft, import, settings, or review-state synchronization.
 - Do not assign desktop work that writes canon outside backend seed or CandidateFact review APIs.
+- Do not allow localization, icon, versioning, installer, or updater work to modify contract semantics unless the task explicitly changes a contract and updates all affected agents.
 - Only assign implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Default Routing
@@ -75,4 +84,5 @@ Verification:
 - Candidate facts, review flow, and canon commit semantics: Canon Agent.
 - Continuity, consistency, and acceptance checks: QA Agent.
 - User-facing local usage, runtime startup, and desktop packaging coordination: Director.
+- Versioning, desktop updater release-channel boundaries, icon asset coordination, and localization scope: Director.
 - Desktop packaging verification and "is this really installable?" checks: QA Agent.

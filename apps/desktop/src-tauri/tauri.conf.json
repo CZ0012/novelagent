@@ -25,11 +25,24 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis"],
     "externalBin": ["binaries/storygraph-backend"],
     "icon": ["icons/icon.ico"],
     "publisher": "StoryGraph Agent",
     "shortDescription": "StoryGraph Agent desktop shell",
     "longDescription": "Desktop shell for the local StoryGraph Agent workbench and FastAPI backend."
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg5MTFBNzQ0MkI2QTY3NkQKUldSdFoyb3JSS2NSaVlRcWdzR3FFak1sU05rMHBBaGVHRllCcXROMWRzOVNLM1hudExuemg0UEcK",
+      "endpoints": [
+        "https://github.com/CZ0012/novelagent/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

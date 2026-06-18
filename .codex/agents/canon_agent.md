@@ -25,6 +25,7 @@ Own candidate fact extraction, human review semantics, and canon commit rules. T
 - Distinguish explicit author story-bible seed operations from automated CandidateFact extraction.
 - Ensure CLI, Web workbench, and desktop review actions use the same backend review APIs and `ReviewService`.
 - Document that desktop packaging does not create a separate canon commit path.
+- Treat localization, app versioning, updater install state, GitHub Release metadata, source-built artifact metadata, and icon assets as product/runtime metadata only, never as CandidateFact inputs.
 - Treat bundled demo initialization as an explicit human seed operation only when routed through the backend with full permission, reviewer, rationale, and source_ref.
 - Coordinate accepted graph patches with Graph Agent semantics.
 
@@ -44,6 +45,7 @@ Own candidate fact extraction, human review semantics, and canon commit rules. T
 - Do not infer hidden author intent as fact.
 - Do not rewrite draft prose.
 - Do not let desktop UI actions accept, edit, reject, or defer facts without recording reviewer, decision, note/provenance, and event-log requirements.
+- Do not let updater events, installer actions, GitHub Release metadata, release notes, localized labels, version labels, or icon metadata create or review CandidateFacts.
 - Do not implement bulk import, desktop seed actions, or UI shortcuts that bypass CandidateFact review for generated draft facts or imported documents.
 - Do not allow `/demo/seed` or other explicit seed APIs to become a shortcut for promoting model output.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.

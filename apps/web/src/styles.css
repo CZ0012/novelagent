@@ -858,8 +858,66 @@ textarea {
   margin-top: 3px;
 }
 
+.update-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.update-card.available {
+  border-color: #9fd0ca;
+  background: var(--teal-soft);
+}
+
+.update-card.installing {
+  border-color: #edd08d;
+  background: #fff6dd;
+}
+
+.update-card.error {
+  border-color: #f4b8b0;
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.update-card small {
+  color: var(--muted);
+}
+
+.update-card a,
+.inline-update-button {
+  border: 1px solid #0b5f59;
+  border-radius: 7px;
+  background: var(--teal);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 10px;
+  text-decoration: none;
+  font-weight: 750;
+}
+
+.inline-update-button {
+  cursor: pointer;
+  font: inherit;
+}
+
+.inline-update-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .settings-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
 }
