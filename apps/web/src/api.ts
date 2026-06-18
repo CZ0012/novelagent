@@ -1,0 +1,157 @@
+export type ContextGap = {
+  kind: string;
+  ref: string;
+  severity: "low" | "medium" | "high" | "critical";
+  message: string;
+  source?: string | null;
+};
+
+export type ContextPack = {
+  contract_version: "context_pack_v1";
+  project_id: string;
+  scene_id: string;
+  chapter_id: string;
+  pov_character_id: string;
+  location_id: string;
+  timeline_position: string;
+  scene_goal: string;
+  conflict: string;
+  required_characters: string[];
+  active_relationships: string[];
+  knowledge_boundaries: Array<{
+    character_id: string;
+    knows: string[];
+    does_not_know: string[];
+    falsely_believes: string[];
+    suspects: string[];
+    hides: string[];
+    source_refs: string[];
+  }>;
+  must_include: string[];
+  must_not_violate: string[];
+  unresolved_foreshadowing: string[];
+  relevant_world_rules: string[];
+  previous_scene_summary?: string | null;
+  style_constraints: Record<string, unknown>;
+  retrieved_style_samples: string[];
+  missing_context: ContextGap[];
+  provenance: {
+    graph_query_ids: string[];
+    draft_refs: string[];
+    style_sample_refs: string[];
+    author_instruction_refs: string[];
+    built_at: string;
+  };
+  budget: {
+    target_tokens: number;
+    estimated_tokens: number;
+    priority_order: string[];
+    dropped_items: string[];
+  };
+};
+
+export type Draft = {
+  id: string;
+  project_id: string;
+  scene_id: string;
+  version: number;
+  text: string;
+  summary?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkflowRun = {
+  id: string;
+  contract_version: "workflow_run_v1";
+  workflow_name: string;
+  project_id: string;
+  scene_id?: string | null;
+  status: string;
+  current_step?: string | null;
+  steps: WorkflowStep[];
+  review_payload: {
+    status: "none" | "pending";
+    candidate_ids: string[];
+    source_draft_id?: string | null;
+    note?: string | null;
+  };
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkflowStep = {
+  name: string;
+  status: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  artifact_refs: Record<string, unknown>;
+  message?: string | null;
+};
+
+export type ContinuityReport = {
+  contract_version: "continuity_report_v1";
+  status: string;
+  summary: string;
+  issues: Array<{
+    id: string;
+    issue_type: string;
+    severity: string;
+    description: string;
+    suggestion: string;
+    blocking: boolean;
+  }>;
+  checked_dimensions: string[];
+};
+
+export type CandidateFact = {
+  id: string;
+  project_id: string;
+  fact_type: string;
+  subject_id: string;
+  relation: string;
+  object_id?: string | null;
+  status: string;
+  rationale: string;
+  review: {
+    status: string;
+    reviewer?: string | null;
+    note?: string | null;
+  };
+};
+
+export type SceneRunResult = {
+  context_pack: ContextPack;
+  draft: Draft;
+  continuity_report: ContinuityReport;
+  candidates: CandidateFact[];
+  workflow_run: WorkflowRun;
+};
+
+export async function apiGet<T>(baseUrl: string, path: string): Promise<T> {
+  const response = await fetch(`${baseUrl}${path}`);
+  return parseResponse<T>(response);
+}
+
+export async function apiPost<T>(
+  baseUrl: string,
+  path: string,
+  body?: unknown
+): Promise<T> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  return parseResponse<T>(response);
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    const detail = payload?.detail?.message ?? payload?.detail ?? response.statusText;
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return payload as T;
+}

@@ -27,6 +27,8 @@ Current MVP capabilities:
 - Explicit human seed commands and API routes for story-bible Characters, Locations, and graph relationships.
 - Read-only graph query API and CLI surfaces for inspecting canon neighbors and relationships.
 - Local deterministic style sample store feeding `ContextPack.retrieved_style_samples`.
+- React/Vite author workbench for scene drafting, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, and pending fact review through the API.
+- Tauri desktop shell configuration that hosts the same web workbench over the local FastAPI backend; the desktop layer does not write canon directly.
 - Fantasy demo fixture and regression tests for the canon safety loop.
 
 ## Local Verification
@@ -34,6 +36,18 @@ Current MVP capabilities:
 ```powershell
 python -m pytest
 ```
+
+Build and run the web workbench:
+
+```powershell
+npm --prefix apps/web install
+npm --prefix apps/web run build
+npm --prefix apps/web run dev
+```
+
+Open `http://127.0.0.1:5173` and point the API field at the FastAPI backend, usually `http://127.0.0.1:8000`.
+
+The Tauri shell under `apps/desktop` is configuration-only in this MVP. It is intended to host the same React workbench and continue using backend review APIs for all canon-changing operations.
 
 Neo4j backend smoke tests are opt-in because they require a running Neo4j service:
 
