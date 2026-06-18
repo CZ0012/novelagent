@@ -54,6 +54,8 @@ StoryGraph Agent 应该帮助作者完成：
 - 文风一致性维护。
 - 草稿事实抽取与人工确认。
 - 多轮修订与版本回滚。
+- 清晰区分当前可用的 CLI / API + Web 工作台、源码构建桌面包，以及未来签名发布的桌面安装器。
+- 桌面版应让作者不必理解开发环境即可启动本地后端、打开写作工作台并管理本地项目数据。
 
 ### 2.2 工程目标
 
@@ -66,6 +68,8 @@ StoryGraph Agent 应该帮助作者完成：
 - 所有 canon 变更可追溯来源。
 - 自动生成内容不得直接污染 canon。
 - 支持人工审阅后写入正式设定。
+- 当前 MVP 必须明确标注本地可用入口、源码构建桌面包和未发布签名安装器之间的差异。
+- 可安装桌面版必须复用同一本地 API、工作流引擎、Graph Store、Draft Store 和 ReviewService，不得另建一套 canon 写入逻辑。
 
 ---
 
@@ -80,7 +84,13 @@ MVP 阶段不追求：
 - 复杂 UI。
 - 对所有小说类型通用的完美写作模型。
 
-MVP 应优先做成一个**本地引擎 + API + CLI + 简单 Web UI** 的创作引擎。桌面版不应另起一套逻辑，而应作为同一本地 API 与工作流引擎之上的桌面工作台逐步加入。
+MVP 应优先做成一个**本地引擎 + API + CLI + Web UI + 桌面宿主** 的创作引擎。桌面版不应另起一套逻辑，而应作为同一本地 API 与工作流引擎之上的桌面工作台。
+
+项目对作者公开的使用方式应表述为：
+
+- CLI 本地工作区，用于持久化 demo、图谱种子、场景流程和待审事实。
+- FastAPI + React/Vite Web 工作台，用于本地浏览器中的写作、Context Pack 检查和人工审阅。
+- Tauri 桌面应用，可从源码构建本地 Windows 可执行文件和 NSIS 安装器；仓库不提交签名 release 二进制。
 
 ---
 
@@ -936,6 +946,44 @@ Neo4j / SQLite / Vector Store 本地连接
 
 桌面进程不直接操作 canon。它通过 FastAPI 调用后端服务，后端服务再经 LangGraph、ReviewService、GraphStore 完成状态变更。
 
+### 11.5 本地安装与桌面打包要求
+
+当前状态：
+
+- `apps/desktop` 已是可构建的 Tauri shell，包含 npm scripts、Rust crate、Windows icon、后端启动/停止/状态命令、PyInstaller backend sidecar 和 NSIS bundle 配置。
+- 当前可运行入口是 CLI、FastAPI + React/Vite Web 工作台、面向桌面宿主的持久化后端入口 `python -m apps.api.desktop_server`，以及源码构建的 Tauri 桌面应用。
+- `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。需要默认 demo project 时，应在工作台点击 `Seed Demo` 或调用 `POST /demo/seed`，该路径仍要求 full 权限并记录 reviewer、rationale 和 source_ref。
+- 默认 `apps.api.main:app` 开发入口可用于本地 demo；不传入 settings 时它使用 seeded in-memory stores，不应被描述为完整桌面产品或持久化作者项目入口。
+- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.0_x64-setup.exe`。该产物是本地构建输出，不是已签名 release artifact。
+- FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地安全分级，不是身份认证；CLI 当前不执行同一权限闸门。
+- React/Vite 工作台当前支持本地 `.txt`、`.md`、`.markdown`、`.docx` 文件和文件夹导入到前端资料树/阅读器。导入内容只保存在浏览器内存，不写 Draft Store、Candidate Store 或 Graph Store。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
+
+可安装桌面版的目标：
+
+- 提供普通作者可启动的本地软件入口，例如通过 Tauri/NSIS 生成的 Windows 安装包或免安装可执行目录。
+- 启动时自动启动或连接 FastAPI 本地后端，并把 React 工作台作为主界面。
+- 使用设置页管理本地 workspace、模型供应商、API key 引用、权限分级、图数据库连接和备份路径。
+- 默认使用本地持久化工作区，避免作者误以为内存 demo 是正式项目存储。
+- 保留 CLI 与 API 的可用性，桌面版只是更友好的宿主，不替代后端契约。
+- 打包必须包含 Windows icon/bundle 资源，并记录 clean checkout 上的构建与 smoke test 结果。
+- 文档或文件夹导入内容若进入后端处理，必须先落入 Draft Store、StyleSample Store 或 pending CandidateFact；仅用于前端阅读器时可停留在浏览器内存，但不得绕过 ReviewService 直接写 Graph Store。
+
+边界控制：
+
+- 桌面层不得直接写 Graph Store、Draft Store、Candidate Store 或 Event Log。
+- 所有 canon 变更仍必须通过后端 human seed API 或 CandidateFact review API。
+- 桌面层不得把前端临时状态、sampleData、LLM 输出、导入文本或用户未确认草稿写入 canon。
+- 桌面层可以负责进程启动、健康检查、日志位置、workspace 选择和用户设置，但不能持有绕过 ReviewService 的 canon 写入口。
+- 打包文档必须明确区分 PowerShell 命令与 Windows PowerShell 命令。
+
+验收标准：
+
+- 新用户能通过 README 的安装/启动步骤打开桌面或 Web 工作台。
+- 桌面启动后能显示 API 健康状态，并在后端不可用时给出可恢复错误。
+- 场景生成、Context Pack 检查、连续性报告和待审事实流程与 API/CLI 使用同一 contract。
+- 接受、编辑接受、拒绝或延后 CandidateFact 后，workflow review pause 状态与 `workflow_run_v1` / `review_payload_v1` 保持一致。
+- 重启软件后，配置为持久化的 workspace 不丢失图谱、草稿、候选事实、工作流运行记录和风格样本。
+
 ---
 
 ## 12. 目录结构建议
@@ -1304,7 +1352,7 @@ POST /projects/{project_id}/facts/{fact_id}/edit
 
 - 同一 POV 的多个场景文风更一致。
 
-### Phase 7：Web UI 与桌面壳
+### Phase 7：Web UI 与可安装桌面壳
 
 目标：让作者能以写作工作台方式使用。
 
@@ -1317,7 +1365,19 @@ POST /projects/{project_id}/facts/{fact_id}/edit
 - 简单图谱可视化。
 - LangGraph run panel。
 - Tauri 桌面壳。
+- 完善并验证 Tauri/Rust 桌面工程文件。
+- 本地 FastAPI 后端启动、健康检查、错误恢复和日志定位。
 - 本地数据库路径与模型供应商设置。
+- 持久化 workspace 选择与重启恢复。
+- Windows 安装包或可执行目录打包流程。
+- 当前 CLI、API + Web、桌面入口的使用文档。
+
+验收：
+
+- CLI、本地 API + Web 工作台、桌面入口的用途和限制在 README 中清楚区分。
+- 桌面版能启动同一 React 工作台，并通过 FastAPI 完成所有草稿、检查、抽取和审阅操作。
+- 桌面层没有任何绕过 ReviewService 的 canon 写入路径。
+- 打包产物可在没有开发服务器的情况下启动本地工作台。
 
 ---
 
@@ -1409,6 +1469,30 @@ storygraph review-facts
 ### Task 15
 
 创建一个 `examples/fantasy_project` 作为端到端 demo。
+
+### Task 16
+
+整理当前使用文档，明确 CLI、API + Web 工作台、Tauri 桌面壳三种入口的状态、启动方式和限制。
+
+要求：
+
+- README 必须区分 CLI、API + Web、源码构建桌面安装器和未签名 release artifact。
+- Web 工作台启动文档必须包含 FastAPI 与 Vite 两个进程。
+- CLI workspace 文档必须说明本地持久化路径。
+- `apps/desktop/README.md` 必须说明桌面构建状态、安装器输出路径和桌面层 canon 边界。
+
+### Task 17
+
+实现可安装桌面工作台。
+
+要求：
+
+- 补齐或修正 Tauri/Rust crate、构建脚本、icon/bundle 资源。
+- 桌面启动时自动启动或连接本地 FastAPI 后端。
+- 桌面主界面复用 React/Vite 工作台。
+- 设置页管理 workspace、后端状态、模型供应商、API key 和数据库连接。
+- 打包为 Windows 可运行产物。
+- 所有 canon 变更仍走后端 human seed 或 CandidateFact review API。
 
 ---
 

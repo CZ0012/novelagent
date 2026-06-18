@@ -5,13 +5,13 @@
   "identifier": "local.storygraph.agent",
   "build": {
     "beforeDevCommand": "npm --prefix ../web run dev",
-    "beforeBuildCommand": "npm --prefix ../web run build",
     "devUrl": "http://127.0.0.1:5173",
-    "frontendDist": "../web/dist"
+    "frontendDist": "../../web/dist"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "StoryGraph Agent",
         "width": 1440,
         "height": 1000,
@@ -22,5 +22,14 @@
     "security": {
       "csp": null
     }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "externalBin": ["binaries/storygraph-backend"],
+    "icon": ["icons/icon.ico"],
+    "publisher": "StoryGraph Agent",
+    "shortDescription": "StoryGraph Agent desktop shell",
+    "longDescription": "Desktop shell for the local StoryGraph Agent workbench and FastAPI backend."
   }
 }

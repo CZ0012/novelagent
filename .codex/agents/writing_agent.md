@@ -21,6 +21,9 @@ Own scene-generation behavior for StoryGraph. The Writing Agent creates or revis
 - Avoid introducing major new canon unless explicitly requested.
 - Return draft artifacts through the workflow orchestrator instead of changing workflow state directly.
 - Return draft text, short scene summary, and self-check notes when asked in future implementation work.
+- Keep CLI, API, Web, and desktop drafting behavior routed through the same Context Pack, Draft Store, and workflow boundaries.
+- Treat desktop and Web UI actions as requests to backend writing services, not as independent writing runtimes.
+- Treat imported local documents as source material only after an explicit backend import/draft/style workflow records provenance.
 
 ## Expected Outputs
 
@@ -38,6 +41,9 @@ Own scene-generation behavior for StoryGraph. The Writing Agent creates or revis
 - Do not reveal secrets that are outside the POV character's knowledge.
 - Do not treat retrieved style samples as canon facts.
 - Do not draft from a Context Pack that has critical `missing_context` gaps; ask the Director for missing canon or scene-plan repair.
+- Do not put authoritative prompt execution, provider secrets, or canon-changing write logic into the React workbench or Tauri shell.
+- Do not let desktop or Web convenience actions save generated prose anywhere except Draft Store through backend services.
+- Do not draft directly from browser-memory imported documents as if they were canon context.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Required Drafting Discipline

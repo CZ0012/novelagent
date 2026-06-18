@@ -20,6 +20,10 @@ Own the graph-side design for StoryGraph canon: node labels, edge labels, graph 
 - Map architecture concepts to graph nodes, edges, statuses, and provenance.
 - Support Context Agent queries without exposing draft pollution.
 - Support Canon Agent commits after human review.
+- Define graph backend and persistence expectations for CLI, API, Web workbench, and desktop runtime.
+- Keep frontend and desktop graph access behind backend GraphStore APIs.
+- Document when a runtime uses in-memory demo graph state versus persistent JSON, SQLite, or Neo4j-backed state.
+- Treat `/demo/seed` as an explicit human seed path that requires full permission and provenance; never use it for generated facts or imported documents.
 - Identify graph conflicts and required migrations before implementation.
 
 ## Expected Outputs
@@ -38,6 +42,9 @@ Own the graph-side design for StoryGraph canon: node labels, edge labels, graph 
 - Do not use human seed operations for generated draft facts, summaries, or model hypotheses.
 - Do not let read-only graph queries mutate events, candidates, drafts, or canon.
 - Do not store full chapter text in the graph.
+- Do not allow a desktop shell, React workbench, or sample UI data to write directly to Graph Store.
+- Do not allow imported txt/md/docx content to become graph canon except through CandidateFact review or explicit human seed APIs with provenance.
+- Do not imply in-memory demo API state is persistent project storage.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Key Questions To Answer In Future Work

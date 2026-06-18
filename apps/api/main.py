@@ -2,14 +2,28 @@
 
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from storygraph.core.agent_config import (
+    AgentPermissionLevel,
+    AgentRuntimeConfig,
+    AgentRuntimeConfigUpdate,
+    apply_agent_config,
+    config_response,
+    has_permission,
+    load_agent_config,
+    save_agent_config,
+    update_agent_config,
+)
 from storygraph.core.config import StoryGraphSettings
 from storygraph.core.errors import ContractError, GraphStoreError
 from storygraph.core.ids import new_id, slug_id
 from storygraph.core.time import utc_now
-from storygraph.demo import PROJECT_ID, SCENE_ID
+from storygraph.demo import PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
 from storygraph.models.style import StyleSample
 from storygraph.services import (
     AuthorCanonSeedService,
@@ -17,6 +31,7 @@ from storygraph.services import (
     GraphQueryService,
     ReviewService,
     RuleBasedContinuityChecker,
+    RuleBasedSceneWriter,
     RuleBasedStateExtractor,
     create_scene_writer,
 )
@@ -68,8 +83,17 @@ class StyleSampleRequest(BaseModel):
 
 
 class ReviewRequest(BaseModel):
-    reviewer: str = "author"
+    reviewer: str = Field("author", min_length=1)
     note: str | None = None
+
+
+class DemoSeedRequest(BaseModel):
+    reviewer: str = Field("author", min_length=1)
+    rationale: str = Field(
+        "Author explicitly initialized the bundled fantasy demo.",
+        min_length=1,
+    )
+    source_ref: str = Field("demo:fantasy_project_v1", min_length=1)
 
 
 class DraftRequest(BaseModel):
@@ -83,10 +107,19 @@ class EditAcceptRequest(ReviewRequest):
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     app = FastAPI(title="StoryGraph Agent", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins(),
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     use_persistent_stores = settings is not None
     settings = settings or StoryGraphSettings()
     if use_persistent_stores:
         settings.ensure_workspace()
+    agent_config = load_agent_config(settings)
+    apply_agent_config(settings, agent_config)
     configured_graph = open_configured_graph_store(
         settings,
         default_backend="memory",
@@ -107,7 +140,6 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         settings.style_sample_store_path if use_persistent_stores else ":memory:"
     )
     context_builder = ContextPackBuilder(graph, draft_store, style_sample_store)
-    writer = create_scene_writer(settings, draft_store)
     checker = RuleBasedContinuityChecker()
     extractor = RuleBasedStateExtractor()
     review = ReviewService(candidate_store, graph)
@@ -115,7 +147,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     graph_query = GraphQueryService(graph)
     scene_workflow = SceneGenerationWorkflow(
         context_builder=context_builder,
-        writer=writer,
+        writer=RuleBasedSceneWriter(draft_store),
         checker=checker,
         extractor=extractor,
         workflow_store=workflow_store,
@@ -124,17 +156,59 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         checkpoint_path=str(settings.workflow_checkpoint_path),
     )
 
+    def require_permission(required: AgentPermissionLevel) -> None:
+        if not has_permission(agent_config.permission_level, required):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "category": "permission_denied",
+                    "message": (
+                        f"Agent permission `{agent_config.permission_level}` does not allow "
+                        f"`{required}` operations."
+                    ),
+                },
+            )
+
     @app.get("/health")
     def health() -> dict:
         return {
             "status": "ok",
+            "persistent_stores": use_persistent_stores,
+            "workspace": str(settings.workspace_dir),
+            "graph_backend": configured_graph.backend,
             "workflow_runtime": settings.workflow_runtime,
             "scene_writer": settings.scene_writer,
             "llm_configured": bool(settings.llm_base_url and settings.llm_api_key),
+            "permission_level": agent_config.permission_level,
         }
+
+    @app.get("/settings/agent")
+    def get_agent_settings() -> dict:
+        return _agent_settings_payload(agent_config)
+
+    @app.put("/settings/agent")
+    def put_agent_settings(request: AgentRuntimeConfigUpdate) -> dict:
+        nonlocal agent_config
+        if not has_permission(agent_config.permission_level, request.permission_level):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "category": "permission_denied",
+                    "message": (
+                        "Permission level cannot be raised through the API. "
+                        "Edit the local agent_config.json or restart with an explicit local reset."
+                    ),
+                },
+            )
+        agent_config = update_agent_config(agent_config, request)
+        apply_agent_config(settings, agent_config)
+        if use_persistent_stores:
+            save_agent_config(settings, agent_config)
+        return _agent_settings_payload(agent_config)
 
     @app.post("/projects")
     def create_project(request: CreateProjectRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
         project_id = slug_id("project", request.title)
         try:
             graph.seed_canon_node(
@@ -163,6 +237,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/characters")
     def add_character(project_id: str, request: CharacterSeedRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
         try:
             node = canon_seed.add_character(
                 project_id=project_id,
@@ -180,6 +255,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/locations")
     def add_location(project_id: str, request: LocationSeedRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
         try:
             node = canon_seed.add_location(
                 project_id=project_id,
@@ -197,6 +273,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/relations")
     def add_relation(project_id: str, request: RelationSeedRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
         try:
             relation = canon_seed.add_relation(
                 project_id=project_id,
@@ -216,6 +293,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/style-samples")
     def add_style_sample(project_id: str, request: StyleSampleRequest) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
         try:
             graph.get_node(project_id)
             sample = StyleSample(
@@ -237,6 +315,60 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     @app.get("/demo")
     def demo() -> dict:
         return {"project_id": PROJECT_ID, "scene_id": SCENE_ID}
+
+    @app.post("/demo/seed")
+    def seed_demo(request: DemoSeedRequest | None = None) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        request = request or DemoSeedRequest()
+        demo_graph = build_fantasy_demo_graph()
+        nodes_created = 0
+        relationships_created = 0
+        nodes_skipped: list[str] = []
+        relationships_skipped: list[str] = []
+
+        for node in sorted(demo_graph.nodes.values(), key=lambda item: item.id):
+            try:
+                graph.seed_canon_node(
+                    node_id=node.id,
+                    node_type=node.type,
+                    properties=node.properties,
+                    source_ref=request.source_ref,
+                    reviewer=request.reviewer,
+                    rationale=request.rationale,
+                )
+                nodes_created += 1
+            except GraphStoreError as exc:
+                if exc.category != "duplicate_id":
+                    raise _graph_http_exception(exc) from exc
+                nodes_skipped.append(node.id)
+
+        for relation in sorted(demo_graph.relationships.values(), key=lambda item: item.id):
+            try:
+                graph.seed_canon_relation(
+                    relation_id=relation.id,
+                    relation_type=relation.type,
+                    source_id=relation.source_id,
+                    target_id=relation.target_id,
+                    properties=relation.properties,
+                    source_ref=request.source_ref,
+                    reviewer=request.reviewer,
+                    rationale=request.rationale,
+                )
+                relationships_created += 1
+            except GraphStoreError as exc:
+                if exc.category != "duplicate_id":
+                    raise _graph_http_exception(exc) from exc
+                relationships_skipped.append(relation.id)
+
+        persist_graph()
+        return {
+            "project_id": PROJECT_ID,
+            "scene_id": SCENE_ID,
+            "nodes_created": nodes_created,
+            "relationships_created": relationships_created,
+            "nodes_skipped": nodes_skipped,
+            "relationships_skipped": relationships_skipped,
+        }
 
     @app.get("/projects/{project_id}/graph/query")
     def query_graph(
@@ -265,6 +397,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/draft")
     def write_draft(project_id: str, scene_id: str, request: DraftRequest | None = None) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
         if request and request.text is not None:
             return draft_store.create_draft(
                 project_id=project_id,
@@ -273,7 +406,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 summary=request.summary,
             ).model_dump()
         context_pack = context_builder.build(project_id=project_id, scene_id=scene_id)
-        return writer.write_and_save(context_pack).model_dump()
+        return create_scene_writer(settings, draft_store).write_and_save(context_pack).model_dump()
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/check-continuity")
     def check_continuity(project_id: str, scene_id: str) -> dict:
@@ -285,6 +418,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/extract-state")
     def extract_state(project_id: str, scene_id: str) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
         draft = draft_store.latest_for_scene(project_id, scene_id)
         if draft is None:
             raise HTTPException(status_code=404, detail="No draft for scene")
@@ -297,7 +431,21 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/runs/scene-generation")
     def run_scene_generation(project_id: str, scene_id: str) -> dict:
-        result = scene_workflow.run(project_id=project_id, scene_id=scene_id)
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        workflow = SceneGenerationWorkflow(
+            context_builder=context_builder,
+            writer=create_scene_writer(settings, draft_store),
+            checker=checker,
+            extractor=extractor,
+            workflow_store=workflow_store,
+            review_service=review,
+            runtime_kind=settings.workflow_runtime,
+            checkpoint_path=str(settings.workflow_checkpoint_path),
+        )
+        try:
+            result = workflow.run(project_id=project_id, scene_id=scene_id)
+        finally:
+            workflow.close()
         return {
             "context_pack": result.context_pack.model_dump(),
             "draft": result.draft.model_dump(),
@@ -343,6 +491,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/facts/{fact_id}/accept")
     def accept_fact(project_id: str, fact_id: str, request: ReviewRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
         _ensure_candidate_project(candidate_store, fact_id, project_id)
         try:
             fact = review.accept(fact_id, reviewer=request.reviewer, note=request.note)
@@ -353,6 +502,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/facts/{fact_id}/edit-accept")
     def edit_accept_fact(project_id: str, fact_id: str, request: EditAcceptRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
         _ensure_candidate_project(candidate_store, fact_id, project_id)
         try:
             fact = review.edit_and_accept(
@@ -368,6 +518,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/facts/{fact_id}/reject")
     def reject_fact(project_id: str, fact_id: str, request: ReviewRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
         _ensure_candidate_project(candidate_store, fact_id, project_id)
         try:
             fact = review.reject(fact_id, reviewer=request.reviewer, note=request.note)
@@ -377,6 +528,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/facts/{fact_id}/defer")
     def defer_fact(project_id: str, fact_id: str, request: ReviewRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
         _ensure_candidate_project(candidate_store, fact_id, project_id)
         try:
             fact = review.defer(fact_id, reviewer=request.reviewer, note=request.note)
@@ -416,6 +568,29 @@ def _csv(value: str | None) -> list[str] | None:
     if value is None:
         return None
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _agent_settings_payload(config: AgentRuntimeConfig) -> dict:
+    response = config_response(config).model_dump()
+    response["permission_descriptions"] = {
+        "read_only": "Read canon, drafts, context packs, runs, and pending facts only.",
+        "read_generate": "Read plus generate drafts, checks, extracted candidates, and style samples.",
+        "full": "All local author operations, including human seed and CandidateFact review decisions.",
+    }
+    return response
+
+
+def _cors_origins() -> list[str]:
+    configured = os.environ.get("STORYGRAPH_CORS_ORIGINS")
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    return [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+        "tauri://localhost",
+    ]
 
 
 def _workflow_events(run) -> list[dict]:

@@ -128,6 +128,40 @@ export type SceneRunResult = {
   workflow_run: WorkflowRun;
 };
 
+export type AgentPermissionLevel = "read_only" | "read_generate" | "full";
+
+export type AgentSettings = {
+  scene_writer: "rule_based" | "llm";
+  provider_label: string;
+  llm_base_url: string;
+  llm_model: string;
+  api_key_configured: boolean;
+  api_key_preview?: string | null;
+  llm_json_mode: boolean;
+  permission_level: AgentPermissionLevel;
+  permission_descriptions?: Record<AgentPermissionLevel, string>;
+};
+
+export type AgentSettingsUpdate = {
+  scene_writer: "rule_based" | "llm";
+  provider_label: string;
+  llm_base_url: string;
+  llm_model: string;
+  llm_api_key?: string | null;
+  clear_api_key?: boolean;
+  llm_json_mode: boolean;
+  permission_level: AgentPermissionLevel;
+};
+
+export type DemoSeedResult = {
+  project_id: string;
+  scene_id: string;
+  nodes_created: number;
+  relationships_created: number;
+  nodes_skipped: string[];
+  relationships_skipped: string[];
+};
+
 export async function apiGet<T>(baseUrl: string, path: string): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`);
   return parseResponse<T>(response);
@@ -140,6 +174,19 @@ export async function apiPost<T>(
 ): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     method: "POST",
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  return parseResponse<T>(response);
+}
+
+export async function apiPut<T>(
+  baseUrl: string,
+  path: string,
+  body?: unknown
+): Promise<T> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "PUT",
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body)
   });

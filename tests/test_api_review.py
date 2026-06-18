@@ -45,6 +45,18 @@ def test_api_edit_accept_review_action():
     assert payload["proposed_graph_patch"]["properties"]["review_note"] == "edited before canon commit"
 
 
+def test_api_review_rejects_empty_reviewer():
+    client = TestClient(create_app())
+    fact_id = _create_candidate(client, "fact_api_empty_reviewer")
+
+    response = client.post(
+        f"/projects/{PROJECT_ID}/facts/{fact_id}/accept",
+        json={"reviewer": ""},
+    )
+
+    assert response.status_code == 422
+
+
 def _create_candidate(client: TestClient, fact_id: str) -> str:
     marker = (
         f"[[fact:id={fact_id};fact_type=ItemState;subject={ITEM_ID};"
@@ -61,4 +73,3 @@ def _create_candidate(client: TestClient, fact_id: str) -> str:
     candidates = extract_response.json()["candidates"]
     assert len(candidates) == 1
     return candidates[0]["id"]
-

@@ -12,6 +12,8 @@ The project has moved from instruction and contract setup into MVP implementatio
 
 Application source files are allowed when they are explicitly aligned with `docs/architecture.md` and the versioned contracts under `contracts/`. Keep implementation scoped to the StoryGraph Agent architecture and preserve the canon safety rules below.
 
+Current user-facing runtime status must stay explicit: this MVP can be run through the local CLI, FastAPI + React/Vite, and a source-built Tauri desktop package. `apps/desktop` can produce local Windows executable and NSIS installer outputs, but those outputs are not checked-in, signed, or published release artifacts.
+
 ## Architecture Source
 
 The architecture source of truth is:
@@ -36,7 +38,7 @@ Use the Director as the coordination layer. The Director should split work, conf
 ## Canon Safety Rules
 
 - The Graph Store is the source of truth for canon state.
-- Draft text, generated summaries, and model hypotheses must not directly mutate canon.
+- Draft text, generated summaries, imported documents, and model hypotheses must not directly mutate canon.
 - Automated extraction may only produce `CandidateFact` records or proposed graph patches.
 - A candidate fact becomes canon only after explicit human review.
 - Every canon write must have provenance: source scene, source draft, rationale, reviewer decision, and event log entry.
@@ -54,6 +56,8 @@ Use the Director as the coordination layer. The Director should split work, conf
 - Prefer precise Markdown over implementation sketches.
 - JSON examples are allowed in contract documents, but they are illustrative unless explicitly marked as required.
 - Avoid unrelated code files; implementation should stay scoped to the MVP architecture and versioned contracts.
+- When changing local usage, runtime startup, or desktop packaging behavior, update `README.md`, `docs/architecture.md`, `apps/desktop/README.md`, and affected subagent instructions in the same task.
+- Keep CLI, API + Web, source-built desktop, and signed release usage instructions distinct. The desktop shell must be documented as a host for the same backend workflow, not as a separate canon-writing path.
 
 ## Shell And File Writing Notes
 

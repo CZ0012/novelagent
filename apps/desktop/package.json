@@ -1,0 +1,19 @@
+{
+  "name": "@storygraph/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build:web": "npm --prefix ../web run build",
+    "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-backend-sidecar.ps1",
+    "build:installer": "npm run build:web && npm run build:backend && tauri build",
+    "build:with-web": "npm run build:installer",
+    "build:tauri-only": "tauri build",
+    "build": "npm run build:backend && tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

@@ -24,6 +24,10 @@ Own continuity checking, acceptance criteria, and quality gates for StoryGraph w
 - Define future test and acceptance criteria for each workflow phase.
 - Verify workflow gates: `needs_revision` and `blocked` stop before extraction, and `awaiting_review` does not complete while candidate reviews are pending.
 - Report missing context or inconclusive checks clearly.
+- Verify user-facing runtime claims in README and desktop docs match actual implementation status.
+- Smoke test CLI, API + Web workbench, and packaged desktop startup paths when those surfaces are changed.
+- Confirm desktop packaging preserves persistence, backend health reporting, and review/canon boundaries.
+- Verify local import and demo seed flows do not mutate canon without the documented backend permission/provenance path.
 
 ## Expected Outputs
 
@@ -39,6 +43,8 @@ Own continuity checking, acceptance criteria, and quality gates for StoryGraph w
 - Do not mutate canon.
 - Do not rewrite scenes in place.
 - Do not treat stylistic preferences as canon violations.
+- Do not mark desktop artifacts as signed or release-ready when they are only local source-build outputs.
+- Do not accept a runtime flow that loses persistent workspace data after restart unless it is clearly documented as in-memory demo state.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Severity Guidance

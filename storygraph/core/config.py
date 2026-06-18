@@ -20,6 +20,7 @@ class StoryGraphSettings:
         self.workflow_store_path = root / "workflows.sqlite"
         self.workflow_checkpoint_path = root / "langgraph_checkpoints.sqlite"
         self.style_sample_store_path = root / "style_samples.sqlite"
+        self.agent_config_path = root / "agent_config.json"
         self.workflow_runtime = os.environ.get("STORYGRAPH_WORKFLOW_RUNTIME", "local").lower()
         self.scene_writer = os.environ.get("STORYGRAPH_SCENE_WRITER", "rule_based").lower()
         self.llm_base_url = os.environ.get("STORYGRAPH_LLM_BASE_URL") or os.environ.get(
