@@ -44,6 +44,16 @@ $env:STORYGRAPH_NEO4J_PASSWORD="password"
 python -m pytest tests/test_graph_neo4j_integration.py
 ```
 
+The local CLI uses the JSON graph backend by default. API runs use the seeded in-memory demo graph unless `STORYGRAPH_GRAPH_BACKEND` is set. To point API/CLI runtime graph operations at Neo4j, set:
+
+```powershell
+$env:STORYGRAPH_GRAPH_BACKEND="neo4j"
+$env:STORYGRAPH_NEO4J_URI="bolt://localhost:7687"
+$env:STORYGRAPH_NEO4J_USER="neo4j"
+$env:STORYGRAPH_NEO4J_PASSWORD="password"
+$env:STORYGRAPH_NEO4J_DATABASE="neo4j"
+```
+
 ## Demo CLI
 
 ```powershell

@@ -5,10 +5,11 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from storygraph.core.config import StoryGraphSettings
 from storygraph.core.errors import ContractError, GraphStoreError
 from storygraph.core.ids import new_id, slug_id
 from storygraph.core.time import utc_now
-from storygraph.demo import PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
+from storygraph.demo import PROJECT_ID, SCENE_ID
 from storygraph.models.style import StyleSample
 from storygraph.services import (
     AuthorCanonSeedService,
@@ -20,6 +21,7 @@ from storygraph.services import (
     RuleBasedStateExtractor,
 )
 from storygraph.stores import CandidateStore, SQLiteCandidateStore, SQLiteDraftStore, SQLiteStyleSampleStore
+from storygraph.stores.graph_factory import open_configured_graph_store, save_configured_graph_store
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
 from storygraph.workflows import SceneGenerationWorkflow
 
@@ -79,9 +81,18 @@ class EditAcceptRequest(ReviewRequest):
     patch_properties: dict = Field(default_factory=dict)
 
 
-def create_app() -> FastAPI:
+def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     app = FastAPI(title="StoryGraph Agent", version="0.1.0")
-    graph = build_fantasy_demo_graph()
+    settings = settings or StoryGraphSettings()
+    configured_graph = open_configured_graph_store(
+        settings,
+        default_backend="memory",
+        seed_demo=True,
+    )
+    graph = configured_graph.graph
+
+    def persist_graph() -> None:
+        save_configured_graph_store(configured_graph, settings)
     draft_store = SQLiteDraftStore()
     candidate_store = SQLiteCandidateStore()
     workflow_store = SQLiteWorkflowStore()
@@ -124,6 +135,7 @@ def create_app() -> FastAPI:
             )
         except GraphStoreError as exc:
             raise _graph_http_exception(exc) from exc
+        persist_graph()
         return {"project_id": project_id}
 
     @app.get("/projects/{project_id}")
@@ -136,7 +148,7 @@ def create_app() -> FastAPI:
     @app.post("/projects/{project_id}/characters")
     def add_character(project_id: str, request: CharacterSeedRequest) -> dict:
         try:
-            return canon_seed.add_character(
+            node = canon_seed.add_character(
                 project_id=project_id,
                 node_id=request.id,
                 name=request.name,
@@ -144,14 +156,16 @@ def create_app() -> FastAPI:
                 reviewer=request.reviewer,
                 rationale=request.rationale,
                 source_ref=request.source_ref,
-            ).model_dump()
+            )
+            persist_graph()
+            return node.model_dump()
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
     @app.post("/projects/{project_id}/locations")
     def add_location(project_id: str, request: LocationSeedRequest) -> dict:
         try:
-            return canon_seed.add_location(
+            node = canon_seed.add_location(
                 project_id=project_id,
                 node_id=request.id,
                 name=request.name,
@@ -159,14 +173,16 @@ def create_app() -> FastAPI:
                 reviewer=request.reviewer,
                 rationale=request.rationale,
                 source_ref=request.source_ref,
-            ).model_dump()
+            )
+            persist_graph()
+            return node.model_dump()
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
     @app.post("/projects/{project_id}/relations")
     def add_relation(project_id: str, request: RelationSeedRequest) -> dict:
         try:
-            return canon_seed.add_relation(
+            relation = canon_seed.add_relation(
                 project_id=project_id,
                 relation_id=request.id,
                 relation_type=request.type,
@@ -176,7 +192,9 @@ def create_app() -> FastAPI:
                 reviewer=request.reviewer,
                 rationale=request.rationale,
                 source_ref=request.source_ref,
-            ).model_dump()
+            )
+            persist_graph()
+            return relation.model_dump()
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
@@ -299,6 +317,7 @@ def create_app() -> FastAPI:
             fact = review.accept(fact_id, reviewer=request.reviewer, note=request.note)
         except ContractError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        persist_graph()
         return fact.model_dump()
 
     @app.post("/projects/{project_id}/facts/{fact_id}/edit-accept")
@@ -313,6 +332,7 @@ def create_app() -> FastAPI:
             )
         except ContractError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        persist_graph()
         return fact.model_dump()
 
     @app.post("/projects/{project_id}/facts/{fact_id}/reject")

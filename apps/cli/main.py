@@ -29,6 +29,13 @@ from storygraph.services import (
     RuleBasedStateExtractor,
 )
 from storygraph.stores import SQLiteCandidateStore, SQLiteDraftStore, SQLiteStyleSampleStore
+from storygraph.stores.graph_base import GraphStore
+from storygraph.stores.graph_factory import (
+    ConfiguredGraphStore,
+    close_configured_graph_store,
+    open_configured_graph_store,
+    save_configured_graph_store,
+)
 from storygraph.stores.json_graph import load_json_graph, save_json_graph
 from storygraph.stores.memory_graph import InMemoryGraphStore
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
@@ -38,7 +45,8 @@ from storygraph.workflows import SceneGenerationWorkflow
 @dataclass
 class CliRuntime:
     settings: StoryGraphSettings
-    graph: InMemoryGraphStore
+    graph: GraphStore
+    graph_backend: str
     draft_store: SQLiteDraftStore
     candidate_store: SQLiteCandidateStore
     workflow_store: SQLiteWorkflowStore
@@ -54,25 +62,37 @@ class CliRuntime:
         ]:
             with suppress(Exception):
                 store.close()
+        with suppress(Exception):
+            close_configured_graph_store(
+                ConfiguredGraphStore(graph=self.graph, backend=self.graph_backend)
+            )
 
 
 def _runtime(workspace: str | Path | None = None) -> CliRuntime:
     settings = StoryGraphSettings(workspace)
     settings.ensure_workspace()
-    graph = load_json_graph(settings.graph_path)
+    configured_graph = open_configured_graph_store(settings)
     draft_store = SQLiteDraftStore(settings.draft_store_path)
     candidate_store = SQLiteCandidateStore(settings.candidate_store_path)
     workflow_store = SQLiteWorkflowStore(settings.workflow_store_path)
     style_sample_store = SQLiteStyleSampleStore(settings.style_sample_store_path)
-    review = ReviewService(candidate_store, graph)
+    review = ReviewService(candidate_store, configured_graph.graph)
     return CliRuntime(
         settings=settings,
-        graph=graph,
+        graph=configured_graph.graph,
+        graph_backend=configured_graph.backend,
         draft_store=draft_store,
         candidate_store=candidate_store,
         workflow_store=workflow_store,
         style_sample_store=style_sample_store,
         review=review,
+    )
+
+
+def _save_runtime_graph(runtime: CliRuntime) -> None:
+    save_configured_graph_store(
+        ConfiguredGraphStore(graph=runtime.graph, backend=runtime.graph_backend),
+        runtime.settings,
     )
 
 
@@ -275,7 +295,7 @@ def add_character_command(
             rationale=rationale,
             source_ref=source_ref,
         )
-        save_json_graph(runtime.graph, runtime.settings.graph_path)
+        _save_runtime_graph(runtime)
         return node.model_dump()
     finally:
         runtime.close()
@@ -303,7 +323,7 @@ def add_location_command(
             rationale=rationale,
             source_ref=source_ref,
         )
-        save_json_graph(runtime.graph, runtime.settings.graph_path)
+        _save_runtime_graph(runtime)
         return node.model_dump()
     finally:
         runtime.close()
@@ -335,7 +355,7 @@ def add_relation_command(
             rationale=rationale,
             source_ref=source_ref,
         )
-        save_json_graph(runtime.graph, runtime.settings.graph_path)
+        _save_runtime_graph(runtime)
         return relation.model_dump()
     finally:
         runtime.close()
@@ -497,7 +517,7 @@ def review_facts_command(
         candidate_id = fact_id or _single_pending_fact_id(runtime, project_id)
         if action == "accept":
             fact = runtime.review.accept(candidate_id, reviewer=reviewer, note=note)
-            save_json_graph(runtime.graph, runtime.settings.graph_path)
+            _save_runtime_graph(runtime)
         elif action == "edit-accept":
             patch_properties = json.loads(patch_json or "{}")
             if not isinstance(patch_properties, dict):
@@ -508,7 +528,7 @@ def review_facts_command(
                 patch_properties=patch_properties,
                 note=note,
             )
-            save_json_graph(runtime.graph, runtime.settings.graph_path)
+            _save_runtime_graph(runtime)
         elif action == "reject":
             fact = runtime.review.reject(candidate_id, reviewer=reviewer, note=note)
         elif action == "defer":
