@@ -18,7 +18,9 @@ class StoryGraphSettings:
         self.draft_store_path = root / "drafts.sqlite"
         self.candidate_store_path = root / "candidates.sqlite"
         self.workflow_store_path = root / "workflows.sqlite"
+        self.workflow_checkpoint_path = root / "langgraph_checkpoints.sqlite"
         self.style_sample_store_path = root / "style_samples.sqlite"
+        self.workflow_runtime = os.environ.get("STORYGRAPH_WORKFLOW_RUNTIME", "local").lower()
         self.graph_backend_explicit = "STORYGRAPH_GRAPH_BACKEND" in os.environ
         self.graph_backend = os.environ.get("STORYGRAPH_GRAPH_BACKEND", "json").lower()
         self.neo4j_uri = os.environ.get("STORYGRAPH_NEO4J_URI")

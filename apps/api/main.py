@@ -120,11 +120,13 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         extractor=extractor,
         workflow_store=workflow_store,
         review_service=review,
+        runtime_kind=settings.workflow_runtime,
+        checkpoint_path=str(settings.workflow_checkpoint_path),
     )
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok"}
+        return {"status": "ok", "workflow_runtime": settings.workflow_runtime}
 
     @app.post("/projects")
     def create_project(request: CreateProjectRequest) -> dict:

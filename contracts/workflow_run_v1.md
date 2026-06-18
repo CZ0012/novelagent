@@ -4,11 +4,11 @@
 
 `workflow_run_v1` defines the persisted state of a StoryGraph workflow run.
 
-The MVP stores LangGraph-shaped checkpoints locally so scene generation can be inspected, paused for human review, and resumed. This contract is the boundary for API, CLI, workbench, and future LangGraph runtime integration.
+The MVP stores workflow projections locally so scene generation can be inspected, paused for human review, and resumed. This contract is the boundary for API, CLI, workbench, the dependency-free local runtime, and the optional LangGraph runtime/checkpointer.
 
 ## Producers And Consumers
 
-- Primary producer: Director / workflow orchestrator.
+- Primary producer: Director / workflow orchestrator using either the local runtime or optional LangGraph runtime.
 - Primary consumers: API run endpoints, CLI/workbench run panels, Canon Agent review flow, QA Agent.
 - Related contracts: `review_payload_v1`, `context_pack_v1`, `continuity_report_v1`, `candidate_fact_v1`.
 
@@ -93,6 +93,7 @@ When a run has `status = awaiting_review`, `review_payload.status` must be `pend
 ## Invariants
 
 - Workflow state is operational state, not canon.
+- LangGraph checkpoints, when enabled, are operational checkpoints and must not be treated as graph canon.
 - A workflow run must not directly mutate graph canon.
 - `needs_revision` and `blocked` runs must not proceed to state extraction.
 - State extraction may only produce `CandidateFact` records.

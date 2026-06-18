@@ -481,8 +481,13 @@ def run_scene_command(
             extractor=RuleBasedStateExtractor(),
             workflow_store=runtime.workflow_store,
             review_service=runtime.review,
+            runtime_kind=runtime.settings.workflow_runtime,
+            checkpoint_path=str(runtime.settings.workflow_checkpoint_path),
         )
-        result = workflow.run(project_id=project_id, scene_id=scene_id)
+        try:
+            result = workflow.run(project_id=project_id, scene_id=scene_id)
+        finally:
+            workflow.close()
         return {
             "context_pack": result.context_pack.model_dump(),
             "draft": result.draft.model_dump(),

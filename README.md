@@ -23,7 +23,7 @@ Current MVP capabilities:
 - Review service that keeps candidate facts pending until a human accept/edit decision commits them to canon.
 - Minimal FastAPI and CLI entry points.
 - Local CLI workspace commands for context building, scene drafting, continuity checks, state extraction, workflow runs, and pending fact review.
-- Workflow run checkpoints with API run listing, run event inspection, persisted settings-backed stores, and review-pause resume.
+- Workflow run checkpoints with API run listing, run event inspection, persisted settings-backed stores, review-pause resume, and optional LangGraph runtime/checkpointer support.
 - Explicit human seed commands and API routes for story-bible Characters, Locations, and graph relationships.
 - Read-only graph query API and CLI surfaces for inspecting canon neighbors and relationships.
 - Local deterministic style sample store feeding `ContextPack.retrieved_style_samples`.
@@ -68,6 +68,21 @@ $env:STORYGRAPH_NEO4J_USER="neo4j"
 $env:STORYGRAPH_NEO4J_PASSWORD="password"
 $env:STORYGRAPH_NEO4J_DATABASE="neo4j"
 ```
+
+Scene workflows use the dependency-free local runtime by default:
+
+```powershell
+$env:STORYGRAPH_WORKFLOW_RUNTIME="local"
+```
+
+To run the same `scene_generation` flow through a real LangGraph `StateGraph` with SQLite checkpoints, install the optional extra and set:
+
+```powershell
+python -m pip install -e ".[langgraph]"
+$env:STORYGRAPH_WORKFLOW_RUNTIME="langgraph"
+```
+
+LangGraph checkpoints are stored at `langgraph_checkpoints.sqlite` inside the StoryGraph workspace. Public API/CLI run panels still read the stable `workflow_run_v1` projection from `workflows.sqlite`; canon writes remain gated by explicit ReviewService decisions.
 
 ## Demo CLI
 
