@@ -40,10 +40,15 @@ import {
   AgentSettings,
   AgentSettingsUpdate,
   CandidateFact,
+  ChapterOutline,
   ContextPack,
   ContinuityReport,
   DemoSeedResult,
   Draft,
+  GraphNodePayload,
+  ProjectGraphPreview,
+  ProjectOutline,
+  SceneOutline,
   SceneRunResult,
   WorkflowRun,
   WorkflowStep,
@@ -51,15 +56,8 @@ import {
   apiPost,
   apiPut
 } from "./api";
-import { demoProject } from "./sampleData";
 import { APP_VERSION, GITHUB_LATEST_RELEASE_API } from "./version";
 import "./styles.css";
-
-const defaultDraft = `雨停之后，林瑾登上了旧钟楼。
-
-钟提前响了。那声音太干净，也太刻意，像有人把信号送进石头深处。
-
-他在钟架下方发现半枚黑色火漆，压在灰尘里。赫连雅看过来之前，他已经把它攥进掌心，也把骤然变重的怀疑藏了起来。`;
 
 type InspectorTab = "context" | "continuity" | "facts" | "settings";
 type LibraryDocumentKind = "txt" | "md" | "docx";
@@ -91,6 +89,49 @@ type ImportSummary = {
   documents: LibraryDocument[];
   skipped: number;
   failed: number;
+};
+
+type ProjectForm = {
+  title: string;
+  genre: string;
+  language: string;
+  target_length: string;
+  narrative_pov: string;
+};
+
+type ChapterForm = {
+  title: string;
+  chapter_index: string;
+  summary: string;
+};
+
+type SceneForm = {
+  chapter_id: string;
+  title: string;
+  scene_index: string;
+  pov_character_id: string;
+  location_id: string;
+  timeline_position: string;
+  goal: string;
+  conflict: string;
+  must_include: string;
+  must_not_violate: string;
+};
+
+type CharacterForm = {
+  name: string;
+  role: string;
+};
+
+type LocationForm = {
+  name: string;
+  type: string;
+};
+
+type WorldRuleForm = {
+  domain: string;
+  rule: string;
+  severity: string;
 };
 
 type UpdateStatus = {
@@ -129,23 +170,75 @@ const defaultAgentForm: AgentSettingsUpdate = {
   permission_level: "full"
 };
 
+const defaultProjectForm: ProjectForm = {
+  title: "",
+  genre: "fantasy",
+  language: "zh-CN",
+  target_length: "",
+  narrative_pov: "第三人称有限视角"
+};
+
+const defaultChapterForm: ChapterForm = {
+  title: "",
+  chapter_index: "1",
+  summary: ""
+};
+
+const defaultSceneForm: SceneForm = {
+  chapter_id: "",
+  title: "",
+  scene_index: "1",
+  pov_character_id: "",
+  location_id: "",
+  timeline_position: "",
+  goal: "",
+  conflict: "",
+  must_include: "",
+  must_not_violate: ""
+};
+
+const defaultCharacterForm: CharacterForm = {
+  name: "",
+  role: ""
+};
+
+const defaultLocationForm: LocationForm = {
+  name: "",
+  type: ""
+};
+
+const defaultWorldRuleForm: WorldRuleForm = {
+  domain: "",
+  rule: "",
+  severity: "medium"
+};
+
 export default function App() {
   const [apiBase, setApiBase] = useState("http://127.0.0.1:8000");
-  const [projectId, setProjectId] = useState(demoProject.projectId);
-  const [sceneId, setSceneId] = useState(demoProject.sceneId);
+  const [projects, setProjects] = useState<ProjectOutline[]>([]);
+  const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
+  const [projectId, setProjectId] = useState("");
+  const [sceneId, setSceneId] = useState("");
   const [activeTab, setActiveTab] = useState<InspectorTab>("context");
   const [contextPack, setContextPack] = useState<ContextPack | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [draftText, setDraftText] = useState(defaultDraft);
-  const [draftSummary, setDraftSummary] = useState("林瑾发现钟楼线索，但尚未得知血脉秘密。");
+  const [draftText, setDraftText] = useState("");
+  const [draftSummary, setDraftSummary] = useState("");
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [runEvents, setRunEvents] = useState<WorkflowStep[]>([]);
   const [continuityReport, setContinuityReport] = useState<ContinuityReport | null>(null);
   const [facts, setFacts] = useState<CandidateFact[]>([]);
+  const [graphPreview, setGraphPreview] = useState<ProjectGraphPreview | null>(null);
   const [agentSettings, setAgentSettings] = useState<AgentSettings | null>(null);
   const [agentForm, setAgentForm] = useState<AgentSettingsUpdate>(defaultAgentForm);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [clearApiKey, setClearApiKey] = useState(false);
+  const [projectForm, setProjectForm] = useState<ProjectForm>(defaultProjectForm);
+  const [chapterForm, setChapterForm] = useState<ChapterForm>(defaultChapterForm);
+  const [sceneForm, setSceneForm] = useState<SceneForm>(defaultSceneForm);
+  const [characterForm, setCharacterForm] = useState<CharacterForm>(defaultCharacterForm);
+  const [locationForm, setLocationForm] = useState<LocationForm>(defaultLocationForm);
+  const [worldRuleForm, setWorldRuleForm] = useState<WorldRuleForm>(defaultWorldRuleForm);
   const [desktopUpdate, setDesktopUpdate] = useState<TauriUpdate | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
     state: "idle",
@@ -160,8 +253,18 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === projectId) ?? null,
+    [projectId, projects]
+  );
+  const selectedScene = useMemo(
+    () => findScene(projects, projectId, sceneId),
+    [projectId, projects, sceneId]
+  );
+  const hasWorkspace = projects.length > 0;
+  const hasScene = Boolean(projectId && sceneId);
   const endpoint = useMemo(
-    () => `/projects/${projectId}/scenes/${sceneId}`,
+    () => (projectId && sceneId ? `/projects/${projectId}/scenes/${sceneId}` : ""),
     [projectId, sceneId]
   );
   const libraryTree = useMemo(
@@ -249,12 +352,84 @@ export default function App() {
     setNotice("本地资料已清空，canon（正典）未改变。");
   }, []);
 
+  const refreshWorkspace = useCallback(
+    async (preferredProjectId?: string, preferredSceneId?: string) => {
+      const payload = await apiGet<{ projects: ProjectOutline[] }>(apiBase, "/projects");
+      const nextProjects = payload.projects;
+      setProjects(nextProjects);
+      setWorkspaceLoaded(true);
+
+      if (!nextProjects.length) {
+        setProjectId("");
+        setSceneId("");
+        setContextPack(null);
+        setDraft(null);
+        setDraftText("");
+        setDraftSummary("");
+        setRun(null);
+        setRunEvents([]);
+        setContinuityReport(null);
+        setGraphPreview(null);
+        return { projectId: "", sceneId: "" };
+      }
+
+      const nextProject =
+        nextProjects.find((project) => project.id === preferredProjectId) ?? nextProjects[0];
+      const availableScenes = flattenScenes(nextProject);
+      const nextScene =
+        availableScenes.find((scene) => scene.id === preferredSceneId) ?? availableScenes[0] ?? null;
+      setProjectId(nextProject.id);
+      setSceneId(nextScene?.id ?? "");
+      return { projectId: nextProject.id, sceneId: nextScene?.id ?? "" };
+    },
+    [apiBase]
+  );
+
+  const refreshGraphPreview = useCallback(
+    async (targetProjectId = projectId) => {
+      if (!targetProjectId) {
+        setGraphPreview(null);
+        return;
+      }
+      const preview = await apiGet<ProjectGraphPreview>(
+        apiBase,
+        `/projects/${targetProjectId}/graph/preview`
+      );
+      setGraphPreview(preview);
+    },
+    [apiBase, projectId]
+  );
+
+  const refreshLatestDraft = useCallback(
+    async (targetProjectId = projectId, targetSceneId = sceneId) => {
+      if (!targetProjectId || !targetSceneId) {
+        setDraft(null);
+        setDraftText("");
+        setDraftSummary("");
+        return;
+      }
+      const payload = await apiGet<{ draft: Draft | null }>(
+        apiBase,
+        `/projects/${targetProjectId}/scenes/${targetSceneId}/draft`
+      );
+      setDraft(payload.draft);
+      setDraftText(payload.draft?.text ?? "");
+      setDraftSummary(payload.draft?.summary ?? "");
+    },
+    [apiBase, projectId, sceneId]
+  );
+
   const refreshFacts = useCallback(async () => {
+    if (!projectId) {
+      setFacts([]);
+      return [];
+    }
     const payload = await apiGet<{ facts: CandidateFact[] }>(
       apiBase,
       `/projects/${projectId}/facts/pending`
     );
     setFacts(payload.facts);
+    return payload.facts;
   }, [apiBase, projectId]);
 
   const refreshAgentSettings = useCallback(async () => {
@@ -422,27 +597,202 @@ export default function App() {
     }
   }, [desktopUpdate]);
 
+  const createProject = useCallback(async () => {
+    if (!projectForm.title.trim()) {
+      throw new Error("请先填写小说项目名称。");
+    }
+    const result = await apiPost<{ project_id: string }>(apiBase, "/projects", {
+      title: projectForm.title.trim(),
+      genre: projectForm.genre.trim() || "fiction",
+      language: projectForm.language.trim() || "zh-CN",
+      target_length: projectForm.target_length.trim() || null,
+      narrative_pov: projectForm.narrative_pov.trim() || null
+    });
+    setProjectForm(defaultProjectForm);
+    await refreshWorkspace(result.project_id);
+    await refreshGraphPreview(result.project_id);
+    setNotice("项目已创建。继续添加章节、场景和基础 canon。");
+  }, [apiBase, projectForm, refreshGraphPreview, refreshWorkspace]);
+
+  const createChapter = useCallback(async () => {
+    if (!projectId) throw new Error("请先选择或创建项目。");
+    if (!chapterForm.title.trim()) throw new Error("请填写章节标题。");
+    await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/chapters`, {
+      title: chapterForm.title.trim(),
+      chapter_index: toPositiveInteger(chapterForm.chapter_index, 1),
+      summary: chapterForm.summary.trim() || null,
+      reviewer: "author",
+      rationale: "作者从工作台创建章节。",
+      source_ref: "author_seed:workbench_outline"
+    });
+    setChapterForm((current) => ({
+      ...defaultChapterForm,
+      chapter_index: String(toPositiveInteger(current.chapter_index, 1) + 1)
+    }));
+    await refreshWorkspace(projectId, sceneId);
+    await refreshGraphPreview(projectId);
+    setNotice("章节已写入 canon seed。");
+  }, [apiBase, chapterForm, projectId, refreshGraphPreview, refreshWorkspace, sceneId]);
+
+  const createScene = useCallback(async () => {
+    if (!projectId) throw new Error("请先选择或创建项目。");
+    const targetChapterId = sceneForm.chapter_id || selectedProject?.chapters[0]?.id || "";
+    if (!targetChapterId) throw new Error("请先选择章节。");
+    if (!sceneForm.title.trim()) throw new Error("请填写场景标题。");
+    const result = await apiPost<GraphNodePayload>(
+      apiBase,
+      `/projects/${projectId}/chapters/${targetChapterId}/scenes`,
+      {
+        title: sceneForm.title.trim(),
+        scene_index: toPositiveInteger(sceneForm.scene_index, 1),
+        pov_character_id: sceneForm.pov_character_id.trim() || null,
+        location_id: sceneForm.location_id.trim() || null,
+        timeline_position: sceneForm.timeline_position.trim() || null,
+        goal: sceneForm.goal.trim() || null,
+        conflict: sceneForm.conflict.trim() || null,
+        required_characters: splitLines(sceneForm.pov_character_id),
+        must_include: splitLines(sceneForm.must_include),
+        must_not_violate: splitLines(sceneForm.must_not_violate),
+        status: "planned",
+        reviewer: "author",
+        rationale: "作者从工作台创建场景。",
+        source_ref: "author_seed:workbench_outline"
+      }
+    );
+    setSceneForm((current) => ({
+      ...defaultSceneForm,
+      chapter_id: current.chapter_id,
+      scene_index: String(toPositiveInteger(current.scene_index, 1) + 1)
+    }));
+    await refreshWorkspace(projectId, result.id);
+    await refreshGraphPreview(projectId);
+    setNotice("场景已创建，可保存草稿或运行 Agent 工作流。");
+  }, [apiBase, projectId, refreshGraphPreview, refreshWorkspace, sceneForm, selectedProject]);
+
+  const createCharacter = useCallback(async () => {
+    if (!projectId) throw new Error("请先选择或创建项目。");
+    if (!characterForm.name.trim()) throw new Error("请填写人物名称。");
+    await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/characters`, {
+      name: characterForm.name.trim(),
+      properties: { role: characterForm.role.trim() || undefined },
+      reviewer: "author",
+      rationale: "作者从工作台创建人物。",
+      source_ref: "author_seed:workbench_story_bible"
+    });
+    setCharacterForm(defaultCharacterForm);
+    await refreshGraphPreview(projectId);
+    setNotice("人物已写入 canon seed。可把生成的 character_id 填到场景视角中。");
+  }, [apiBase, characterForm, projectId, refreshGraphPreview]);
+
+  const createLocation = useCallback(async () => {
+    if (!projectId) throw new Error("请先选择或创建项目。");
+    if (!locationForm.name.trim()) throw new Error("请填写地点名称。");
+    await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/locations`, {
+      name: locationForm.name.trim(),
+      properties: { type: locationForm.type.trim() || undefined },
+      reviewer: "author",
+      rationale: "作者从工作台创建地点。",
+      source_ref: "author_seed:workbench_story_bible"
+    });
+    setLocationForm(defaultLocationForm);
+    await refreshGraphPreview(projectId);
+    setNotice("地点已写入 canon seed。");
+  }, [apiBase, locationForm, projectId, refreshGraphPreview]);
+
+  const createWorldRule = useCallback(async () => {
+    if (!projectId) throw new Error("请先选择或创建项目。");
+    if (!worldRuleForm.domain.trim() || !worldRuleForm.rule.trim()) {
+      throw new Error("请填写规则领域和规则内容。");
+    }
+    await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/world-rules`, {
+      domain: worldRuleForm.domain.trim(),
+      rule: worldRuleForm.rule.trim(),
+      severity: worldRuleForm.severity,
+      reviewer: "author",
+      rationale: "作者从工作台创建世界规则。",
+      source_ref: "author_seed:workbench_story_bible"
+    });
+    setWorldRuleForm(defaultWorldRuleForm);
+    await refreshGraphPreview(projectId);
+    setNotice("世界规则已写入 canon seed。");
+  }, [apiBase, projectId, refreshGraphPreview, worldRuleForm]);
+
+  const saveDocumentAsDraft = useCallback(
+    async (document: LibraryDocument) => {
+      if (!endpoint) throw new Error("请先创建并选择一个场景。");
+      if (document.status !== "ready") throw new Error("这个文档还不能保存为草稿。");
+      const saved = await apiPost<Draft>(apiBase, `${endpoint}/draft`, {
+        text: document.content,
+        summary: `从本地导入文档“${document.name}”设为当前场景草稿。`
+      });
+      setDraft(saved);
+      setDraftText(saved.text);
+      setDraftSummary(saved.summary ?? "");
+      setNotice(`已把“${document.name}”保存为草稿 v${saved.version}；canon 未改变。`);
+      return saved;
+    },
+    [apiBase, endpoint]
+  );
+
+  const saveDocumentAsStyleSample = useCallback(
+    async (document: LibraryDocument) => {
+      if (!projectId) throw new Error("请先创建并选择项目。");
+      if (document.status !== "ready") throw new Error("这个文档还不能保存为风格样本。");
+      await apiPost(apiBase, `/projects/${projectId}/style-samples`, {
+        text: document.content,
+        source_ref: `import:${document.path}::${document.id}`,
+        pov: contextPack?.style_constraints.pov ?? null,
+        tone: contextPack?.style_constraints.tone ?? null,
+        dialogue_style: contextPack?.style_constraints.dialogue_style ?? null,
+        tags: ["import"],
+        summary: `本地导入风格样本：${document.name}`
+      });
+      setNotice(`“${document.name}”已保存为风格样本；它只会作为 P6 软参考。`);
+    },
+    [apiBase, contextPack, projectId]
+  );
+
+  const saveDocumentAsDraftAndExtract = useCallback(
+    async (document: LibraryDocument) => {
+      await saveDocumentAsDraft(document);
+      const payload = await apiPost<{ candidates: CandidateFact[] }>(
+        apiBase,
+        `${endpoint}/extract-state`
+      );
+      await refreshFacts();
+      setActiveTab("facts");
+      setNotice(
+        payload.candidates.length
+          ? `已生成 ${payload.candidates.length} 条待审候选事实；canon 尚未改变。`
+          : "草稿已保存，未抽取到候选事实；canon 未改变。"
+      );
+    },
+    [apiBase, endpoint, refreshFacts, saveDocumentAsDraft]
+  );
+
   const seedDemo = useCallback(async () => {
     const result = await apiPost<DemoSeedResult>(apiBase, "/demo/seed", {
       reviewer: "author",
       rationale: "作者从工作台明确初始化内置奇幻演示项目。",
       source_ref: "demo:workbench_seed"
     });
-    setProjectId(result.project_id);
-    setSceneId(result.scene_id);
+    await refreshWorkspace(result.project_id, result.scene_id);
     const pack = await apiPost<ContextPack>(
       apiBase,
       `/projects/${result.project_id}/scenes/${result.scene_id}/context-pack`
     );
     setContextPack(pack);
+    await refreshLatestDraft(result.project_id, result.scene_id);
+    await refreshGraphPreview(result.project_id);
     setActiveTab("context");
     await refreshFacts();
     setNotice(
       `演示项目已就绪：写入 ${result.nodes_created} 个节点、${result.relationships_created} 条关系。`
     );
-  }, [apiBase, refreshFacts]);
+  }, [apiBase, refreshFacts, refreshGraphPreview, refreshLatestDraft, refreshWorkspace]);
 
   const buildContext = useCallback(async () => {
+    if (!endpoint) throw new Error("请先选择场景。");
     const pack = await apiPost<ContextPack>(apiBase, `${endpoint}/context-pack`);
     setContextPack(pack);
     setActiveTab("context");
@@ -450,6 +800,7 @@ export default function App() {
   }, [apiBase, endpoint]);
 
   const saveDraft = useCallback(async () => {
+    if (!endpoint) throw new Error("请先选择场景。");
     const saved = await apiPost<Draft>(apiBase, `${endpoint}/draft`, {
       text: draftText,
       summary: draftSummary
@@ -459,7 +810,10 @@ export default function App() {
   }, [apiBase, draftSummary, draftText, endpoint]);
 
   const generateDraft = useCallback(async () => {
+    if (!endpoint) throw new Error("请先选择场景。");
     const saved = await apiPost<Draft>(apiBase, `${endpoint}/draft`);
+    const pack = await apiPost<ContextPack>(apiBase, `${endpoint}/context-pack`);
+    setContextPack(pack);
     setDraft(saved);
     setDraftText(saved.text);
     setDraftSummary(saved.summary ?? "");
@@ -467,6 +821,7 @@ export default function App() {
   }, [apiBase, endpoint]);
 
   const runScene = useCallback(async () => {
+    if (!endpoint) throw new Error("请先选择场景。");
     const result = await apiPost<SceneRunResult>(
       apiBase,
       `${endpoint}/runs/scene-generation`
@@ -494,15 +849,51 @@ export default function App() {
         `/projects/${projectId}/facts/${factId}/${action}`,
         { reviewer: "author", note: `工作台执行：${reviewActionLabels[action]}` }
       );
-      await refreshFacts();
+      const remaining = await refreshFacts();
+      if (run?.status === "awaiting_review" && remaining.length === 0) {
+        const resumed = await apiPost<WorkflowRun>(apiBase, `/runs/${run.id}/resume-review`);
+        setRun(resumed);
+        const events = await apiGet<{ events: WorkflowStep[] }>(
+          apiBase,
+          `/runs/${resumed.id}/events`
+        );
+        setRunEvents(events.events);
+        setNotice(`候选事实已${reviewActionLabels[action]}，工作流审阅暂停已恢复。`);
+        return;
+      }
+      await refreshGraphPreview(projectId);
       setNotice(`候选事实已${reviewActionLabels[action]}。`);
     },
-    [apiBase, projectId, refreshFacts]
+    [apiBase, projectId, refreshFacts, refreshGraphPreview, run]
   );
+
+  useEffect(() => {
+    refreshWorkspace(projectId, sceneId).catch((exc) => {
+      setWorkspaceLoaded(true);
+      setError(toErrorMessage(exc));
+    });
+  }, [apiBase]);
 
   useEffect(() => {
     refreshFacts().catch(() => undefined);
   }, [refreshFacts]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    refreshGraphPreview(projectId).catch(() => undefined);
+  }, [projectId, refreshGraphPreview]);
+
+  useEffect(() => {
+    refreshLatestDraft().catch(() => undefined);
+  }, [refreshLatestDraft]);
+
+  useEffect(() => {
+    const firstChapterId = selectedProject?.chapters[0]?.id ?? "";
+    if (!firstChapterId) return;
+    setSceneForm((current) =>
+      current.chapter_id ? current : { ...current, chapter_id: firstChapterId }
+    );
+  }, [selectedProject]);
 
   useEffect(() => {
     refreshAgentSettings().catch(() => undefined);
@@ -516,6 +907,11 @@ export default function App() {
   const permission = agentSettings?.permission_level ?? "full";
   const canGenerate = permission === "read_generate" || permission === "full";
   const canReview = permission === "full";
+  const writerNeedsKey =
+    agentSettings?.scene_writer === "llm" &&
+    (!agentSettings.api_key_configured || !agentSettings.llm_base_url || !agentSettings.llm_model);
+  const canRunScene = hasScene && canGenerate && !writerNeedsKey;
+  const currentChapterId = selectedProject?.chapters[0]?.id ?? "";
 
   return (
     <div className="workbench">
@@ -547,77 +943,118 @@ export default function App() {
 
       <div className="layout">
         <aside className="sidebar">
-          <div className="sidebar-section">
-            <div className="section-title">项目</div>
-            <div className="project-title">{demoProject.title}</div>
-            <div className="project-id">{projectId}</div>
-            <button
-              className="sidebar-action"
-              disabled={!canReview || busy !== null}
-              onClick={() => runAction("seed-demo", seedDemo)}
-              title={canReview ? "初始化内置演示项目" : "需要完全权限"}
-              type="button"
-            >
-              <Database size={15} /> 初始化演示
-            </button>
-          </div>
-          <nav className="scene-tree" aria-label="场景树">
-            {demoProject.chapters.map((chapter) => (
-              <div key={chapter.id} className="chapter">
-                <div className="chapter-row">
-                  <BookOpen size={15} />
-                  <span>{chapter.title}</span>
-                </div>
-                {chapter.scenes.map((scene) => (
-                  <button
-                    key={scene.id}
-                    className={`scene-row ${scene.id === sceneId ? "selected" : ""}`}
-                    onClick={() => setSceneId(scene.id)}
-                    type="button"
-                  >
-                    <ChevronRight size={14} />
-                    <span>{scene.title}</span>
-                    <small>{scene.status}</small>
-                  </button>
-                ))}
-              </div>
-            ))}
-          </nav>
-          <div className="sidebar-footer">
-            <ShieldCheck size={16} />
-            草稿不会直接改写 canon（正典）。
-          </div>
+          <ProjectSidebar
+            busy={busy}
+            canReview={canReview}
+            chapterForm={chapterForm}
+            characterForm={characterForm}
+            currentChapterId={currentChapterId}
+            hasWorkspace={hasWorkspace}
+            locationForm={locationForm}
+            onChapterFormChange={setChapterForm}
+            onCharacterFormChange={setCharacterForm}
+            onCreateChapter={() => runAction("create-chapter", createChapter)}
+            onCreateCharacter={() => runAction("create-character", createCharacter)}
+            onCreateLocation={() => runAction("create-location", createLocation)}
+            onCreateProject={() => runAction("create-project", createProject)}
+            onCreateScene={() => runAction("create-scene", createScene)}
+            onCreateWorldRule={() => runAction("create-world-rule", createWorldRule)}
+            onLocationFormChange={setLocationForm}
+            onProjectFormChange={setProjectForm}
+            onRefresh={() =>
+              runAction("workspace", async () => {
+                await refreshWorkspace(projectId, sceneId);
+              })
+            }
+            onSceneFormChange={setSceneForm}
+            onSeedDemo={() => runAction("seed-demo", seedDemo)}
+            onSelectProject={(nextProjectId) => {
+              const nextProject = projects.find((project) => project.id === nextProjectId);
+              const firstScene = nextProject ? flattenScenes(nextProject)[0] : null;
+              setProjectId(nextProjectId);
+              setSceneId(firstScene?.id ?? "");
+              setContextPack(null);
+              setRun(null);
+              setRunEvents([]);
+              setContinuityReport(null);
+            }}
+            onSelectScene={(nextSceneId) => {
+              setSceneId(nextSceneId);
+              setContextPack(null);
+              setRun(null);
+              setRunEvents([]);
+              setContinuityReport(null);
+            }}
+            onWorldRuleFormChange={setWorldRuleForm}
+            projectForm={projectForm}
+            projectId={projectId}
+            projects={projects}
+            sceneForm={sceneForm}
+            sceneId={sceneId}
+            selectedProject={selectedProject}
+            workspaceLoaded={workspaceLoaded}
+            worldRuleForm={worldRuleForm}
+          />
         </aside>
 
         <main className="editor">
           <section className="scene-toolbar">
             <div>
-              <h1>钟楼搜寻</h1>
-              <p>{sceneId} / 视角 {contextPack?.pov_character_id ?? "character_linj"}</p>
+              <h1>{selectedScene?.title ?? (hasWorkspace ? "请选择场景" : "空工作区")}</h1>
+              <p>
+                {hasScene
+                  ? `${sceneId} / 视角 ${contextPack?.pov_character_id || selectedScene?.pov_character_id || "未设置"}`
+                  : "创建项目、章节和场景后，草稿与 Agent 工作流才会接入后端。"}
+              </p>
             </div>
             <div className="toolbar-actions">
-              <button onClick={() => runAction("context", buildContext)} type="button">
+              <button
+                onClick={() => runAction("context", buildContext)}
+                type="button"
+                disabled={!hasScene}
+              >
                 <RefreshCw size={16} /> 上下文
               </button>
-              <button onClick={() => runAction("save", saveDraft)} type="button" disabled={!canGenerate}>
+              <button
+                onClick={() => runAction("save", saveDraft)}
+                type="button"
+                disabled={!canGenerate || !hasScene}
+              >
                 <Save size={16} /> 保存
               </button>
               <button
                 onClick={() => runAction("draft", generateDraft)}
                 type="button"
-                disabled={missingCritical || !canGenerate}
+                disabled={missingCritical || !canRunScene}
+                title="仅执行 build_context + write_draft，并保存到 Draft Store。"
               >
-                <FileText size={16} /> 生成草稿
+                <FileText size={16} /> 仅生成草稿
               </button>
               <button
                 className="primary"
                 onClick={() => runAction("run", runScene)}
                 type="button"
-                disabled={!canGenerate}
+                disabled={!canRunScene}
+                title="运行 build_context、write_draft、check_continuity、extract_state、human_review。"
               >
-                <Play size={16} /> 运行
+                <Play size={16} /> 运行 Agent 工作流
               </button>
             </div>
+          </section>
+
+          <section className="state-strip" aria-label="当前工作流状态">
+            <StatusDot
+              label={`项目：${selectedProject?.title ?? "未创建"}`}
+              tone={hasWorkspace ? "good" : "warning"}
+            />
+            <StatusDot
+              label={`写作器：${formatWriter(agentSettings)}`}
+              tone={writerNeedsKey ? "danger" : canGenerate ? "good" : "neutral"}
+            />
+            <StatusDot
+              label={writerNeedsKey ? "LLM 设置未完整" : "Draft/Candidate/Canon 分离"}
+              tone={writerNeedsKey ? "danger" : "neutral"}
+            />
           </section>
 
           {(error || notice) && (
@@ -627,18 +1064,31 @@ export default function App() {
             </div>
           )}
 
+          {!hasWorkspace && (
+            <section className="empty-workspace">
+              <EmptyState
+                icon={<Database />}
+                title="当前后端没有真实项目"
+                text="持久化/桌面工作区不会静默初始化演示；请创建自己的小说项目，或显式初始化内置演示。"
+              />
+            </section>
+          )}
+
           <section className="meta-grid" aria-label="场景元数据">
-            <Meta label="目标" value={contextPack?.scene_goal ?? "寻找失踪的封印信"} />
-            <Meta label="冲突" value={contextPack?.conflict ?? "钟楼由敌对势力控制"} />
-            <Meta label="时间线" value={contextPack?.timeline_position ?? "王都政变三天后"} />
-            <Meta label="地点" value={contextPack?.location_id ?? "location_old_bell_tower"} />
+            <Meta label="目标" value={contextPack?.scene_goal || selectedScene?.goal || ""} />
+            <Meta label="冲突" value={contextPack?.conflict || selectedScene?.conflict || ""} />
+            <Meta
+              label="时间线"
+              value={contextPack?.timeline_position || selectedScene?.timeline_position || ""}
+            />
+            <Meta label="地点" value={contextPack?.location_id || selectedScene?.location_id || ""} />
           </section>
 
           <section className="library-panel" aria-label="本地资料库">
             <div className="library-header">
               <div>
                 <span><Library size={15} /> 本地资料 / 导入</span>
-                <small>{libraryDocuments.length} 个本地文档 / 非 canon（正典）</small>
+                <small>{libraryDocuments.length} 个本地文档 / 默认只在浏览器内存 / 非 canon（正典）</small>
               </div>
               <div className="library-actions">
                 <label className="import-button">
@@ -690,7 +1140,23 @@ export default function App() {
                   />
                 )}
               </div>
-              <DocumentReader document={selectedLibraryDocument} />
+              <DocumentReader
+                busy={busy}
+                canGenerate={canGenerate}
+                document={selectedLibraryDocument}
+                hasScene={hasScene}
+                onExtract={(document) =>
+                  runAction("import-extract", () => saveDocumentAsDraftAndExtract(document))
+                }
+                onSaveDraft={(document) =>
+                  runAction("import-draft", async () => {
+                    await saveDocumentAsDraft(document);
+                  })
+                }
+                onSaveStyle={(document) =>
+                  runAction("import-style", () => saveDocumentAsStyleSample(document))
+                }
+              />
             </div>
           </section>
 
@@ -766,10 +1232,459 @@ export default function App() {
               updateStatus={updateStatus}
             />
           )}
-          <GraphPreview />
+          <GraphPreview preview={graphPreview} selectedSceneId={sceneId} />
         </aside>
       </div>
     </div>
+  );
+}
+
+function ProjectSidebar({
+  busy,
+  canReview,
+  chapterForm,
+  characterForm,
+  currentChapterId,
+  hasWorkspace,
+  locationForm,
+  onChapterFormChange,
+  onCharacterFormChange,
+  onCreateChapter,
+  onCreateCharacter,
+  onCreateLocation,
+  onCreateProject,
+  onCreateScene,
+  onCreateWorldRule,
+  onLocationFormChange,
+  onProjectFormChange,
+  onRefresh,
+  onSceneFormChange,
+  onSeedDemo,
+  onSelectProject,
+  onSelectScene,
+  onWorldRuleFormChange,
+  projectForm,
+  projectId,
+  projects,
+  sceneForm,
+  sceneId,
+  selectedProject,
+  workspaceLoaded,
+  worldRuleForm
+}: {
+  busy: string | null;
+  canReview: boolean;
+  chapterForm: ChapterForm;
+  characterForm: CharacterForm;
+  currentChapterId: string;
+  hasWorkspace: boolean;
+  locationForm: LocationForm;
+  onChapterFormChange: React.Dispatch<React.SetStateAction<ChapterForm>>;
+  onCharacterFormChange: React.Dispatch<React.SetStateAction<CharacterForm>>;
+  onCreateChapter: () => void;
+  onCreateCharacter: () => void;
+  onCreateLocation: () => void;
+  onCreateProject: () => void;
+  onCreateScene: () => void;
+  onCreateWorldRule: () => void;
+  onLocationFormChange: React.Dispatch<React.SetStateAction<LocationForm>>;
+  onProjectFormChange: React.Dispatch<React.SetStateAction<ProjectForm>>;
+  onRefresh: () => void;
+  onSceneFormChange: React.Dispatch<React.SetStateAction<SceneForm>>;
+  onSeedDemo: () => void;
+  onSelectProject: (projectId: string) => void;
+  onSelectScene: (sceneId: string) => void;
+  onWorldRuleFormChange: React.Dispatch<React.SetStateAction<WorldRuleForm>>;
+  projectForm: ProjectForm;
+  projectId: string;
+  projects: ProjectOutline[];
+  sceneForm: SceneForm;
+  sceneId: string;
+  selectedProject: ProjectOutline | null;
+  workspaceLoaded: boolean;
+  worldRuleForm: WorldRuleForm;
+}) {
+  const chapters = selectedProject?.chapters ?? [];
+  const sceneChapterId = sceneForm.chapter_id || currentChapterId;
+
+  return (
+    <>
+      <div className="sidebar-scroll">
+        <section className="sidebar-section">
+          <div className="section-title">真实工作区</div>
+          {workspaceLoaded && hasWorkspace ? (
+            <>
+              <select
+                className="sidebar-select"
+                value={projectId}
+                onChange={(event) => onSelectProject(event.target.value)}
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.title}
+                  </option>
+                ))}
+              </select>
+              <div className="project-id">{projectId}</div>
+            </>
+          ) : (
+            <div className="project-empty">
+              {workspaceLoaded ? "后端还没有项目。" : "正在读取后端项目..."}
+            </div>
+          )}
+          <div className="sidebar-button-row">
+            <button
+              disabled={busy !== null}
+              onClick={onRefresh}
+              title="从后端刷新项目树"
+              type="button"
+            >
+              <RefreshCw size={15} /> 刷新
+            </button>
+            <button
+              disabled={!canReview || busy !== null}
+              onClick={onSeedDemo}
+              title={canReview ? "显式初始化内置演示项目" : "需要完全权限"}
+              type="button"
+            >
+              <Database size={15} /> 初始化演示
+            </button>
+          </div>
+        </section>
+
+        <nav className="scene-tree" aria-label="后端项目树">
+          {selectedProject ? (
+            selectedProject.chapters.map((chapter) => (
+              <div key={chapter.id} className="chapter">
+                <div className="chapter-row">
+                  <BookOpen size={15} />
+                  <span>{chapter.title}</span>
+                  <small>{chapter.status ?? "planned"}</small>
+                </div>
+                {chapter.scenes.length ? (
+                  chapter.scenes.map((scene) => (
+                    <button
+                      key={scene.id}
+                      className={`scene-row ${scene.id === sceneId ? "selected" : ""}`}
+                      onClick={() => onSelectScene(scene.id)}
+                      type="button"
+                    >
+                      <ChevronRight size={14} />
+                      <span>{scene.title}</span>
+                      <small>{scene.status ?? "planned"}</small>
+                    </button>
+                  ))
+                ) : (
+                  <p className="tree-empty">本章节还没有场景。</p>
+                )}
+              </div>
+            ))
+          ) : (
+            <EmptyState
+              icon={<BookOpen />}
+              title="没有后端项目树"
+              text="创建项目后，章节和场景会从 Graph Store 读取。"
+            />
+          )}
+        </nav>
+
+        <section className="sidebar-section seed-panel">
+          <div className="section-title">创建我的小说项目</div>
+          <input
+            placeholder="项目名称"
+            value={projectForm.title}
+            onChange={(event) =>
+              onProjectFormChange((current) => ({ ...current, title: event.target.value }))
+            }
+          />
+          <div className="compact-grid">
+            <input
+              placeholder="类型"
+              value={projectForm.genre}
+              onChange={(event) =>
+                onProjectFormChange((current) => ({ ...current, genre: event.target.value }))
+              }
+            />
+            <input
+              placeholder="语言"
+              value={projectForm.language}
+              onChange={(event) =>
+                onProjectFormChange((current) => ({ ...current, language: event.target.value }))
+              }
+            />
+          </div>
+          <input
+            placeholder="目标篇幅"
+            value={projectForm.target_length}
+            onChange={(event) =>
+              onProjectFormChange((current) => ({
+                ...current,
+                target_length: event.target.value
+              }))
+            }
+          />
+          <input
+            placeholder="叙述视角"
+            value={projectForm.narrative_pov}
+            onChange={(event) =>
+              onProjectFormChange((current) => ({
+                ...current,
+                narrative_pov: event.target.value
+              }))
+            }
+          />
+          <button
+            className="sidebar-action"
+            disabled={!canReview || busy !== null}
+            onClick={onCreateProject}
+            type="button"
+          >
+            <Save size={15} /> 创建项目
+          </button>
+        </section>
+
+        <section className="sidebar-section seed-panel">
+          <div className="section-title">章节 / 场景</div>
+          <input
+            placeholder="章节标题"
+            value={chapterForm.title}
+            onChange={(event) =>
+              onChapterFormChange((current) => ({ ...current, title: event.target.value }))
+            }
+          />
+          <div className="compact-grid">
+            <input
+              placeholder="章节序号"
+              value={chapterForm.chapter_index}
+              onChange={(event) =>
+                onChapterFormChange((current) => ({
+                  ...current,
+                  chapter_index: event.target.value
+                }))
+              }
+            />
+            <button
+              disabled={!canReview || !projectId || busy !== null}
+              onClick={onCreateChapter}
+              type="button"
+            >
+              <Save size={15} /> 添加章节
+            </button>
+          </div>
+          <input
+            placeholder="章节摘要"
+            value={chapterForm.summary}
+            onChange={(event) =>
+              onChapterFormChange((current) => ({ ...current, summary: event.target.value }))
+            }
+          />
+          <select
+            value={sceneChapterId}
+            onChange={(event) =>
+              onSceneFormChange((current) => ({ ...current, chapter_id: event.target.value }))
+            }
+          >
+            <option value="">选择章节</option>
+            {chapters.map((chapter) => (
+              <option key={chapter.id} value={chapter.id}>
+                {chapter.title}
+              </option>
+            ))}
+          </select>
+          <input
+            placeholder="场景标题"
+            value={sceneForm.title}
+            onChange={(event) =>
+              onSceneFormChange((current) => ({ ...current, title: event.target.value }))
+            }
+          />
+          <div className="compact-grid">
+            <input
+              placeholder="场景序号"
+              value={sceneForm.scene_index}
+              onChange={(event) =>
+                onSceneFormChange((current) => ({
+                  ...current,
+                  scene_index: event.target.value
+                }))
+              }
+            />
+            <button
+              disabled={!canReview || !projectId || !chapters.length || busy !== null}
+              onClick={() => {
+                if (!sceneForm.chapter_id && currentChapterId) {
+                  onSceneFormChange((current) => ({
+                    ...current,
+                    chapter_id: currentChapterId
+                  }));
+                }
+                onCreateScene();
+              }}
+              type="button"
+            >
+              <Save size={15} /> 添加场景
+            </button>
+          </div>
+          <input
+            placeholder="POV character_id"
+            value={sceneForm.pov_character_id}
+            onChange={(event) =>
+              onSceneFormChange((current) => ({
+                ...current,
+                pov_character_id: event.target.value
+              }))
+            }
+          />
+          <input
+            placeholder="location_id"
+            value={sceneForm.location_id}
+            onChange={(event) =>
+              onSceneFormChange((current) => ({
+                ...current,
+                location_id: event.target.value
+              }))
+            }
+          />
+          <input
+            placeholder="时间线"
+            value={sceneForm.timeline_position}
+            onChange={(event) =>
+              onSceneFormChange((current) => ({
+                ...current,
+                timeline_position: event.target.value
+              }))
+            }
+          />
+          <input
+            placeholder="场景目标"
+            value={sceneForm.goal}
+            onChange={(event) =>
+              onSceneFormChange((current) => ({ ...current, goal: event.target.value }))
+            }
+          />
+          <input
+            placeholder="场景冲突"
+            value={sceneForm.conflict}
+            onChange={(event) =>
+              onSceneFormChange((current) => ({ ...current, conflict: event.target.value }))
+            }
+          />
+          <textarea
+            className="mini-textarea"
+            placeholder="必须包含：每行一条"
+            value={sceneForm.must_include}
+            onChange={(event) =>
+              onSceneFormChange((current) => ({
+                ...current,
+                must_include: event.target.value
+              }))
+            }
+          />
+          <textarea
+            className="mini-textarea"
+            placeholder="禁止违反：每行一条"
+            value={sceneForm.must_not_violate}
+            onChange={(event) =>
+              onSceneFormChange((current) => ({
+                ...current,
+                must_not_violate: event.target.value
+              }))
+            }
+          />
+        </section>
+
+        <section className="sidebar-section seed-panel">
+          <div className="section-title">人物 / 地点 / 规则</div>
+          <input
+            placeholder="人物名称"
+            value={characterForm.name}
+            onChange={(event) =>
+              onCharacterFormChange((current) => ({ ...current, name: event.target.value }))
+            }
+          />
+          <div className="compact-grid">
+            <input
+              placeholder="人物作用"
+              value={characterForm.role}
+              onChange={(event) =>
+                onCharacterFormChange((current) => ({ ...current, role: event.target.value }))
+              }
+            />
+            <button
+              disabled={!canReview || !projectId || busy !== null}
+              onClick={onCreateCharacter}
+              type="button"
+            >
+              <Save size={15} /> 人物
+            </button>
+          </div>
+          <input
+            placeholder="地点名称"
+            value={locationForm.name}
+            onChange={(event) =>
+              onLocationFormChange((current) => ({ ...current, name: event.target.value }))
+            }
+          />
+          <div className="compact-grid">
+            <input
+              placeholder="地点类型"
+              value={locationForm.type}
+              onChange={(event) =>
+                onLocationFormChange((current) => ({ ...current, type: event.target.value }))
+              }
+            />
+            <button
+              disabled={!canReview || !projectId || busy !== null}
+              onClick={onCreateLocation}
+              type="button"
+            >
+              <Save size={15} /> 地点
+            </button>
+          </div>
+          <input
+            placeholder="规则领域"
+            value={worldRuleForm.domain}
+            onChange={(event) =>
+              onWorldRuleFormChange((current) => ({ ...current, domain: event.target.value }))
+            }
+          />
+          <input
+            placeholder="世界规则"
+            value={worldRuleForm.rule}
+            onChange={(event) =>
+              onWorldRuleFormChange((current) => ({ ...current, rule: event.target.value }))
+            }
+          />
+          <div className="compact-grid">
+            <select
+              value={worldRuleForm.severity}
+              onChange={(event) =>
+                onWorldRuleFormChange((current) => ({
+                  ...current,
+                  severity: event.target.value
+                }))
+              }
+            >
+              <option value="low">低</option>
+              <option value="medium">中</option>
+              <option value="high">高</option>
+              <option value="critical">严重</option>
+            </select>
+            <button
+              disabled={!canReview || !projectId || busy !== null}
+              onClick={onCreateWorldRule}
+              type="button"
+            >
+              <Save size={15} /> 规则
+            </button>
+          </div>
+        </section>
+      </div>
+      <div className="sidebar-footer">
+        <ShieldCheck size={16} />
+        导入、草稿、候选事实都不会直接改写 canon（正典）。
+      </div>
+    </>
   );
 }
 
@@ -878,18 +1793,36 @@ function LibraryTreeItem({
   );
 }
 
-function DocumentReader({ document: doc }: { document: LibraryDocument | null }) {
+function DocumentReader({
+  busy,
+  canGenerate,
+  document: doc,
+  hasScene,
+  onExtract,
+  onSaveDraft,
+  onSaveStyle
+}: {
+  busy: string | null;
+  canGenerate: boolean;
+  document: LibraryDocument | null;
+  hasScene: boolean;
+  onExtract: (document: LibraryDocument) => void;
+  onSaveDraft: (document: LibraryDocument) => void;
+  onSaveStyle: (document: LibraryDocument) => void;
+}) {
   if (!doc) {
     return (
       <div className="document-reader empty">
         <EmptyState
           icon={<Library />}
           title="选择一个文档"
-          text="导入内容只保存在浏览器内存中。"
+          text="导入内容默认只保存在浏览器内存中，不会自动进入草稿、候选事实或 canon。"
         />
       </div>
     );
   }
+
+  const canBridge = doc.status === "ready" && canGenerate && hasScene && busy === null;
 
   return (
     <div className="document-reader">
@@ -901,6 +1834,35 @@ function DocumentReader({ document: doc }: { document: LibraryDocument | null })
         <div className="reader-tags">
           <span>{doc.kind.toUpperCase()}</span>
           <span>{formatFileSize(doc.size)}</span>
+        </div>
+      </div>
+      <div className="reader-bridge">
+        <span>当前是本地阅读器资料；只有点击下面按钮才会写入后端 Draft/StyleSample/CandidateFact。</span>
+        <div>
+          <button
+            disabled={!canBridge}
+            onClick={() => onSaveDraft(doc)}
+            title="保存为当前场景 Draft Store 草稿，不写 canon。"
+            type="button"
+          >
+            <FileText size={14} /> 设为当前草稿
+          </button>
+          <button
+            disabled={doc.status !== "ready" || !canGenerate || busy !== null}
+            onClick={() => onSaveStyle(doc)}
+            title="保存为 StyleSample Store 风格样本，只作为 P6 软参考。"
+            type="button"
+          >
+            <Wand2 size={14} /> 存为风格样本
+          </button>
+          <button
+            disabled={!canBridge}
+            onClick={() => onExtract(doc)}
+            title="先保存为草稿，再抽取 pending CandidateFact；仍需人工审阅才可能进入 canon。"
+            type="button"
+          >
+            <ShieldCheck size={14} /> 抽取待审事实
+          </button>
         </div>
       </div>
       {doc.status === "error" ? (
@@ -1195,21 +2157,56 @@ function FactsInspector({
   );
 }
 
-function GraphPreview() {
+function GraphPreview({
+  preview,
+  selectedSceneId
+}: {
+  preview: ProjectGraphPreview | null;
+  selectedSceneId: string;
+}) {
+  if (!preview) {
+    return (
+      <div className="graph-preview">
+        <div className="preview-title"><Network size={15} /> 图谱 / 时间线</div>
+        <EmptyState
+          icon={<Network />}
+          title="暂无后端图谱预览"
+          text="选择真实项目后，这里会显示 Graph Store 中的 CANON 节点关系和场景时间线。"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="graph-preview">
       <div className="preview-title"><Network size={15} /> 图谱 / 时间线</div>
       <div className="graph-lines">
-        {demoProject.graphPreview.map((edge) => (
-          <div key={`${edge.source}-${edge.edge}-${edge.target}`}>
-            <span>{edge.source}</span><b>{edge.edge}</b><span>{edge.target}</span>
-          </div>
-        ))}
+        {preview.relationships.length ? (
+          preview.relationships.map((edge) => (
+            <div key={edge.id}>
+              <span title={edge.source_id}>{edge.source_label}</span>
+              <b>{edge.type}</b>
+              <span title={edge.target_id}>{edge.target_label}</span>
+            </div>
+          ))
+        ) : (
+          <p className="muted">暂无可预览关系。</p>
+        )}
       </div>
+      {preview.truncated && <p className="muted">预览已截断，只显示前几条关系。</p>}
       <div className="timeline">
-        {demoProject.timeline.map((item) => (
-          <div key={item.label} className={item.state}>{item.label}</div>
-        ))}
+        {preview.timeline.length ? (
+          preview.timeline.map((item) => (
+            <div
+              key={item.id}
+              className={item.id === selectedSceneId ? "current" : item.state}
+            >
+              {item.label}
+            </div>
+          ))
+        ) : (
+          <div>暂无场景</div>
+        )}
       </div>
     </div>
   );
@@ -1353,6 +2350,40 @@ const reviewActionLabels = {
   reject: "拒绝",
   defer: "延后"
 } as const;
+
+function flattenScenes(project: ProjectOutline): SceneOutline[] {
+  return project.chapters.flatMap((chapter) => chapter.scenes);
+}
+
+function findScene(
+  projects: ProjectOutline[],
+  projectId: string,
+  sceneId: string
+): SceneOutline | null {
+  const project = projects.find((item) => item.id === projectId);
+  if (!project) return null;
+  return flattenScenes(project).find((scene) => scene.id === sceneId) ?? null;
+}
+
+function splitLines(value: string): string[] {
+  return value
+    .split(/[\n,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toPositiveInteger(value: string, fallback: number): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function formatWriter(settings: AgentSettings | null): string {
+  if (!settings) return "读取中";
+  if (settings.scene_writer === "llm") {
+    return settings.api_key_configured ? `LLM ${settings.llm_model}` : "LLM 未配置密钥";
+  }
+  return "本地规则";
+}
 
 async function readLibraryFiles(files: File[]): Promise<ImportSummary> {
   let skipped = 0;

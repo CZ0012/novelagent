@@ -25,6 +25,7 @@ Own scene-generation behavior for StoryGraph. The Writing Agent creates or revis
 - Treat desktop and Web UI actions as requests to backend writing services, not as independent writing runtimes.
 - Keep UI localization, app version strings, updater state, GitHub Release metadata, and icon assets separate from draft prompts and literary output.
 - Treat imported local documents as source material only after an explicit backend import/draft/style workflow records provenance.
+- Treat API key configuration as credentials only; LLM drafting also requires LLM writing mode, saved settings, sufficient permission, and a valid Context Pack.
 
 ## Expected Outputs
 
@@ -46,6 +47,7 @@ Own scene-generation behavior for StoryGraph. The Writing Agent creates or revis
 - Do not let desktop or Web convenience actions save generated prose anywhere except Draft Store through backend services.
 - Do not let updater release notes, GitHub Release metadata, app version labels, localized UI copy, icon descriptions, or desktop branding become draft content or style constraints.
 - Do not draft directly from browser-memory imported documents as if they were canon context.
+- Do not draft from sampleData, empty-workspace placeholders, or graph/timeline preview fixtures as if they were backend project/scene state.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Required Drafting Discipline

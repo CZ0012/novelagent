@@ -27,6 +27,8 @@ Own candidate fact extraction, human review semantics, and canon commit rules. T
 - Document that desktop packaging does not create a separate canon commit path.
 - Treat localization, app versioning, updater install state, GitHub Release metadata, source-built artifact metadata, and icon assets as product/runtime metadata only, never as CandidateFact inputs.
 - Treat bundled demo initialization as an explicit human seed operation only when routed through the backend with full permission, reviewer, rationale, and source_ref.
+- Treat imported documents as canon-irrelevant reader content until an explicit backend action saves them as a draft and state extraction creates pending CandidateFacts.
+- Ensure sampleData, graph/timeline preview fixtures, and empty-workspace onboarding state never become CandidateFact evidence.
 - Coordinate accepted graph patches with Graph Agent semantics.
 
 ## Expected Outputs
@@ -48,6 +50,7 @@ Own candidate fact extraction, human review semantics, and canon commit rules. T
 - Do not let updater events, installer actions, GitHub Release metadata, release notes, localized labels, version labels, or icon metadata create or review CandidateFacts.
 - Do not implement bulk import, desktop seed actions, or UI shortcuts that bypass CandidateFact review for generated draft facts or imported documents.
 - Do not allow `/demo/seed` or other explicit seed APIs to become a shortcut for promoting model output.
+- Do not accept imported document extraction as canon commit; it may only produce pending candidates until explicit review.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.
 
 ## Review Outcomes

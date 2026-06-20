@@ -28,7 +28,7 @@ The implementation follows:
 - Local CLI workspace commands for context building, scene drafting, continuity checks, state extraction, workflow runs, and pending fact review.
 - Workflow run checkpoints and projections with API run listing, run event inspection, review-pause resume, persisted stores, and optional LangGraph runtime/checkpointer support.
 - FastAPI routes for the authoring workflow plus persisted agent settings for model provider, API key reference, JSON mode, scene writer mode, and API permission level.
-- Chinese-localized React/Vite author workbench for scene drafting, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, pending fact review, local txt/md/docx file or folder import, agent settings, and update checks through the API or desktop shell.
+- Chinese-localized React/Vite author workbench for real API-backed project trees, empty-workspace onboarding, scene drafting, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, pending fact review, local txt/md/docx file or folder import, agent settings, and update checks through the API or desktop shell.
 - Desktop-target FastAPI entrypoint (`apps.api.desktop_server`) that uses a persistent local workspace and the JSON graph backend.
 - Buildable Tauri desktop package under `apps/desktop`, including npm scripts, a Rust entrypoint, hidden PyInstaller backend sidecar packaging, backend start/stop/status commands, Tauri capabilities, signed-updater configuration, a sci-fi app icon, and NSIS installer configuration.
 - Fantasy demo fixture and regression tests for the canon safety loop.
@@ -40,7 +40,7 @@ This MVP can be used through CLI, browser, or a locally built Windows desktop pa
 Use one of these surfaces:
 
 - CLI workspace: best for persistent local MVP runs. It stores JSON and SQLite state under `.storygraph`, `STORYGRAPH_HOME`, or the directory passed with `--workspace`.
-- Persistent FastAPI + React/Vite workbench: best for local authoring through the browser. Start the persistent API backend and the web dev server separately.
+- Persistent FastAPI + React/Vite workbench: best for local authoring through the browser. Start the persistent API backend and the web dev server separately. It reads the real project tree from `/projects`; UI fixture/sample data is not treated as a workspace.
 - Seeded demo FastAPI + React/Vite workbench: best for quick UI experiments. The default `apps.api.main:app` uvicorn entrypoint uses in-memory demo stores unless created with explicit settings.
 - Tauri desktop app: best for direct local use after a source build. It hosts the React workbench, starts or connects to the local FastAPI backend without showing a backend console window, and can check signed desktop updates from the configured release channel.
 
@@ -78,7 +78,7 @@ $env:STORYGRAPH_HOME="D:\storygraph-workspaces\demo"
 python -m apps.api.desktop_server
 ```
 
-Run those commands in one PowerShell terminal. If `STORYGRAPH_HOME` is not set, the desktop-target backend uses `%LOCALAPPDATA%\StoryGraph Agent\workspace` on Windows when available, or the user home directory fallback. It creates the workspace directory and uses the JSON graph backend. It does not silently seed demo canon; click `Seed Demo` in the workbench or call `POST /demo/seed` when you want to initialize the bundled fantasy demo.
+Run those commands in one PowerShell terminal. If `STORYGRAPH_HOME` is not set, the desktop-target backend uses `%LOCALAPPDATA%\StoryGraph Agent\workspace` on Windows when available, or the user home directory fallback. It creates the workspace directory and uses the JSON graph backend. It does not silently seed demo canon; an empty persistent or desktop workspace should show project creation and explicit demo initialization options. Click `Seed Demo` in the workbench or call `POST /demo/seed` only when you want to initialize the bundled fantasy demo.
 
 For a quick seeded in-memory API instead, run:
 
@@ -208,7 +208,15 @@ The `add-character`, `add-location`, and `add-relation` commands are a separate 
 
 ## Document And Folder Import
 
-The React/Vite workbench can import local `.txt`, `.md`, `.markdown`, and `.docx` files, including a browser-supported folder selection. Imported documents appear in an expandable local library tree and reader. This content stays in browser memory and does not write drafts, facts, or canon.
+The React/Vite workbench can import local `.txt`, `.md`, `.markdown`, and `.docx` files, including a browser-supported folder selection. Imported documents appear in an expandable local library tree and reader. By default this is still a browser-memory reader: imported content does not write drafts, facts, or canon.
+
+From the reader, the author may explicitly send a ready imported document through backend stores:
+
+- Save as the current scene draft in Draft Store.
+- Save as a StyleSample Store style sample for P6 soft style retrieval.
+- Save as the current scene draft and then run state extraction, which can create pending `CandidateFact` records.
+
+These paths require the normal backend project/scene and permission checks. They still do not write Graph Store canon directly; extracted candidates remain pending until human review accepts or edit-accepts them with provenance.
 
 CLI file inputs are still intentionally narrow:
 
@@ -217,7 +225,7 @@ python -m apps.cli.main add-style-sample --workspace .storygraph-demo --project 
 python -m apps.cli.main write-scene --workspace .storygraph-demo --project project_fantasy_demo --scene scene_003 --text-file .\drafts\scene_003.txt --summary "Author-provided draft."
 ```
 
-These CLI commands read single UTF-8 text files. They do not import a folder tree, split chapters automatically, parse rich document formats, or promote extracted content to canon. Any future importer that creates drafts, style samples, or pending candidate facts must preserve the same safety rule: imported material must not write canon without human review and provenance.
+These CLI commands read single UTF-8 text files. They do not import a folder tree, split chapters automatically, parse rich document formats, or promote extracted content to canon. Any importer path that creates drafts, style samples, or pending candidate facts must preserve the same safety rule: imported material must not write canon without human review and provenance.
 
 ## API Permission Levels
 
@@ -247,6 +255,8 @@ $env:STORYGRAPH_LLM_BASE_URL="https://your-provider.example/v1"
 $env:STORYGRAPH_LLM_API_KEY="<your provider key>"
 $env:STORYGRAPH_LLM_MODEL="deepseek-chat"
 ```
+
+In the Web or desktop settings panel, entering an API key only stores the credential reference. It does not enable LLM drafting by itself. The author must choose the OpenAI-compatible LLM writing mode, save settings, have `read_generate` or `full` permission, and run with a valid project, scene, and Context Pack.
 
 The LLM writer reads `storygraph/prompts/scene_writer.md`, asks for JSON output, saves only to Draft Store, and locally rejects drafts that omit `must_include` items or contain literal `must_not_violate` constraints. It never receives a Graph Store handle; generated state changes still have to pass through CandidateFact extraction and human review.
 
@@ -280,6 +290,8 @@ Scene workflows use the dependency-free local runtime by default:
 ```powershell
 $env:STORYGRAPH_WORKFLOW_RUNTIME="local"
 ```
+
+The workbench `Run` Agent workflow button follows the `scene_generation` steps from `workflow_run_v1`: `build_context`, `write_draft`, `check_continuity`, `extract_state`, and `human_review`. The review step is a pause around pending candidates, not a canon write by itself.
 
 To run the same `scene_generation` flow through a real LangGraph `StateGraph` with SQLite checkpoints, install the optional extra and set:
 

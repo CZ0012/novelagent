@@ -45,6 +45,8 @@ class CreateProjectRequest(BaseModel):
     title: str
     genre: str = "fantasy"
     language: str = "zh-CN"
+    target_length: str | None = None
+    narrative_pov: str | None = None
 
 
 class AuthorSeedRequest(BaseModel):
@@ -69,6 +71,47 @@ class RelationSeedRequest(AuthorSeedRequest):
     type: str = Field(..., min_length=1)
     source_id: str = Field(..., min_length=1)
     target_id: str = Field(..., min_length=1)
+
+
+class ChapterSeedRequest(AuthorSeedRequest):
+    id: str | None = None
+    title: str = Field(..., min_length=1)
+    volume_index: int = 1
+    chapter_index: int = 1
+    summary: str | None = None
+    purpose: str | None = None
+    status: str = "planned"
+    properties: dict = Field(default_factory=dict)
+
+
+class SceneSeedRequest(AuthorSeedRequest):
+    id: str | None = None
+    title: str = Field(..., min_length=1)
+    scene_index: int = 1
+    pov_character_id: str | None = None
+    location_id: str | None = None
+    timeline_position: str | None = None
+    goal: str | None = None
+    conflict: str | None = None
+    outcome: str | None = None
+    emotional_turn: str | None = None
+    required_characters: list[str] = Field(default_factory=list)
+    must_include: list[str] = Field(default_factory=list)
+    must_not_violate: list[str] = Field(default_factory=list)
+    style_constraints: dict = Field(default_factory=dict)
+    previous_scene_id: str | None = None
+    status: str = "planned"
+    properties: dict = Field(default_factory=dict)
+
+
+class WorldRuleSeedRequest(AuthorSeedRequest):
+    id: str | None = None
+    domain: str = Field(..., min_length=1)
+    rule: str = Field(..., min_length=1)
+    severity: str = "medium"
+    examples: list[str] = Field(default_factory=list)
+    exceptions: list[str] = Field(default_factory=list)
+    properties: dict = Field(default_factory=dict)
 
 
 class StyleSampleRequest(BaseModel):
@@ -220,6 +263,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     "title": request.title,
                     "genre": request.genre,
                     "language": request.language,
+                    "target_length": request.target_length,
+                    "narrative_pov": request.narrative_pov,
                 },
                 source_ref="api:projects",
                 reviewer="author",
@@ -230,10 +275,21 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         persist_graph()
         return {"project_id": project_id}
 
+    @app.get("/projects")
+    def list_projects() -> dict:
+        return {"projects": graph_query.list_projects()}
+
     @app.get("/projects/{project_id}")
     def get_project(project_id: str) -> dict:
         try:
             return graph_query.get_node(project_id=project_id, node_id=project_id).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.get("/projects/{project_id}/outline")
+    def get_project_outline(project_id: str) -> dict:
+        try:
+            return graph_query.project_outline(project_id=project_id)
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
@@ -264,6 +320,91 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 node_id=request.id,
                 name=request.name,
                 properties=request.properties,
+                reviewer=request.reviewer,
+                rationale=request.rationale,
+                source_ref=request.source_ref,
+            )
+            persist_graph()
+            return node.model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/chapters")
+    def add_chapter(project_id: str, request: ChapterSeedRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            node = canon_seed.add_chapter(
+                project_id=project_id,
+                node_id=request.id,
+                title=request.title,
+                properties={
+                    "volume_index": request.volume_index,
+                    "chapter_index": request.chapter_index,
+                    "summary": request.summary,
+                    "purpose": request.purpose,
+                    "status": request.status,
+                    **request.properties,
+                },
+                reviewer=request.reviewer,
+                rationale=request.rationale,
+                source_ref=request.source_ref,
+            )
+            persist_graph()
+            return node.model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/chapters/{chapter_id}/scenes")
+    def add_scene(project_id: str, chapter_id: str, request: SceneSeedRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            node = canon_seed.add_scene(
+                project_id=project_id,
+                chapter_id=chapter_id,
+                node_id=request.id,
+                title=request.title,
+                properties={
+                    "scene_index": request.scene_index,
+                    "pov_character_id": request.pov_character_id,
+                    "location_id": request.location_id,
+                    "timeline_position": request.timeline_position,
+                    "goal": request.goal,
+                    "conflict": request.conflict,
+                    "outcome": request.outcome,
+                    "emotional_turn": request.emotional_turn,
+                    "required_characters": request.required_characters,
+                    "must_include": request.must_include,
+                    "must_not_violate": request.must_not_violate,
+                    "style_constraints": request.style_constraints,
+                    "previous_scene_id": request.previous_scene_id,
+                    "status": request.status,
+                    **request.properties,
+                },
+                previous_scene_id=request.previous_scene_id,
+                reviewer=request.reviewer,
+                rationale=request.rationale,
+                source_ref=request.source_ref,
+            )
+            persist_graph()
+            return node.model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/world-rules")
+    def add_world_rule(project_id: str, request: WorldRuleSeedRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            node = canon_seed.add_world_rule(
+                project_id=project_id,
+                node_id=request.id,
+                domain=request.domain,
+                rule=request.rule,
+                properties={
+                    "severity": request.severity,
+                    "examples": request.examples,
+                    "exceptions": request.exceptions,
+                    **request.properties,
+                },
                 reviewer=request.reviewer,
                 rationale=request.rationale,
                 source_ref=request.source_ref,
@@ -393,9 +534,28 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
+    @app.get("/projects/{project_id}/graph/preview")
+    def project_graph_preview(project_id: str) -> dict:
+        try:
+            return graph_query.project_graph_preview(project_id=project_id)
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.get("/projects/{project_id}/scenes/{scene_id}")
+    def get_scene(project_id: str, scene_id: str) -> dict:
+        try:
+            return graph_query.scene_node(project_id=project_id, scene_id=scene_id)
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
     @app.post("/projects/{project_id}/scenes/{scene_id}/context-pack")
     def build_context(project_id: str, scene_id: str) -> dict:
         return context_builder.build(project_id=project_id, scene_id=scene_id).model_dump()
+
+    @app.get("/projects/{project_id}/scenes/{scene_id}/draft")
+    def latest_draft(project_id: str, scene_id: str) -> dict:
+        draft = draft_store.latest_for_scene(project_id, scene_id)
+        return {"draft": draft.model_dump() if draft else None}
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/draft")
     def write_draft(project_id: str, scene_id: str, request: DraftRequest | None = None) -> dict:

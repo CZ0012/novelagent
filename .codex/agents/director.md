@@ -23,6 +23,9 @@ Coordinate multi-subagent development for the StoryGraph Agent project. The Dire
 - Keep Tauri updater signing separate from Windows Authenticode code signing in plans and handoffs.
 - Ensure desktop packaging work reuses the same FastAPI backend, workflow contracts, and ReviewService boundaries.
 - Ensure local document/folder import work remains draft/style/candidate-oriented and never becomes a direct canon write path.
+- Ensure Web/desktop project trees come from backend `/projects`; empty persistent workspaces should offer project creation or explicit demo initialization, not treat sampleData as a real workspace.
+- Ensure Agent workflow UI and handoffs preserve the `build_context`, `write_draft`, `check_continuity`, `extract_state`, `human_review` step boundary.
+- Ensure API key configuration is described only as a credential reference; LLM writing also requires LLM mode, saved settings, sufficient permission, and valid context.
 - Resolve conflicts between subagent outputs.
 - Protect the rule that generated drafts do not directly mutate canon.
 - Summarize progress and remaining risks for the main agent or user.
@@ -72,6 +75,8 @@ Verification:
 - Do not present a GitHub Release download link as equivalent to in-app signed updater installation.
 - Do not present GitHub Release metadata as story workspace, canon, draft, import, settings, or review-state synchronization.
 - Do not assign desktop work that writes canon outside backend seed or CandidateFact review APIs.
+- Do not let a workbench fixture, sampleData tree, or empty-workspace placeholder become Context Pack, Draft Store, CandidateFact, or Graph Store input.
+- Do not describe saving an API key as enabling LLM drafting unless the writing mode, permissions, saved settings, and context requirements are also met.
 - Do not allow localization, icon, versioning, installer, or updater work to modify contract semantics unless the task explicitly changes a contract and updates all affected agents.
 - Only assign implementation that is scoped to the MVP architecture and versioned contracts.
 

@@ -61,6 +61,73 @@ export type Draft = {
   updated_at: string;
 };
 
+export type GraphNodePayload = {
+  id: string;
+  type: string;
+  status: string;
+  properties: Record<string, unknown>;
+};
+
+export type SceneOutline = {
+  id: string;
+  title: string;
+  scene_index?: number | null;
+  status?: string | null;
+  pov_character_id?: string | null;
+  location_id?: string | null;
+  timeline_position?: string | null;
+  goal?: string | null;
+  conflict?: string | null;
+  properties: Record<string, unknown>;
+};
+
+export type ChapterOutline = {
+  id: string;
+  title: string;
+  volume_index?: number | null;
+  chapter_index?: number | null;
+  status?: string | null;
+  summary?: string | null;
+  purpose?: string | null;
+  properties: Record<string, unknown>;
+  scenes: SceneOutline[];
+};
+
+export type ProjectOutline = {
+  id: string;
+  title: string;
+  genre?: string | null;
+  language?: string | null;
+  status: string;
+  properties: Record<string, unknown>;
+  chapters: ChapterOutline[];
+};
+
+export type ProjectGraphPreview = {
+  project_id: string;
+  nodes: Array<{
+    id: string;
+    type: string;
+    label: string;
+  }>;
+  relationships: Array<{
+    id: string;
+    source_id: string;
+    source_label: string;
+    type: string;
+    target_id: string;
+    target_label: string;
+  }>;
+  timeline: Array<{
+    id: string;
+    label: string;
+    state: string;
+    chapter_id: string;
+    scene_index?: number | null;
+  }>;
+  truncated: boolean;
+};
+
 export type WorkflowRun = {
   id: string;
   contract_version: "workflow_run_v1";

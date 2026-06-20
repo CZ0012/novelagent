@@ -25,6 +25,7 @@ On startup, the Rust shell:
 
 - reads desktop settings from `%LOCALAPPDATA%\StoryGraph Agent\desktop-settings.json` on Windows, with user-home fallbacks on other platforms;
 - defaults the workspace to `%LOCALAPPDATA%\StoryGraph Agent\workspace`;
+- creates or reuses that persistent workspace without seeding demo canon automatically;
 - checks `/health` on the configured backend URL;
 - reuses an already-running local backend when it is healthy;
 - otherwise starts the bundled `storygraph-backend` sidecar when present, falling back to `python -m apps.api.desktop_server` during source development;
@@ -33,6 +34,10 @@ On startup, the Rust shell:
 - writes backend stdout/stderr logs under `%LOCALAPPDATA%\StoryGraph Agent\logs`.
 
 The desktop commands are intentionally narrow: settings load/save, backend status, backend start, backend stop, local path reporting, and signed updater checks/install through Tauri's updater plugin. They do not write canon.
+
+Inside the hosted workbench, the project tree comes from the backend `/projects` response. A fresh persistent desktop workspace should show project creation and explicit demo initialization options; UI fixture/sample data must not be treated as a real workspace.
+
+Local document import remains a browser-memory reader by default. From the reader, an author can explicitly save a ready document as the current scene Draft Store draft, save it as a StyleSample Store style sample, or save it as a draft and then extract pending `CandidateFact` records. None of those paths directly writes Graph Store canon.
 
 ## Build Commands
 
@@ -148,11 +153,16 @@ python -m apps.api.desktop_server
 
 That entrypoint starts `apps.api.desktop:app`, uses a persistent StoryGraph workspace, defaults to the JSON graph backend, and does not seed canon automatically. Use the workbench `Seed Demo` action or `POST /demo/seed` when you want to explicitly initialize the bundled fantasy demo.
 
+Agent settings persist with the backend workspace. Saving an API key only stores the credential reference; LLM drafting also requires selecting the LLM writing mode, saving settings, having `read_generate` or `full` permission, and running with a valid project, scene, and Context Pack.
+
 ## Boundary Rules
 
 - The desktop layer must not write canon directly.
 - Canon writes must still go through backend human seed APIs or CandidateFact review APIs.
 - Generated drafts, summaries, imported text, sample UI data, and model hypotheses must not be promoted to canon by the desktop process.
+- Web workbench sampleData/fixture previews must not be treated as the desktop workspace, Context Pack input, Draft Store source, CandidateFact evidence, or Graph Store state.
+- Imported documents may become Draft Store drafts, StyleSample Store samples, or pending CandidateFacts only through explicit backend actions; review is still required before any extracted fact becomes canon.
+- The Agent workflow run button follows `build_context`, `write_draft`, `check_continuity`, `extract_state`, and `human_review`; the review pause is not itself a canon commit.
 - The desktop layer may orchestrate processes, settings, health checks, logs, workspace selection, and windows.
 - The desktop layer may orchestrate signed updater checks and installation, but updater metadata must not be treated as story data.
 - The desktop layer must not bypass `ReviewService`, `GraphStore`, or the versioned contracts under `contracts/`.

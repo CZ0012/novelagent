@@ -34,6 +34,9 @@ Own continuity checking, acceptance criteria, and quality gates for StoryGraph w
 - Verify docs distinguish Tauri updater signatures from Windows Authenticode code signing.
 - Verify GitHub Release/update language does not imply sync for local workspaces, canon, drafts, imported documents, project settings, or review state.
 - Verify local import and demo seed flows do not mutate canon without the documented backend permission/provenance path.
+- Verify persistent Web/desktop empty workspaces show project creation or explicit demo initialization, and do not present sampleData as a real workspace.
+- Verify Agent workflow UI exposes `build_context`, `write_draft`, `check_continuity`, `extract_state`, and `human_review` consistently with `workflow_run_v1`.
+- Verify API key settings do not imply LLM use unless LLM mode, saved settings, sufficient permission, and valid context are present.
 
 ## Expected Outputs
 
@@ -53,6 +56,7 @@ Own continuity checking, acceptance criteria, and quality gates for StoryGraph w
 - Do not mark GitHub release download fallback as equivalent to signed in-app updater install.
 - Do not accept `nsis.zip` updater artifact claims when the verified output is `setup.exe` plus `setup.exe.sig`.
 - Do not accept a runtime flow that loses persistent workspace data after restart unless it is clearly documented as in-memory demo state.
+- Do not accept sampleData, graph/timeline preview fixtures, or empty-workspace placeholders as real project/canon/draft state.
 - Do not accept desktop or updater changes that introduce a new canon write path, weaken permissions, or bypass backend review APIs.
 - Only add implementation that is scoped to the MVP architecture and versioned contracts.
 

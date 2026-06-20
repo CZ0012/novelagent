@@ -943,15 +943,15 @@ Neo4j / SQLite / Vector Store 本地连接
 
 核心界面模块：
 
-- Project Workspace：项目、卷、章节、场景树。
+- Project Workspace：项目、卷、章节、场景树；Web/桌面工作台必须从后端 `/projects` 读取真实项目树，不能把前端 sampleData/fixture 当成真实 workspace。
 - Scene Editor：正文编辑器、版本切换、局部改写、批注。
 - Context Pack Inspector：写作前上下文包，可查看、锁定、调整硬约束。
-- Agent Run Panel：展示 LangGraph 当前节点、流式输出、检查结果和失败重试。
+- Agent Run Panel：展示工作流当前节点、事件、检查结果和失败重试；场景工作流按钮应明确包含 `build_context`、`write_draft`、`check_continuity`、`extract_state`、`human_review`。
 - Pending Facts Review：候选事实、关系变化、秘密揭露、伏笔状态的人审队列。
 - Graph View：人物关系、知识边界、地点、事件因果、伏笔网络的可视化。
 - Timeline View：章节、场景、事件、角色位置和秘密揭示时间线。
 - Style Lab：风格样本、人物口吻样本、文风漂移报告。
-- Settings：模型供应商、API key、本地模型、数据库路径、备份与导出。
+- Settings：模型供应商、API key、本地模型、数据库路径、备份与导出；配置 API key 只表示保存凭据引用，不等于启用 LLM 写作，仍需选择 LLM 写作模式、保存设置、具备权限并拥有有效 context。
 
 桌面进程不直接操作 canon。它通过 FastAPI 调用后端服务，后端服务再经 LangGraph、ReviewService、GraphStore 完成状态变更。
 
@@ -961,11 +961,13 @@ Neo4j / SQLite / Vector Store 本地连接
 
 - `apps/desktop` 已是可构建的 Tauri shell，包含 npm scripts、Rust crate、Windows icon、后端启动/停止/状态命令、PyInstaller backend sidecar 和 NSIS bundle 配置。
 - 当前可运行入口是 CLI、FastAPI + React/Vite Web 工作台、面向桌面宿主的持久化后端入口 `python -m apps.api.desktop_server`，以及源码构建的 Tauri 桌面应用。
-- `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。需要默认 demo project 时，应在工作台点击 `Seed Demo` 或调用 `POST /demo/seed`，该路径仍要求 full 权限并记录 reviewer、rationale 和 source_ref。
+- `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。持久化或桌面空 workspace 应显示创建项目或显式初始化演示的入口。需要默认 demo project 时，应在工作台点击 `Seed Demo` 或调用 `POST /demo/seed`，该路径仍要求 full 权限并记录 reviewer、rationale 和 source_ref。
 - 默认 `apps.api.main:app` 开发入口可用于本地 demo；不传入 settings 时它使用 seeded in-memory stores，不应被描述为完整桌面产品或持久化作者项目入口。
 - 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.0_x64-setup.exe` 及 Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.0_x64-setup.exe.sig`。这些产物是本地源码构建输出，不是已发布签名 release channel。当前验证产物不包含 `nsis.zip`。
 - FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地安全分级，不是身份认证；CLI 当前不执行同一权限闸门。
-- React/Vite 工作台当前支持本地 `.txt`、`.md`、`.markdown`、`.docx` 文件和文件夹导入到前端资料树/阅读器。导入内容只保存在浏览器内存，不写 Draft Store、Candidate Store 或 Graph Store。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
+- React/Vite 工作台当前支持本地 `.txt`、`.md`、`.markdown`、`.docx` 文件和文件夹导入到前端资料树/阅读器。默认导入内容只保存在浏览器内存，不写 Draft Store、StyleSample Store、Candidate Store 或 Graph Store。作者可显式把 ready 文档保存为当前场景 Draft Store 草稿、保存为 StyleSample Store 风格样本，或先保存草稿后抽取 pending CandidateFact。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
+- Web 工作台的项目树和当前场景选择必须来自后端项目/章节/场景数据；Graph/Timeline 预览或其他 sampleData 只能作为 UI 占位，不得被 Context Pack、Draft Store、CandidateFact 或 Graph Store 当成真实 workspace 来源。
+- 设置页保存 API key、base URL 或模型名称不应自动切换到 LLM writer。LLM 写作只有在 scene writer mode 选择 `llm`、设置已保存、权限至少为 `read_generate`、当前项目/场景有效且 Context Pack 可构建时才应运行。
 
 可安装桌面版的目标：
 
@@ -989,8 +991,10 @@ Neo4j / SQLite / Vector Store 本地连接
 验收标准：
 
 - 新用户能通过 README 的安装/启动步骤打开桌面或 Web 工作台。
+- 持久化或桌面空 workspace 不显示内存 demo 作为真实项目；用户可创建项目，或通过明确 full 权限 seed 操作初始化演示。
 - 桌面启动后能显示 API 健康状态，并在后端不可用时给出可恢复错误。
 - 场景生成、Context Pack 检查、连续性报告和待审事实流程与 API/CLI 使用同一 contract。
+- 工作台运行 Agent 工作流时清楚呈现 `build_context`、`write_draft`、`check_continuity`、`extract_state`、`human_review`。
 - 接受、编辑接受、拒绝或延后 CandidateFact 后，workflow review pause 状态与 `workflow_run_v1` / `review_payload_v1` 保持一致。
 - 重启软件后，配置为持久化的 workspace 不丢失图谱、草稿、候选事实、工作流运行记录和风格样本。
 
