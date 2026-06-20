@@ -524,7 +524,7 @@ export default function App() {
         throw new Error("最新 GitHub Release（发布版本）没有有效版本号");
       }
       const installer = release.assets?.find((asset) =>
-        /StoryGraph Agent_.*_x64-setup\.exe$/i.test(asset.name)
+        /StoryGraph[ .]Agent_.*_x64-setup\.exe$/i.test(asset.name)
       );
       const comparison = compareVersions(latestVersion, APP_VERSION);
       if (comparison > 0) {
