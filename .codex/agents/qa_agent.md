@@ -27,7 +27,7 @@ Own continuity checking, acceptance criteria, and quality gates for StoryGraph w
 - Verify user-facing runtime claims in README and desktop docs match actual implementation status.
 - Smoke test CLI, API + Web workbench, and packaged desktop startup paths when those surfaces are changed.
 - Confirm desktop packaging preserves persistence, backend health reporting, and review/canon boundaries.
-- Verify desktop UX acceptance gates when touched: Chinese UI strings, no extra backend console window, version display, signed updater configuration, install/restart flow, and icon assets.
+- Verify desktop UX acceptance gates when touched: Chinese UI strings, no extra backend console window, tray minimize/quit lifecycle, version display, signed updater configuration, install/restart flow, and icon assets.
 - Verify the single-version rule across `VERSION`, `pyproject.toml`, `apps/web/package.json`, `apps/web/src/version.ts`, `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json`.
 - Verify updater claims distinguish source-built artifacts, updater artifacts, GitHub release downloads, and published signed release channels.
 - Verify the Windows updater artifact naming matches actual output: NSIS setup executable plus `setup.exe.sig`, not `nsis.zip`, unless a later build proves otherwise.
@@ -37,6 +37,7 @@ Own continuity checking, acceptance criteria, and quality gates for StoryGraph w
 - Verify persistent Web/desktop empty workspaces show project creation or explicit demo initialization, and do not present sampleData as a real workspace.
 - Verify Agent workflow UI exposes `build_context`, `write_draft`, `check_continuity`, `extract_state`, and `human_review` consistently with `workflow_run_v1`.
 - Verify API key settings do not imply LLM use unless LLM mode, saved settings, sufficient permission, and valid context are present.
+- Verify `/settings/agent` and the Web/desktop settings panel can both lower and raise local permissions as operator authorization, while draft generation, seed writes, and review decisions remain gated by their documented permission tiers.
 
 ## Expected Outputs
 

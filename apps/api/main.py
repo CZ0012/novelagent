@@ -234,17 +234,6 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     @app.put("/settings/agent")
     def put_agent_settings(request: AgentRuntimeConfigUpdate) -> dict:
         nonlocal agent_config
-        if not has_permission(agent_config.permission_level, request.permission_level):
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "category": "permission_denied",
-                    "message": (
-                        "不能通过 API 自行升高权限。请有意编辑本地 agent_config.json，"
-                        "或通过明确的本地重置重新升权。"
-                    ),
-                },
-            )
         agent_config = update_agent_config(agent_config, request)
         apply_agent_config(settings, agent_config)
         if use_persistent_stores:

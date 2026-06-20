@@ -53,7 +53,7 @@ def test_read_only_permission_blocks_draft_generation(tmp_path):
     assert response.json()["detail"]["category"] == "permission_denied"
 
 
-def test_permission_level_cannot_self_elevate_through_settings_api(tmp_path):
+def test_permission_level_can_be_changed_through_settings_api(tmp_path):
     client = TestClient(create_app(StoryGraphSettings(tmp_path)))
     lowered = client.put(
         "/settings/agent",
@@ -64,6 +64,9 @@ def test_permission_level_cannot_self_elevate_through_settings_api(tmp_path):
     )
     assert lowered.status_code == 200
 
+    blocked = client.post(f"/projects/{PROJECT_ID}/scenes/{SCENE_ID}/draft")
+    assert blocked.status_code == 403
+
     elevated = client.put(
         "/settings/agent",
         json={
@@ -72,9 +75,12 @@ def test_permission_level_cannot_self_elevate_through_settings_api(tmp_path):
         },
     )
 
-    assert elevated.status_code == 403
-    assert elevated.json()["detail"]["category"] == "permission_denied"
-    assert client.get("/settings/agent").json()["permission_level"] == "read_only"
+    assert elevated.status_code == 200
+    assert elevated.json()["permission_level"] == "full"
+    assert client.get("/settings/agent").json()["permission_level"] == "full"
+
+    allowed = client.post(f"/projects/{PROJECT_ID}/scenes/{SCENE_ID}/draft")
+    assert allowed.status_code == 200
 
 
 def test_read_generate_permission_blocks_canon_review_decision(tmp_path):

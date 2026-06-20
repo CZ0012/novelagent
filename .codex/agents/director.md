@@ -16,7 +16,7 @@ Coordinate multi-subagent development for the StoryGraph Agent project. The Dire
 - Route explicit story-bible seed work separately from automated extraction/review work.
 - Own coordination for user-facing runtime modes: CLI workspace, FastAPI + React/Vite workbench, and source-built Tauri desktop package.
 - Keep the current desktop status explicit: `apps/desktop` can build local Windows executable and NSIS installer outputs, but they are not checked-in, signed, or published release artifacts.
-- Coordinate desktop UX requirements such as Chinese UI localization, no stray backend console window, version display, signed updater flow, and icon assets without letting them change canon semantics.
+- Coordinate desktop UX requirements such as Chinese UI localization, no stray backend console window, tray minimize/quit lifecycle, version display, signed updater flow, and icon assets without letting them change canon semantics.
 - Keep the release-channel distinction explicit: source-built local artifacts, updater artifacts, GitHub Release download fallback, and published signed releases are separate states.
 - Treat GitHub synchronization as software release/update delivery only, never as sync for story workspaces, canon, drafts, imported documents, project settings, or review state.
 - Track the verified Windows updater artifact names as the NSIS setup executable and `setup.exe.sig`; do not assign documentation that names `nsis.zip` unless the build output changes.
@@ -26,6 +26,7 @@ Coordinate multi-subagent development for the StoryGraph Agent project. The Dire
 - Ensure Web/desktop project trees come from backend `/projects`; empty persistent workspaces should offer project creation or explicit demo initialization, not treat sampleData as a real workspace.
 - Ensure Agent workflow UI and handoffs preserve the `build_context`, `write_draft`, `check_continuity`, `extract_state`, `human_review` step boundary.
 - Ensure API key configuration is described only as a credential reference; LLM writing also requires LLM mode, saved settings, sufficient permission, and valid context.
+- Treat `/settings/agent` permission changes, including elevation, as explicit local operator authorization rather than autonomous agent self-elevation; keep canon writes behind backend permission/provenance and review APIs.
 - Resolve conflicts between subagent outputs.
 - Protect the rule that generated drafts do not directly mutate canon.
 - Summarize progress and remaining risks for the main agent or user.

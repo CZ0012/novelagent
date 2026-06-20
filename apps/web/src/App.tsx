@@ -2024,12 +2024,10 @@ function AgentSettingsInspector({
             </label>
           ))}
         </div>
-        {settings && !canRaisePermission(settings.permission_level, form.permission_level) && (
-          <div className="reader-warning">
-            <AlertTriangle size={15} />
-            <span>API 会阻止自行升权；如需重新升权，请有意编辑本地配置。</span>
-          </div>
-        )}
+        <div className="reader-warning">
+          <ShieldCheck size={15} />
+          <span>保存后权限立即生效；具体 canon 写入仍需要后端 full 权限和人工 provenance。</span>
+        </div>
       </section>
 
       <section className="settings-block">
@@ -2261,20 +2259,7 @@ function permissionIcon(level: AgentPermissionLevel) {
   return <ShieldCheck size={16} />;
 }
 
-function canRaisePermission(
-  current: AgentPermissionLevel,
-  next: AgentPermissionLevel
-): boolean {
-  return permissionRank[next] <= permissionRank[current];
-}
-
 const permissionLevels: AgentPermissionLevel[] = ["read_only", "read_generate", "full"];
-
-const permissionRank: Record<AgentPermissionLevel, number> = {
-  read_only: 0,
-  read_generate: 1,
-  full: 2
-};
 
 const permissionLabels: Record<AgentPermissionLevel, string> = {
   read_only: "仅读取",

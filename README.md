@@ -30,7 +30,7 @@ The implementation follows:
 - FastAPI routes for the authoring workflow plus persisted agent settings for model provider, API key reference, JSON mode, scene writer mode, and API permission level.
 - Chinese-localized React/Vite author workbench for real API-backed project trees, empty-workspace onboarding, scene drafting, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, pending fact review, local txt/md/docx file or folder import, agent settings, and update checks through the API or desktop shell.
 - Desktop-target FastAPI entrypoint (`apps.api.desktop_server`) that uses a persistent local workspace and the JSON graph backend.
-- Buildable Tauri desktop package under `apps/desktop`, including npm scripts, a Rust entrypoint, hidden PyInstaller backend sidecar packaging, backend start/stop/status commands, Tauri capabilities, signed-updater configuration, a sci-fi app icon, and NSIS installer configuration.
+- Buildable Tauri desktop package under `apps/desktop`, including npm scripts, a Rust entrypoint, hidden PyInstaller backend sidecar packaging, backend start/stop/status commands, system-tray lifecycle handling, Tauri capabilities, signed-updater configuration, a sci-fi app icon, and NSIS installer configuration.
 - Fantasy demo fixture and regression tests for the canon safety loop.
 
 ## Runtime Status
@@ -42,7 +42,7 @@ Use one of these surfaces:
 - CLI workspace: best for persistent local MVP runs. It stores JSON and SQLite state under `.storygraph`, `STORYGRAPH_HOME`, or the directory passed with `--workspace`.
 - Persistent FastAPI + React/Vite workbench: best for local authoring through the browser. Start the persistent API backend and the web dev server separately. It reads the real project tree from `/projects`; UI fixture/sample data is not treated as a workspace.
 - Seeded demo FastAPI + React/Vite workbench: best for quick UI experiments. The default `apps.api.main:app` uvicorn entrypoint uses in-memory demo stores unless created with explicit settings.
-- Tauri desktop app: best for direct local use after a source build. It hosts the React workbench, starts or connects to the local FastAPI backend without showing a backend console window, and can check signed desktop updates from the configured release channel.
+- Tauri desktop app: best for direct local use after a source build. It hosts the React workbench, starts or connects to the local FastAPI backend without showing a backend console window, keeps the app running in the system tray when the main window is closed, and can check signed desktop updates from the configured release channel.
 
 All examples below are PowerShell commands. They also work in Windows PowerShell unless your local execution policy, Python launcher, or Node installation differs.
 
@@ -110,7 +110,7 @@ Current desktop-related files are:
 - `apps/desktop/scripts/build-backend-sidecar.ps1`: Windows PowerShell script that packages `apps.api.desktop_server` as the Tauri backend sidecar.
 - `apps/desktop/scripts/build-installer.ps1`: Windows PowerShell script that rebuilds web assets, rebuilds the backend sidecar, and runs the signed Tauri installer build.
 - `apps/desktop/scripts/generate-icon.py`: dependency-free icon generator for the sci-fi app icon source PNG and `.ico` file.
-- `apps/desktop/src-tauri/Cargo.toml` and `src/main.rs`: Rust shell with commands for desktop settings, backend status, backend start, backend stop, and local path reporting.
+- `apps/desktop/src-tauri/Cargo.toml` and `src/main.rs`: Rust shell with commands for desktop settings, backend status, backend start, backend stop, local path reporting, and tray minimize/quit lifecycle.
 - `apps/desktop/src-tauri/capabilities/default.json`: Tauri v2 capability boundary for the main window.
 - `apps/desktop/src-tauri/tauri.conf.json`: Tauri configuration pointing at `apps/web`, an NSIS bundle target, and the signed updater endpoint.
 
@@ -126,7 +126,7 @@ npm --prefix apps/desktop run build:installer
 The generated installer is:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.0_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.1_x64-setup.exe
 ```
 
 Other useful desktop commands:
@@ -146,17 +146,17 @@ Verified local build output from `npm --prefix apps/desktop run build:installer`
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.0_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.0_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.1_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.1_x64-setup.exe.sig
 ```
 
-The full installer build regenerates the PyInstaller backend sidecar with `--noconsole`, rebuilds the React/Vite workbench, and runs `tauri build`. The Tauri shell also starts the sidecar with Windows `CREATE_NO_WINDOW`, so the packaged app should not show a stray backend terminal window. The generated installer, `setup.exe.sig` updater signature, backend sidecar, and release executables are local outputs, not checked-in release artifacts.
+The full installer build regenerates the PyInstaller backend sidecar with `--noconsole`, rebuilds the React/Vite workbench, and runs `tauri build`. The Tauri shell also starts the sidecar with Windows `CREATE_NO_WINDOW`, so the packaged app should not show a stray backend terminal window. Closing the main desktop window hides it to the system tray; use the tray menu item `退出 StoryGraph Agent` to stop the managed backend and exit the app. The generated installer, `setup.exe.sig` updater signature, backend sidecar, and release executables are local outputs, not checked-in release artifacts.
 
 The in-app settings panel includes a `Version & Updates` section. In the Tauri desktop runtime it uses `tauri-plugin-updater` to check the signed endpoint `https://github.com/CZ0012/novelagent/releases/latest/download/latest.json`, stop the managed backend, install the update, and restart the app. In a plain browser runtime it falls back to a GitHub Release check and, when available, links to the Windows installer asset.
 
 Version updates must keep `VERSION`, `pyproject.toml`, `apps/web/package.json`, `apps/web/src/version.ts`, `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, canon, drafts, imported documents, project settings, and review state are not synchronized to GitHub.
 
-For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.0_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.1_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 
@@ -229,13 +229,13 @@ These CLI commands read single UTF-8 text files. They do not import a folder tre
 
 ## API Permission Levels
 
-The FastAPI runtime has a local safety switch at `/settings/agent`. This is not authentication; it is a developer-local permission tier used to prevent accidental generation or canon writes from the API surface.
+The FastAPI runtime has a local operator authorization switch at `/settings/agent`. This is not authentication; it is a local permission tier used to prevent accidental generation or canon writes from the API surface.
 
 - `read_only`: allows read-style operations such as health, settings reads, graph queries, context building, continuity reads, and pending fact listing; blocks draft generation, state extraction, workflow runs, story-bible seed writes, and review decisions.
 - `read_generate`: allows draft generation or save, style sample insertion, state extraction, and scene workflow runs; blocks canon seed writes and candidate fact review decisions.
 - `full`: allows the full local API surface, including human seed writes and accept/edit-accept/reject/defer review decisions.
 
-The API can lower the current permission level, but it cannot raise permissions again from a lower level. Re-elevation must be done deliberately through the local `agent_config.json` file or a local reset.
+Saving `/settings/agent` is treated as explicit local operator authorization. The Web or desktop settings panel and the same local API can both lower and raise `permission_level`, and the new level applies immediately. This does not let generated drafts, imported documents, or model output bypass CandidateFact review; canon-changing routes still require `full` permission plus reviewer, rationale, source reference, and the normal backend review/provenance path.
 
 Set the level with PowerShell:
 

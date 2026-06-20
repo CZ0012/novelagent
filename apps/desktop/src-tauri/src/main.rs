@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::{
     env,
     fs::{self, File, OpenOptions},
@@ -13,12 +15,17 @@ use std::{
     thread,
     time::Duration,
 };
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-use tauri::Manager;
+use tauri::{
+    menu::MenuBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, WindowEvent,
+};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+const MAIN_WINDOW_LABEL: &str = "main";
+const TRAY_MENU_SHOW: &str = "show-main-window";
+const TRAY_MENU_QUIT: &str = "quit-storygraph-agent";
 
 #[derive(Default)]
 struct BackendProcess {
@@ -229,6 +236,7 @@ fn main() {
         .manage(BackendProcess::default())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            setup_tray(app)?;
             let settings = read_settings().unwrap_or_else(|_| DesktopSettings::default());
             if settings.auto_start_backend {
                 let app_handle = app.handle().clone();
@@ -238,6 +246,33 @@ fn main() {
                 });
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != MAIN_WINDOW_LABEL {
+                return;
+            }
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+                let _ = window.set_skip_taskbar(true);
+            }
+        })
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_MENU_SHOW => show_main_window(app),
+            TRAY_MENU_QUIT => quit_desktop_app(app),
+            _ => {}
+        })
+        .on_tray_icon_event(|app, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            }
+            | TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => show_main_window(app),
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             backend_status,
@@ -249,6 +284,40 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run StoryGraph Agent desktop shell");
+}
+
+fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
+    let menu = MenuBuilder::new(app)
+        .text(TRAY_MENU_SHOW, "显示主界面")
+        .separator()
+        .text(TRAY_MENU_QUIT, "退出 StoryGraph Agent")
+        .build()?;
+    let mut tray = TrayIconBuilder::with_id("storygraph-main-tray")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .tooltip("StoryGraph Agent 正在运行");
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+
+    tray.build(app)?;
+    Ok(())
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.set_skip_taskbar(false);
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn quit_desktop_app(app: &tauri::AppHandle) {
+    let state = app.state::<BackendProcess>();
+    let _ = stop_backend(state);
+    app.exit(0);
 }
 
 fn wait_for_backend(

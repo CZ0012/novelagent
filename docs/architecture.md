@@ -959,12 +959,12 @@ Neo4j / SQLite / Vector Store 本地连接
 
 当前状态：
 
-- `apps/desktop` 已是可构建的 Tauri shell，包含 npm scripts、Rust crate、Windows icon、后端启动/停止/状态命令、PyInstaller backend sidecar 和 NSIS bundle 配置。
+- `apps/desktop` 已是可构建的 Tauri shell，包含 npm scripts、Rust crate、Windows icon、后端启动/停止/状态命令、系统托盘隐藏/退出生命周期、PyInstaller backend sidecar 和 NSIS bundle 配置。
 - 当前可运行入口是 CLI、FastAPI + React/Vite Web 工作台、面向桌面宿主的持久化后端入口 `python -m apps.api.desktop_server`，以及源码构建的 Tauri 桌面应用。
 - `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。持久化或桌面空 workspace 应显示创建项目或显式初始化演示的入口。需要默认 demo project 时，应在工作台点击 `Seed Demo` 或调用 `POST /demo/seed`，该路径仍要求 full 权限并记录 reviewer、rationale 和 source_ref。
 - 默认 `apps.api.main:app` 开发入口可用于本地 demo；不传入 settings 时它使用 seeded in-memory stores，不应被描述为完整桌面产品或持久化作者项目入口。
-- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.0_x64-setup.exe` 及 Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.0_x64-setup.exe.sig`。这些产物是本地源码构建输出，不是已发布签名 release channel。当前验证产物不包含 `nsis.zip`。
-- FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地安全分级，不是身份认证；CLI 当前不执行同一权限闸门。
+- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.1_x64-setup.exe` 及 Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.1_x64-setup.exe.sig`。这些产物是本地源码构建输出，不是已发布签名 release channel。当前验证产物不包含 `nsis.zip`。
+- FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地操作者授权分级，不是身份认证；保存设置页或调用 `/settings/agent` 代表本地操作者显式授权，因此可升降权限并立即生效；CLI 当前不执行同一权限闸门。
 - React/Vite 工作台当前支持本地 `.txt`、`.md`、`.markdown`、`.docx` 文件和文件夹导入到前端资料树/阅读器。默认导入内容只保存在浏览器内存，不写 Draft Store、StyleSample Store、Candidate Store 或 Graph Store。作者可显式把 ready 文档保存为当前场景 Draft Store 草稿、保存为 StyleSample Store 风格样本，或先保存草稿后抽取 pending CandidateFact。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
 - Web 工作台的项目树和当前场景选择必须来自后端项目/章节/场景数据；Graph/Timeline 预览或其他 sampleData 只能作为 UI 占位，不得被 Context Pack、Draft Store、CandidateFact 或 Graph Store 当成真实 workspace 来源。
 - 设置页保存 API key、base URL 或模型名称不应自动切换到 LLM writer。LLM 写作只有在 scene writer mode 选择 `llm`、设置已保存、权限至少为 `read_generate`、当前项目/场景有效且 Context Pack 可构建时才应运行。
@@ -1384,6 +1384,7 @@ POST /projects/{project_id}/facts/{fact_id}/edit
 - 本地数据库路径与模型供应商设置。
 - 持久化 workspace 选择与重启恢复。
 - Windows 安装包、updater artifact 或可执行目录打包流程。
+- 桌面窗口关闭时隐藏到系统托盘；托盘菜单的显式退出动作才停止受管后端并退出应用。
 - 后端 sidecar 的无控制台启动、日志重定向和异常恢复。
 - 程序内签名更新检查、安装前停止受管后端、安装后重启。
 - 单一版本号同步、中文 UI 文案和桌面图标资源。
