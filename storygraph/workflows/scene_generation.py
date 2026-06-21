@@ -9,7 +9,9 @@ from storygraph.services.review_service import ReviewService
 from storygraph.services.scene_writer import RuleBasedSceneWriter
 from storygraph.services.state_extraction import RuleBasedStateExtractor
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
+from storygraph.stores.proposal_store import SQLiteProposalStore
 from storygraph.workflows.scene_generation_runtime import (
+    SceneGenerationOutputTarget,
     SceneGenerationRuntime,
     SceneGenerationServices,
     WorkflowRuntimeKind,
@@ -28,6 +30,7 @@ class SceneGenerationWorkflow:
         extractor: RuleBasedStateExtractor,
         workflow_store: SQLiteWorkflowStore | None = None,
         review_service: ReviewService | None = None,
+        proposal_store: SQLiteProposalStore | None = None,
         runtime_kind: WorkflowRuntimeKind = "local",
         runtime: SceneGenerationRuntime | None = None,
         checkpoint_path: str | None = None,
@@ -39,6 +42,7 @@ class SceneGenerationWorkflow:
             extractor=extractor,
             workflow_store=workflow_store,
             review_service=review_service,
+            proposal_store=proposal_store,
         )
         self.runtime = runtime or create_scene_generation_runtime(
             kind=runtime_kind,
@@ -46,8 +50,18 @@ class SceneGenerationWorkflow:
             checkpoint_path=checkpoint_path,
         )
 
-    def run(self, *, project_id: str, scene_id: str) -> SceneRunResult:
-        return self.runtime.run(project_id=project_id, scene_id=scene_id)
+    def run(
+        self,
+        *,
+        project_id: str,
+        scene_id: str,
+        output_target: SceneGenerationOutputTarget = "draft_store",
+    ) -> SceneRunResult:
+        return self.runtime.run(
+            project_id=project_id,
+            scene_id=scene_id,
+            output_target=output_target,
+        )
 
     def resume_review(self, run_id: str) -> WorkflowRun:
         return self.runtime.resume_review(run_id)

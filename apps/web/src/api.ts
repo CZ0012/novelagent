@@ -57,8 +57,75 @@ export type Draft = {
   version: number;
   text: string;
   summary?: string | null;
+  discarded: boolean;
   created_at: string;
   updated_at: string;
+};
+
+export type ProposalArtifactType =
+  | "scene_draft"
+  | "fact_draft"
+  | "scene_rebuild"
+  | "canon_patch"
+  | "outline_draft";
+
+export type ProposalStatus =
+  | "drafting"
+  | "agent_revised"
+  | "author_revised"
+  | "ready_for_review"
+  | "accepted"
+  | "rejected";
+
+export type ProposalRef = {
+  kind: string;
+  ref: string;
+  note?: string | null;
+  quote?: string | null;
+  source_span?: Record<string, unknown> | null;
+};
+
+export type ProposalReviewDecision = {
+  status: "none" | "accepted" | "rejected";
+  reviewer?: string | null;
+  reviewed_at?: string | null;
+  note?: string | null;
+};
+
+export type ProposalArtifact = {
+  contract_version: "proposal_artifact_v1";
+  id: string;
+  project_id: string;
+  artifact_type: ProposalArtifactType;
+  status: ProposalStatus;
+  title: string;
+  body: string;
+  body_format: "plain_text" | "markdown" | "structured_json";
+  target_refs: ProposalRef[];
+  source_refs: ProposalRef[];
+  provenance: {
+    created_by: string;
+    created_via: "manual" | "llm" | "import" | "workflow" | "api";
+    workflow_run_id?: string | null;
+    model_ref?: string | null;
+    note?: string | null;
+  };
+  version: number;
+  derived_refs: ProposalRef[];
+  review_decision: ProposalReviewDecision;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProposalDraftPromotionResult = {
+  proposal: ProposalArtifact;
+  draft: Draft;
+};
+
+export type ProposalCandidatePromotionResult = {
+  proposal: ProposalArtifact;
+  source_draft: Draft;
+  candidates: CandidateFact[];
 };
 
 export type GraphNodePayload = {
@@ -178,19 +245,43 @@ export type CandidateFact = {
   subject_id: string;
   relation: string;
   object_id?: string | null;
+  value?: string | null;
+  source_scene_id: string;
+  source_draft_id: string;
+  source_span: {
+    start_offset: number;
+    end_offset: number;
+    quote: string;
+  };
+  confidence: number;
   status: string;
   rationale: string;
+  evidence: Array<{
+    kind: string;
+    ref: string;
+    note?: string | null;
+    quote?: string | null;
+  }>;
+  proposed_graph_patch: {
+    operation: string;
+    target: string;
+    properties: Record<string, unknown>;
+    source_ref: string;
+  };
   review: {
     status: string;
     reviewer?: string | null;
+    reviewed_at?: string | null;
     note?: string | null;
   };
+  created_at: string;
 };
 
 export type SceneRunResult = {
   context_pack: ContextPack;
-  draft: Draft;
-  continuity_report: ContinuityReport;
+  draft: Draft | null;
+  proposal?: ProposalArtifact | null;
+  continuity_report: ContinuityReport | null;
   candidates: CandidateFact[];
   workflow_run: WorkflowRun;
 };
@@ -254,6 +345,19 @@ export async function apiPut<T>(
 ): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     method: "PUT",
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  return parseResponse<T>(response);
+}
+
+export async function apiPatch<T>(
+  baseUrl: string,
+  path: string,
+  body?: unknown
+): Promise<T> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "PATCH",
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body)
   });

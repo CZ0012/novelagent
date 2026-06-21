@@ -14,21 +14,22 @@ The implementation follows:
 - `contracts/workflow_run_v1.md`
 - `contracts/review_payload_v1.md`
 - `contracts/style_sample_store_v1.md`
+- `contracts/proposal_artifact_v1.md`
 
 ## Current MVP Capabilities
 
 - Pydantic contract models for graph state, context packs, candidate facts, drafts, workflow runs, review payloads, style samples, and continuity reports.
 - Canon-safe graph stores with explicit provenance and event log entries, including the local JSON graph backend and optional Neo4j backend.
-- SQLite stores for drafts, candidate facts, workflow runs, and deterministic local style samples.
+- SQLite stores for drafts, proposal artifacts, candidate facts, workflow runs, and deterministic local style samples.
 - Context Pack builder with P0-P7 budgeting metadata, graph and draft provenance, retrieved style samples, and `missing_context` gap reports.
 - Rule-based scene writer, optional OpenAI-compatible LLM scene writer, rule-based continuity checker, and rule-based candidate fact extractor.
 - Review service that keeps generated `CandidateFact` records pending until a human accept, edit-accept, reject, or defer decision.
 - Human seed paths for story-bible Characters, Locations, and graph relationships. These write canon only when the user supplies reviewer, rationale, source reference, and provenance.
 - Read-only graph query API and CLI commands for inspecting canon neighbors and relationships.
 - Local CLI workspace commands for context building, scene drafting, continuity checks, state extraction, workflow runs, and pending fact review.
-- Workflow run checkpoints and projections with API run listing, run event inspection, review-pause resume, persisted stores, and optional LangGraph runtime/checkpointer support.
+- Workflow run checkpoints and projections with API run listing, run event inspection, review-pause resume, proposal-output runs, persisted stores, and optional LangGraph runtime/checkpointer support.
 - FastAPI routes for the authoring workflow plus persisted agent settings for model provider, API key reference, JSON mode, scene writer mode, and API permission level.
-- Chinese-localized React/Vite author workbench for real API-backed project trees, empty-workspace onboarding, scene drafting, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, pending fact review, local txt/md/docx file or folder import, agent settings, and update checks through the API or desktop shell.
+- Chinese-localized React/Vite author workbench for real API-backed project trees, empty-workspace onboarding, scene drafting, Proposal Workspace collaboration, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, pending fact review, local txt/md/docx file or folder import, agent settings, and update checks through the API or desktop shell.
 - Desktop-target FastAPI entrypoint (`apps.api.desktop_server`) that uses a persistent local workspace and the JSON graph backend.
 - Buildable Tauri desktop package under `apps/desktop`, including npm scripts, a Rust entrypoint, hidden PyInstaller backend sidecar packaging, backend start/stop/status commands, system-tray lifecycle handling, Tauri capabilities, signed-updater configuration, a sci-fi app icon, and NSIS installer configuration.
 - Fantasy demo fixture and regression tests for the canon safety loop.
@@ -126,7 +127,7 @@ npm --prefix apps/desktop run build:installer
 The generated installer is:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.1_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.2_x64-setup.exe
 ```
 
 Other useful desktop commands:
@@ -146,8 +147,8 @@ Verified local build output from `npm --prefix apps/desktop run build:installer`
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.1_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.1_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.2_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.2_x64-setup.exe.sig
 ```
 
 The full installer build regenerates the PyInstaller backend sidecar with `--noconsole`, rebuilds the React/Vite workbench, and runs `tauri build`. The Tauri shell also starts the sidecar with Windows `CREATE_NO_WINDOW`, so the packaged app should not show a stray backend terminal window. Closing the main desktop window hides it to the system tray; use the tray menu item `退出 StoryGraph Agent` to stop the managed backend and exit the app. The generated installer, `setup.exe.sig` updater signature, backend sidecar, and release executables are local outputs, not checked-in release artifacts.
@@ -156,7 +157,7 @@ The in-app settings panel includes a `Version & Updates` section. In the Tauri d
 
 Version updates must keep `VERSION`, `pyproject.toml`, `apps/web/package.json`, `apps/web/src/version.ts`, `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, canon, drafts, imported documents, project settings, and review state are not synchronized to GitHub.
 
-For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.1_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.2_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 
@@ -213,10 +214,11 @@ The React/Vite workbench can import local `.txt`, `.md`, `.markdown`, and `.docx
 From the reader, the author may explicitly send a ready imported document through backend stores:
 
 - Save as the current scene draft in Draft Store.
+- Save as a `proposal_artifact_v1` collaboration draft in Proposal Store.
 - Save as a StyleSample Store style sample for P6 soft style retrieval.
 - Save as the current scene draft and then run state extraction, which can create pending `CandidateFact` records.
 
-These paths require the normal backend project/scene and permission checks. They still do not write Graph Store canon directly; extracted candidates remain pending until human review accepts or edit-accepts them with provenance.
+Proposal artifacts are non-canon workspace records. Accepted `scene_draft` proposals can be explicitly promoted to Draft Store; accepted `fact_draft` proposals can submit pending CandidateFacts only from a real Draft Store `source_draft_id`. These paths require the normal backend project/scene and permission checks. They still do not write Graph Store canon directly; extracted candidates remain pending until human review accepts or edit-accepts them with provenance.
 
 CLI file inputs are still intentionally narrow:
 
@@ -231,9 +233,9 @@ These CLI commands read single UTF-8 text files. They do not import a folder tre
 
 The FastAPI runtime has a local operator authorization switch at `/settings/agent`. This is not authentication; it is a local permission tier used to prevent accidental generation or canon writes from the API surface.
 
-- `read_only`: allows read-style operations such as health, settings reads, graph queries, context building, continuity reads, and pending fact listing; blocks draft generation, state extraction, workflow runs, story-bible seed writes, and review decisions.
-- `read_generate`: allows draft generation or save, style sample insertion, state extraction, and scene workflow runs; blocks canon seed writes and candidate fact review decisions.
-- `full`: allows the full local API surface, including human seed writes and accept/edit-accept/reject/defer review decisions.
+- `read_only`: allows read-style operations such as health, settings reads, graph queries, proposal listing, context building, continuity reads, and pending fact listing; blocks draft generation, proposal creation, state extraction, workflow runs, story-bible seed writes, and review decisions.
+- `read_generate`: allows draft generation or save, proposal creation/revision, style sample insertion, state extraction, and scene workflow runs; blocks canon seed writes, proposal accept/reject, promotion actions, and candidate fact review decisions.
+- `full`: allows the full local API surface, including human seed writes, proposal decisions/promotions, and accept/edit-accept/reject/defer review decisions.
 
 Saving `/settings/agent` is treated as explicit local operator authorization. The Web or desktop settings panel and the same local API can both lower and raise `permission_level`, and the new level applies immediately. This does not let generated drafts, imported documents, or model output bypass CandidateFact review; canon-changing routes still require `full` permission plus reviewer, rationale, source reference, and the normal backend review/provenance path.
 
@@ -293,6 +295,8 @@ $env:STORYGRAPH_WORKFLOW_RUNTIME="local"
 
 The workbench `Run` Agent workflow button follows the `scene_generation` steps from `workflow_run_v1`: `build_context`, `write_draft`, `check_continuity`, `extract_state`, and `human_review`. The review step is a pause around pending candidates, not a canon write by itself.
 
+The API can also run `scene_generation` with `output_target=proposal_workspace`. That mode calls the configured writer, stores the result as a `scene_draft` proposal artifact, and skips continuity checking, state extraction, and human review because no Draft Store draft exists yet. The default `draft_store` mode remains compatible with existing CLI/API behavior.
+
 To run the same `scene_generation` flow through a real LangGraph `StateGraph` with SQLite checkpoints, install the optional extra and set:
 
 ```powershell
@@ -306,6 +310,7 @@ LangGraph checkpoints are stored at `langgraph_checkpoints.sqlite` inside the St
 
 - The Graph Store is the source of truth for canon state.
 - Draft text, generated summaries, imported text, style samples, frontend placeholders, and model hypotheses must not directly mutate canon.
+- Proposal artifacts are non-canon collaboration records; accepting a proposal does not commit canon and promotion is a separate backend action.
 - Automated extraction may only produce `CandidateFact` records or proposed graph patches.
 - A candidate fact becomes canon only after explicit human review.
 - Every canon write must have provenance: source scene, source draft or author seed, rationale, reviewer decision, and event log entry.

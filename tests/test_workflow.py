@@ -11,6 +11,7 @@ from storygraph.services import (
 from storygraph.services.scene_writer import DraftResult
 from storygraph.stores.candidate_store import InMemoryCandidateStore
 from storygraph.stores.draft_store import SQLiteDraftStore
+from storygraph.stores.proposal_store import SQLiteProposalStore
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
 from storygraph.workflows import SceneGenerationWorkflow
 
@@ -64,6 +65,51 @@ def test_scene_generation_workflow_persists_completed_run_checkpoint():
         "completed",
         "skipped",
     ]
+
+
+def test_scene_generation_workflow_can_write_scene_draft_proposal_without_draft_store():
+    graph = build_fantasy_demo_graph()
+    draft_store = SQLiteDraftStore()
+    workflow_store = SQLiteWorkflowStore()
+    proposal_store = SQLiteProposalStore()
+    workflow = SceneGenerationWorkflow(
+        context_builder=ContextPackBuilder(graph, draft_store),
+        writer=RuleBasedSceneWriter(draft_store),
+        checker=RuleBasedContinuityChecker(),
+        extractor=RuleBasedStateExtractor(),
+        workflow_store=workflow_store,
+        proposal_store=proposal_store,
+    )
+
+    result = workflow.run(
+        project_id=PROJECT_ID,
+        scene_id=SCENE_ID,
+        output_target="proposal_workspace",
+    )
+    stored = workflow_store.get(result.workflow_run.id)
+    proposals = proposal_store.list(project_id=PROJECT_ID)
+
+    assert result.draft is None
+    assert result.continuity_report is None
+    assert result.candidates == []
+    assert result.proposal is not None
+    assert result.proposal.artifact_type == "scene_draft"
+    assert result.proposal.status == "agent_revised"
+    assert draft_store.latest_for_scene(PROJECT_ID, SCENE_ID) is None
+    assert [proposal.id for proposal in proposals] == [result.proposal.id]
+    assert stored.status == "completed"
+    assert stored.current_step == "END"
+    assert [step.status for step in stored.steps] == [
+        "completed",
+        "completed",
+        "skipped",
+        "skipped",
+        "skipped",
+    ]
+    assert stored.steps[1].artifact_refs["proposal_id"] == result.proposal.id
+    assert not any(
+        relation.properties.get("candidate_fact_id") for relation in graph.relationships.values()
+    )
 
 
 def test_scene_generation_workflow_records_review_payload_when_candidates_exist():

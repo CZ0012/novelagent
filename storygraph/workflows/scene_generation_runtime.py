@@ -18,17 +18,20 @@ from storygraph.models.candidate import CandidateFact
 from storygraph.models.context import ContextPack
 from storygraph.models.continuity import ContinuityReport
 from storygraph.models.draft import Draft
+from storygraph.models.proposal import ProposalArtifact, ProposalProvenance, ProposalRef
 from storygraph.models.workflow import ReviewPayload, WorkflowRun, WorkflowStep
 from storygraph.services.context_pack_builder import ContextPackBuilder
 from storygraph.services.continuity_checker import RuleBasedContinuityChecker
 from storygraph.services.review_service import ReviewService
 from storygraph.services.scene_writer import RuleBasedSceneWriter
 from storygraph.services.state_extraction import RuleBasedStateExtractor
+from storygraph.stores.proposal_store import SQLiteProposalStore
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
 from storygraph.workflows.types import SceneRunResult
 
 
 WorkflowRuntimeKind = Literal["local", "langgraph"]
+SceneGenerationOutputTarget = Literal["draft_store", "proposal_workspace"]
 
 
 @dataclass(frozen=True)
@@ -39,12 +42,19 @@ class SceneGenerationServices:
     extractor: RuleBasedStateExtractor
     workflow_store: SQLiteWorkflowStore | None = None
     review_service: ReviewService | None = None
+    proposal_store: SQLiteProposalStore | None = None
 
 
 class SceneGenerationRuntime(Protocol):
     runtime_kind: str
 
-    def run(self, *, project_id: str, scene_id: str) -> SceneRunResult:
+    def run(
+        self,
+        *,
+        project_id: str,
+        scene_id: str,
+        output_target: SceneGenerationOutputTarget = "draft_store",
+    ) -> SceneRunResult:
         ...
 
     def resume_review(self, run_id: str) -> WorkflowRun:
@@ -64,8 +74,15 @@ class LocalSceneGenerationRuntime:
         self.extractor = services.extractor
         self.workflow_store = services.workflow_store
         self.review_service = services.review_service
+        self.proposal_store = services.proposal_store
 
-    def run(self, *, project_id: str, scene_id: str) -> SceneRunResult:
+    def run(
+        self,
+        *,
+        project_id: str,
+        scene_id: str,
+        output_target: SceneGenerationOutputTarget = "draft_store",
+    ) -> SceneRunResult:
         run = self._start_run(project_id=project_id, scene_id=scene_id)
         try:
             context_pack = self.context_builder.build(project_id=project_id, scene_id=scene_id)
@@ -77,6 +94,26 @@ class LocalSceneGenerationRuntime:
             "build_context",
             artifact_refs={"context_pack_id": f"context_{scene_id}"},
         )
+        if output_target == "proposal_workspace":
+            try:
+                proposal = self._write_proposal(context_pack=context_pack, run=run)
+            except Exception as exc:
+                self._fail_run(run, current_step="write_draft", exc=exc)
+                raise
+            run = self._complete_step(
+                run,
+                "write_draft",
+                artifact_refs={"proposal_id": proposal.id, "proposal_version": proposal.version},
+            )
+            run = self._finish_proposal_output(run)
+            return SceneRunResult(
+                context_pack=context_pack,
+                draft=None,
+                continuity_report=None,
+                candidates=[],
+                workflow_run=run,
+                proposal=proposal,
+            )
         try:
             draft = self.writer.write_and_save(context_pack)
         except Exception as exc:
@@ -196,6 +233,36 @@ class LocalSceneGenerationRuntime:
         )
         return self._save(run)
 
+    def _write_proposal(self, *, context_pack: ContextPack, run: WorkflowRun) -> ProposalArtifact:
+        if not self.proposal_store:
+            raise RuntimeError("proposal_workspace output requires a proposal store")
+        result = self.writer.draft(context_pack)
+        now = utc_now()
+        proposal = ProposalArtifact(
+            id=new_id("proposal"),
+            project_id=context_pack.project_id,
+            artifact_type="scene_draft",
+            status="agent_revised",
+            title=f"场景草稿提案：{context_pack.scene_id}",
+            body=result.text,
+            body_format="markdown",
+            target_refs=[ProposalRef(kind="scene", ref=context_pack.scene_id)],
+            source_refs=[
+                ProposalRef(kind="context_pack", ref=f"context_{context_pack.scene_id}"),
+                ProposalRef(kind="workflow_run", ref=run.id),
+            ],
+            provenance=ProposalProvenance(
+                created_by="agent",
+                created_via="workflow",
+                workflow_run_id=run.id,
+                note="Scene generation wrote to Proposal Workspace instead of Draft Store.",
+            ),
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+        return self.proposal_store.create(proposal)
+
     def _complete_step(
         self,
         run: WorkflowRun,
@@ -227,6 +294,33 @@ class LocalSceneGenerationRuntime:
                 steps.append(step)
         return self._save(
             run.model_copy(update={"steps": steps, "current_step": current_step, "updated_at": now})
+        )
+
+    def _finish_proposal_output(self, run: WorkflowRun) -> WorkflowRun:
+        now = utc_now()
+        steps = []
+        for step in run.steps:
+            if step.status == "pending":
+                steps.append(
+                    step.model_copy(
+                        update={
+                            "status": "skipped",
+                            "completed_at": now,
+                            "message": "Skipped because output_target=proposal_workspace.",
+                        }
+                    )
+                )
+            else:
+                steps.append(step)
+        return self._save(
+            run.model_copy(
+                update={
+                    "status": "completed",
+                    "current_step": "END",
+                    "steps": steps,
+                    "updated_at": now,
+                }
+            )
         )
 
     def _finish_after_extraction(
@@ -316,7 +410,19 @@ class LangGraphSceneGenerationRuntime(LocalSceneGenerationRuntime):
         self._checkpointer = checkpointer or self._open_checkpointer(checkpoint_path)
         self._app = self._build_graph(checkpointer)
 
-    def run(self, *, project_id: str, scene_id: str) -> SceneRunResult:
+    def run(
+        self,
+        *,
+        project_id: str,
+        scene_id: str,
+        output_target: SceneGenerationOutputTarget = "draft_store",
+    ) -> SceneRunResult:
+        if output_target == "proposal_workspace":
+            return super().run(
+                project_id=project_id,
+                scene_id=scene_id,
+                output_target=output_target,
+            )
         run = self._start_run(project_id=project_id, scene_id=scene_id)
         state = self._app.invoke(
             {

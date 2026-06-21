@@ -46,6 +46,11 @@ import {
   DemoSeedResult,
   Draft,
   GraphNodePayload,
+  ProposalArtifact,
+  ProposalArtifactType,
+  ProposalCandidatePromotionResult,
+  ProposalDraftPromotionResult,
+  ProposalStatus,
   ProjectGraphPreview,
   ProjectOutline,
   SceneOutline,
@@ -53,6 +58,7 @@ import {
   WorkflowRun,
   WorkflowStep,
   apiGet,
+  apiPatch,
   apiPost,
   apiPut
 } from "./api";
@@ -224,6 +230,14 @@ export default function App() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draftText, setDraftText] = useState("");
   const [draftSummary, setDraftSummary] = useState("");
+  const [proposals, setProposals] = useState<ProposalArtifact[]>([]);
+  const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
+  const [proposalTitle, setProposalTitle] = useState("");
+  const [proposalText, setProposalText] = useState("");
+  const [proposalArtifactType, setProposalArtifactType] =
+    useState<ProposalArtifactType>("scene_draft");
+  const [proposalStatusFilter, setProposalStatusFilter] = useState<ProposalStatus | "all">("all");
+  const [proposalSourceDraftId, setProposalSourceDraftId] = useState("");
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [runEvents, setRunEvents] = useState<WorkflowStep[]>([]);
   const [continuityReport, setContinuityReport] = useState<ContinuityReport | null>(null);
@@ -274,6 +288,17 @@ export default function App() {
   const selectedLibraryDocument = useMemo(
     () => libraryDocuments.find((document) => document.id === selectedLibraryDocumentId) ?? null,
     [libraryDocuments, selectedLibraryDocumentId]
+  );
+  const selectedProposal = useMemo(
+    () => proposals.find((proposal) => proposal.id === selectedProposalId) ?? null,
+    [proposals, selectedProposalId]
+  );
+  const visibleProposals = useMemo(
+    () =>
+      proposalStatusFilter === "all"
+        ? proposals
+        : proposals.filter((proposal) => proposal.status === proposalStatusFilter),
+    [proposalStatusFilter, proposals]
   );
 
   const runAction = useCallback(async (label: string, action: () => Promise<void>) => {
@@ -366,6 +391,10 @@ export default function App() {
         setDraft(null);
         setDraftText("");
         setDraftSummary("");
+        setProposals([]);
+        setSelectedProposalId(null);
+        setProposalTitle("");
+        setProposalText("");
         setRun(null);
         setRunEvents([]);
         setContinuityReport(null);
@@ -417,6 +446,28 @@ export default function App() {
       setDraftSummary(payload.draft?.summary ?? "");
     },
     [apiBase, projectId, sceneId]
+  );
+
+  const refreshProposals = useCallback(
+    async (targetProjectId = projectId) => {
+      if (!targetProjectId) {
+        setProposals([]);
+        setSelectedProposalId(null);
+        return [];
+      }
+      const payload = await apiGet<{ proposals: ProposalArtifact[] }>(
+        apiBase,
+        `/projects/${targetProjectId}/proposals`
+      );
+      setProposals(payload.proposals);
+      if (!payload.proposals.length) {
+        setSelectedProposalId(null);
+        setProposalTitle("");
+        setProposalText("");
+      }
+      return payload.proposals;
+    },
+    [apiBase, projectId]
   );
 
   const refreshFacts = useCallback(async () => {
@@ -752,6 +803,31 @@ export default function App() {
     [apiBase, contextPack, projectId]
   );
 
+  const saveDocumentAsProposal = useCallback(
+    async (document: LibraryDocument) => {
+      if (!projectId || !sceneId) throw new Error("请先创建并选择一个场景。");
+      if (document.status !== "ready") throw new Error("这个文档还不能保存为协作草稿。");
+      const proposal = await apiPost<ProposalArtifact>(
+        apiBase,
+        `/projects/${projectId}/proposals`,
+        {
+          artifact_type: "scene_draft",
+          title: `导入提案：${document.name}`,
+          body: document.content,
+          target_refs: [{ kind: "scene", ref: sceneId }],
+          source_refs: [{ kind: "imported_document", ref: `import:${document.path}::${document.id}` }],
+          created_by: "author",
+          created_via: "import",
+          provenance_note: `本地导入文档：${document.name}`
+        }
+      );
+      await refreshProposals(projectId);
+      setSelectedProposalId(proposal.id);
+      setNotice(`“${document.name}”已保存到协作草稿箱；当前场景草稿和 canon 未改变。`);
+    },
+    [apiBase, projectId, refreshProposals, sceneId]
+  );
+
   const saveDocumentAsDraftAndExtract = useCallback(
     async (document: LibraryDocument) => {
       await saveDocumentAsDraft(document);
@@ -826,6 +902,9 @@ export default function App() {
       apiBase,
       `${endpoint}/runs/scene-generation`
     );
+    if (!result.draft || !result.continuity_report) {
+      throw new Error("工作流未返回 Draft Store 草稿。");
+    }
     setContextPack(result.context_pack);
     setDraft(result.draft);
     setDraftText(result.draft.text);
@@ -841,6 +920,202 @@ export default function App() {
     await refreshFacts();
     setNotice(`工作流状态：${formatStatus(result.workflow_run.status)}。`);
   }, [apiBase, endpoint, refreshFacts]);
+
+  const startNewProposal = useCallback(() => {
+    setSelectedProposalId(null);
+    setProposalArtifactType("scene_draft");
+    setProposalTitle(selectedScene ? `${selectedScene.title} 协作草稿` : "");
+    setProposalText("");
+    setProposalSourceDraftId(draft?.id ?? "");
+  }, [draft, selectedScene]);
+
+  const saveProposal = useCallback(async () => {
+    if (!projectId) throw new Error("请先选择或创建项目。");
+    const title = proposalTitle.trim() || "未命名协作草稿";
+    const body = proposalText;
+    if (selectedProposal) {
+      const saved = await apiPatch<ProposalArtifact>(
+        apiBase,
+        `/projects/${projectId}/proposals/${selectedProposal.id}`,
+        {
+          title,
+          body,
+          expected_version: selectedProposal.version
+        }
+      );
+      await refreshProposals(projectId);
+      setSelectedProposalId(saved.id);
+      setNotice(`协作草稿已保存为 v${saved.version}；Draft/Candidate/Canon 未改变。`);
+      return;
+    }
+    const targetRefs =
+      proposalArtifactType === "fact_draft" && proposalSourceDraftId.trim()
+        ? [{ kind: "draft", ref: proposalSourceDraftId.trim() }]
+        : sceneId
+          ? [{ kind: "scene", ref: sceneId }]
+          : [];
+    const saved = await apiPost<ProposalArtifact>(
+      apiBase,
+      `/projects/${projectId}/proposals`,
+      {
+        artifact_type: proposalArtifactType,
+        title,
+        body,
+        target_refs: targetRefs,
+        source_refs: [{ kind: "author_instruction", ref: "workbench:proposal_editor" }],
+        created_by: "author",
+        created_via: "manual",
+        provenance_note: "作者从协作草稿箱创建。"
+      }
+    );
+    await refreshProposals(projectId);
+    setSelectedProposalId(saved.id);
+    setNotice(`协作草稿已创建为 v${saved.version}；尚未进入 Draft/Candidate/Canon。`);
+  }, [
+    apiBase,
+    projectId,
+    proposalArtifactType,
+    proposalSourceDraftId,
+    proposalText,
+    proposalTitle,
+    refreshProposals,
+    sceneId,
+    selectedProposal
+  ]);
+
+  const requestAgentProposal = useCallback(async () => {
+    if (!endpoint) throw new Error("请先选择场景。");
+    if (
+      selectedProposal &&
+      selectedProposal.status !== "accepted" &&
+      selectedProposal.status !== "rejected"
+    ) {
+      const revised = await apiPost<ProposalArtifact>(
+        apiBase,
+        `/projects/${projectId}/proposals/${selectedProposal.id}/revise`,
+        {
+          actor: "agent",
+          created_via: "workflow",
+          expected_version: selectedProposal.version,
+          note: "Agent 从当前 Context Pack 生成新的协作草稿版本。"
+        }
+      );
+      await refreshProposals(projectId);
+      setSelectedProposalId(revised.id);
+      setNotice(`Agent 已修订协作草稿为 v${revised.version}；当前场景草稿未被覆盖。`);
+      return;
+    }
+    const result = await apiPost<SceneRunResult>(
+      apiBase,
+      `${endpoint}/runs/scene-generation`,
+      { output_target: "proposal_workspace" }
+    );
+    setContextPack(result.context_pack);
+    setRun(result.workflow_run);
+    setContinuityReport(result.continuity_report);
+    const events = await apiGet<{ events: WorkflowStep[] }>(
+      apiBase,
+      `/runs/${result.workflow_run.id}/events`
+    );
+    setRunEvents(events.events);
+    const refreshed = await refreshProposals(projectId);
+    if (result.proposal) {
+      setSelectedProposalId(result.proposal.id);
+    } else if (refreshed[0]) {
+      setSelectedProposalId(refreshed[0].id);
+    }
+    setNotice("Agent 已生成 scene_draft 协作草稿；当前场景草稿未被覆盖。");
+  }, [apiBase, endpoint, projectId, refreshProposals, selectedProposal]);
+
+  const extractStateToProposal = useCallback(async () => {
+    if (!endpoint) throw new Error("请先选择场景。");
+    const result = await apiPost<{
+      proposal: ProposalArtifact;
+      candidate_previews: CandidateFact[];
+      candidates: CandidateFact[];
+    }>(apiBase, `${endpoint}/extract-state`, { output_target: "proposal_workspace" });
+    await refreshProposals(projectId);
+    setSelectedProposalId(result.proposal.id);
+    setNotice(
+      result.candidate_previews.length
+        ? `已生成 fact_draft 协作草稿，包含 ${result.candidate_previews.length} 条候选预览。`
+        : "已生成 fact_draft 协作草稿，当前草稿未发现候选事实。"
+    );
+  }, [apiBase, endpoint, projectId, refreshProposals]);
+
+  const submitProposalReview = useCallback(async () => {
+    if (!selectedProposal || !projectId) throw new Error("请先选择协作草稿。");
+    const saved = await apiPost<ProposalArtifact>(
+      apiBase,
+      `/projects/${projectId}/proposals/${selectedProposal.id}/submit-review`,
+      { expected_version: selectedProposal.version }
+    );
+    await refreshProposals(projectId);
+    setSelectedProposalId(saved.id);
+    setNotice(`协作草稿 ${saved.id} 已标记为待审。`);
+  }, [apiBase, projectId, refreshProposals, selectedProposal]);
+
+  const reviewProposal = useCallback(
+    async (decision: "accept" | "reject") => {
+      if (!selectedProposal || !projectId) throw new Error("请先选择协作草稿。");
+      const saved = await apiPost<ProposalArtifact>(
+        apiBase,
+        `/projects/${projectId}/proposals/${selectedProposal.id}/${decision}`,
+        { reviewer: "author", expected_version: selectedProposal.version }
+      );
+      await refreshProposals(projectId);
+      setSelectedProposalId(saved.id);
+      setNotice(`协作草稿已${decision === "accept" ? "接受" : "拒绝"}；canon 未改变。`);
+    },
+    [apiBase, projectId, refreshProposals, selectedProposal]
+  );
+
+  const promoteProposalToDraft = useCallback(async () => {
+    if (!selectedProposal || !projectId || !sceneId) throw new Error("请先选择场景和协作草稿。");
+    const result = await apiPost<ProposalDraftPromotionResult>(
+      apiBase,
+      `/projects/${projectId}/proposals/${selectedProposal.id}/promote/draft`,
+      { scene_id: sceneId, expected_version: selectedProposal.version }
+    );
+    setDraft(result.draft);
+    setDraftText(result.draft.text);
+    setDraftSummary(result.draft.summary ?? "");
+    await refreshProposals(projectId);
+    setSelectedProposalId(result.proposal.id);
+    setNotice(`已转为当前场景草稿 v${result.draft.version}；canon 未改变。`);
+  }, [apiBase, projectId, refreshProposals, sceneId, selectedProposal]);
+
+  const promoteProposalToCandidates = useCallback(async () => {
+    if (!selectedProposal || !projectId) throw new Error("请先选择协作草稿。");
+    const sourceDraftId =
+      proposalSourceDraftId.trim() || findProposalRef(selectedProposal, "draft") || draft?.id || "";
+    if (!sourceDraftId) throw new Error("请提供真实来源草稿 ID。");
+    const result = await apiPost<ProposalCandidatePromotionResult>(
+      apiBase,
+      `/projects/${projectId}/proposals/${selectedProposal.id}/promote/candidate-facts`,
+      {
+        source_draft_id: sourceDraftId,
+        expected_version: selectedProposal.version
+      }
+    );
+    await refreshProposals(projectId);
+    await refreshFacts();
+    setSelectedProposalId(result.proposal.id);
+    setActiveTab("facts");
+    setNotice(
+      result.candidates.length
+        ? `已提交 ${result.candidates.length} 条候选事实；canon 尚未改变。`
+        : "来源草稿中没有可抽取的候选事实。"
+    );
+  }, [
+    apiBase,
+    draft,
+    projectId,
+    proposalSourceDraftId,
+    refreshFacts,
+    refreshProposals,
+    selectedProposal
+  ]);
 
   const reviewFact = useCallback(
     async (factId: string, action: "accept" | "reject" | "defer") => {
@@ -886,6 +1161,28 @@ export default function App() {
   useEffect(() => {
     refreshLatestDraft().catch(() => undefined);
   }, [refreshLatestDraft]);
+
+  useEffect(() => {
+    refreshProposals().catch(() => undefined);
+  }, [refreshProposals]);
+
+  useEffect(() => {
+    if (!proposals.length) {
+      setSelectedProposalId(null);
+      return;
+    }
+    if (!selectedProposalId || !proposals.some((proposal) => proposal.id === selectedProposalId)) {
+      setSelectedProposalId(proposals[0].id);
+    }
+  }, [proposals, selectedProposalId]);
+
+  useEffect(() => {
+    if (!selectedProposal) return;
+    setProposalTitle(selectedProposal.title);
+    setProposalText(selectedProposal.body);
+    setProposalArtifactType(selectedProposal.artifact_type);
+    setProposalSourceDraftId(findProposalRef(selectedProposal, "draft") ?? draft?.id ?? "");
+  }, [draft, selectedProposal]);
 
   useEffect(() => {
     const firstChapterId = selectedProject?.chapters[0]?.id ?? "";
@@ -1153,12 +1450,53 @@ export default function App() {
                     await saveDocumentAsDraft(document);
                   })
                 }
+                onSaveProposal={(document) =>
+                  runAction("import-proposal", () => saveDocumentAsProposal(document))
+                }
                 onSaveStyle={(document) =>
                   runAction("import-style", () => saveDocumentAsStyleSample(document))
                 }
               />
             </div>
           </section>
+
+          <ProposalInbox
+            busy={busy}
+            canGenerate={canGenerate}
+            canReview={canReview}
+            currentDraftId={draft?.id ?? ""}
+            filter={proposalStatusFilter}
+            hasScene={hasScene}
+            onAccept={() => runAction("proposal-accept", () => reviewProposal("accept"))}
+            onCreateNew={startNewProposal}
+            onExtractCandidates={() =>
+              runAction("proposal-candidates", promoteProposalToCandidates)
+            }
+            onExtractFactDraft={() =>
+              runAction("proposal-fact-draft", extractStateToProposal)
+            }
+            onFilterChange={setProposalStatusFilter}
+            onOpenCanonReview={() => {
+              setActiveTab("facts");
+              setNotice("已打开候选事实审阅队列。");
+            }}
+            onPromoteDraft={() => runAction("proposal-draft", promoteProposalToDraft)}
+            onReject={() => runAction("proposal-reject", () => reviewProposal("reject"))}
+            onRequestAgent={() => runAction("proposal-agent", requestAgentProposal)}
+            onSave={() => runAction("proposal-save", saveProposal)}
+            onSelect={setSelectedProposalId}
+            onSourceDraftChange={setProposalSourceDraftId}
+            onSubmitReview={() => runAction("proposal-submit", submitProposalReview)}
+            onTextChange={setProposalText}
+            onTitleChange={setProposalTitle}
+            onTypeChange={setProposalArtifactType}
+            proposalSourceDraftId={proposalSourceDraftId}
+            proposalText={proposalText}
+            proposalTitle={proposalTitle}
+            proposalType={proposalArtifactType}
+            proposals={visibleProposals}
+            selectedProposal={selectedProposal}
+          />
 
           <section className="draft-surface">
             <div className="draft-header">
@@ -1236,6 +1574,220 @@ export default function App() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function ProposalInbox({
+  busy,
+  canGenerate,
+  canReview,
+  currentDraftId,
+  filter,
+  hasScene,
+  onAccept,
+  onCreateNew,
+  onExtractCandidates,
+  onExtractFactDraft,
+  onFilterChange,
+  onOpenCanonReview,
+  onPromoteDraft,
+  onReject,
+  onRequestAgent,
+  onSave,
+  onSelect,
+  onSourceDraftChange,
+  onSubmitReview,
+  onTextChange,
+  onTitleChange,
+  onTypeChange,
+  proposalSourceDraftId,
+  proposalText,
+  proposalTitle,
+  proposalType,
+  proposals,
+  selectedProposal
+}: {
+  busy: string | null;
+  canGenerate: boolean;
+  canReview: boolean;
+  currentDraftId: string;
+  filter: ProposalStatus | "all";
+  hasScene: boolean;
+  onAccept: () => void;
+  onCreateNew: () => void;
+  onExtractCandidates: () => void;
+  onExtractFactDraft: () => void;
+  onFilterChange: (filter: ProposalStatus | "all") => void;
+  onOpenCanonReview: () => void;
+  onPromoteDraft: () => void;
+  onReject: () => void;
+  onRequestAgent: () => void;
+  onSave: () => void;
+  onSelect: (proposalId: string) => void;
+  onSourceDraftChange: (draftId: string) => void;
+  onSubmitReview: () => void;
+  onTextChange: (text: string) => void;
+  onTitleChange: (title: string) => void;
+  onTypeChange: (artifactType: ProposalArtifactType) => void;
+  proposalSourceDraftId: string;
+  proposalText: string;
+  proposalTitle: string;
+  proposalType: ProposalArtifactType;
+  proposals: ProposalArtifact[];
+  selectedProposal: ProposalArtifact | null;
+}) {
+  const locked = selectedProposal?.status === "accepted" || selectedProposal?.status === "rejected";
+  const canSave = canGenerate && busy === null && (!selectedProposal || !locked);
+  const canSubmit = canGenerate && busy === null && Boolean(selectedProposal) && !locked;
+  const canDecide = canReview && busy === null && Boolean(selectedProposal) && !locked;
+  const canPromoteDraft =
+    canReview &&
+    busy === null &&
+    hasScene &&
+    selectedProposal?.status === "accepted" &&
+    selectedProposal.artifact_type === "scene_draft";
+  const effectiveSourceDraftId = proposalSourceDraftId || currentDraftId;
+  const canPromoteCandidates =
+    canReview &&
+    busy === null &&
+    selectedProposal?.status === "accepted" &&
+    selectedProposal.artifact_type === "fact_draft" &&
+    Boolean(effectiveSourceDraftId.trim());
+
+  return (
+    <section className="proposal-panel" aria-label="协作草稿箱">
+      <div className="proposal-header">
+        <div>
+          <span><SplitSquareVertical size={15} /> 协作草稿箱</span>
+          <small>{proposals.length} 条 / Proposal Store</small>
+        </div>
+        <div className="proposal-header-actions">
+          <select
+            value={filter}
+            onChange={(event) => onFilterChange(event.target.value as ProposalStatus | "all")}
+            aria-label="协作草稿状态筛选"
+          >
+            <option value="all">全部</option>
+            {proposalStatuses.map((status) => (
+              <option key={status} value={status}>{proposalStatusLabels[status]}</option>
+            ))}
+          </select>
+          <button type="button" onClick={onCreateNew} disabled={busy !== null}>
+            <FileText size={14} /> 新建
+          </button>
+        </div>
+      </div>
+      <div className="proposal-grid">
+        <div className="proposal-list">
+          {proposals.length ? (
+            proposals.map((proposal) => (
+              <button
+                className={proposal.id === selectedProposal?.id ? "selected" : ""}
+                key={proposal.id}
+                onClick={() => onSelect(proposal.id)}
+                title={proposal.id}
+                type="button"
+              >
+                <strong>{proposal.title}</strong>
+                <span>{proposalTypeLabels[proposal.artifact_type]} / {proposalStatusLabels[proposal.status]} / v{proposal.version}</span>
+              </button>
+            ))
+          ) : (
+            <EmptyState
+              icon={<SplitSquareVertical />}
+              title="暂无协作草稿"
+              text="可从本地资料、Agent 工作流或手动编辑创建。"
+            />
+          )}
+        </div>
+        <div className="proposal-editor">
+          <div className="proposal-fields">
+            <select
+              value={proposalType}
+              disabled={Boolean(selectedProposal)}
+              onChange={(event) => onTypeChange(event.target.value as ProposalArtifactType)}
+              aria-label="协作草稿类型"
+            >
+              {proposalTypes.map((type) => (
+                <option key={type} value={type}>{proposalTypeLabels[type]}</option>
+              ))}
+            </select>
+            <input
+              value={proposalTitle}
+              onChange={(event) => onTitleChange(event.target.value)}
+              placeholder="标题"
+              aria-label="协作草稿标题"
+              disabled={locked}
+            />
+          </div>
+          <textarea
+            className="proposal-textarea"
+            value={proposalText}
+            onChange={(event) => onTextChange(event.target.value)}
+            spellCheck={false}
+            aria-label="协作草稿正文"
+            disabled={locked}
+          />
+          <div className="proposal-actions">
+            <button type="button" onClick={onSave} disabled={!canSave}>
+              <Save size={14} /> 保存草稿
+            </button>
+            <button type="button" onClick={onRequestAgent} disabled={!canGenerate || busy !== null || !hasScene}>
+              <Wand2 size={14} /> 请求 Agent 修改
+            </button>
+            <button type="button" onClick={onExtractFactDraft} disabled={!canGenerate || busy !== null || !hasScene}>
+              <ShieldCheck size={14} /> 生成事实草稿
+            </button>
+            <button type="button" onClick={onSubmitReview} disabled={!canSubmit}>
+              <Clock3 size={14} /> 提交审阅
+            </button>
+            <button type="button" onClick={onAccept} disabled={!canDecide}>
+              <Check size={14} /> 接受
+            </button>
+            <button type="button" onClick={onReject} disabled={!canDecide}>
+              <X size={14} /> 拒绝
+            </button>
+            <button type="button" onClick={onPromoteDraft} disabled={!canPromoteDraft}>
+              <FileText size={14} /> 转为当前场景草稿
+            </button>
+          </div>
+        </div>
+        <div className="proposal-meta">
+          <MetricRow label="状态" value={selectedProposal ? proposalStatusLabels[selectedProposal.status] : "未选择"} />
+          <MetricRow label="类型" value={proposalTypeLabels[proposalType]} />
+          <MetricRow label="版本" value={selectedProposal ? `v${selectedProposal.version}` : "新建"} />
+          <MetricRow label="创建方式" value={selectedProposal?.provenance.created_via ?? "manual"} />
+          <label>
+            <span>来源草稿</span>
+            <input
+              value={effectiveSourceDraftId}
+              onChange={(event) => onSourceDraftChange(event.target.value)}
+              placeholder="Draft ID"
+            />
+          </label>
+          <div className="proposal-side-actions">
+            <button type="button" onClick={onExtractCandidates} disabled={!canPromoteCandidates}>
+              <ShieldCheck size={14} /> 抽取为 CandidateFact
+            </button>
+            <button type="button" onClick={onOpenCanonReview} disabled={busy !== null}>
+              <ShieldCheck size={14} /> 提交 canon review
+            </button>
+          </div>
+          <ListBlock
+            title="来源"
+            items={formatProposalRefs(selectedProposal?.source_refs ?? [])}
+          />
+          <ListBlock
+            title="影响范围"
+            items={formatProposalRefs(selectedProposal?.target_refs ?? [])}
+          />
+          <ListBlock
+            title="派生"
+            items={formatProposalRefs(selectedProposal?.derived_refs ?? [])}
+          />
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1800,6 +2352,7 @@ function DocumentReader({
   hasScene,
   onExtract,
   onSaveDraft,
+  onSaveProposal,
   onSaveStyle
 }: {
   busy: string | null;
@@ -1808,6 +2361,7 @@ function DocumentReader({
   hasScene: boolean;
   onExtract: (document: LibraryDocument) => void;
   onSaveDraft: (document: LibraryDocument) => void;
+  onSaveProposal: (document: LibraryDocument) => void;
   onSaveStyle: (document: LibraryDocument) => void;
 }) {
   if (!doc) {
@@ -1837,7 +2391,7 @@ function DocumentReader({
         </div>
       </div>
       <div className="reader-bridge">
-        <span>当前是本地阅读器资料；只有点击下面按钮才会写入后端 Draft/StyleSample/CandidateFact。</span>
+        <span>当前是本地阅读器资料；只有点击下面按钮才会写入后端 Proposal/Draft/StyleSample/CandidateFact。</span>
         <div>
           <button
             disabled={!canBridge}
@@ -1846,6 +2400,14 @@ function DocumentReader({
             type="button"
           >
             <FileText size={14} /> 设为当前草稿
+          </button>
+          <button
+            disabled={!canBridge}
+            onClick={() => onSaveProposal(doc)}
+            title="保存为 Proposal Store 协作草稿，不写当前场景草稿。"
+            type="button"
+          >
+            <SplitSquareVertical size={14} /> 存入草稿箱
           </button>
           <button
             disabled={doc.status !== "ready" || !canGenerate || busy !== null}
@@ -2239,6 +2801,19 @@ function EmptyState({ icon, title, text }: { icon: React.ReactNode; title: strin
   return <div className="empty-state">{icon}<strong>{title}</strong><span>{text}</span></div>;
 }
 
+function findProposalRef(proposal: ProposalArtifact, kind: string): string | null {
+  return (
+    proposal.derived_refs.find((ref) => ref.kind === kind)?.ref ??
+    proposal.target_refs.find((ref) => ref.kind === kind)?.ref ??
+    proposal.source_refs.find((ref) => ref.kind === kind)?.ref ??
+    null
+  );
+}
+
+function formatProposalRefs(refs: ProposalArtifact["source_refs"]): string[] {
+  return refs.map((ref) => `${ref.kind}: ${ref.ref}${ref.note ? ` / ${ref.note}` : ""}`);
+}
+
 function statusTone(status?: string | null): "good" | "warning" | "danger" | "neutral" {
   if (status === "completed") return "good";
   if (status === "awaiting_review" || status === "needs_revision") return "warning";
@@ -2267,10 +2842,44 @@ const permissionLabels: Record<AgentPermissionLevel, string> = {
   full: "完全权限"
 };
 
+const proposalTypes: ProposalArtifactType[] = [
+  "scene_draft",
+  "fact_draft",
+  "scene_rebuild",
+  "canon_patch",
+  "outline_draft"
+];
+
+const proposalStatuses: ProposalStatus[] = [
+  "drafting",
+  "agent_revised",
+  "author_revised",
+  "ready_for_review",
+  "accepted",
+  "rejected"
+];
+
+const proposalTypeLabels: Record<ProposalArtifactType, string> = {
+  scene_draft: "场景草稿",
+  fact_draft: "事实草稿",
+  scene_rebuild: "场景重建",
+  canon_patch: "Canon 补丁",
+  outline_draft: "大纲草稿"
+};
+
+const proposalStatusLabels: Record<ProposalStatus, string> = {
+  drafting: "起草中",
+  agent_revised: "Agent 已修订",
+  author_revised: "作者已修订",
+  ready_for_review: "待审",
+  accepted: "已接受",
+  rejected: "已拒绝"
+};
+
 const defaultPermissionDescriptions: Record<AgentPermissionLevel, string> = {
-  read_only: "只能读取 canon（正典）、草稿、上下文包、运行记录和待审事实。",
-  read_generate: "可读取并生成草稿、检查结果、候选事实和风格样本。",
-  full: "允许完整本地作者操作，包括人工初始化（seed）和 CandidateFact（候选事实）审阅决策。"
+  read_only: "只能读取 canon（正典）、草稿、协作草稿、上下文包、运行记录和待审事实。",
+  read_generate: "可读取并生成草稿、协作草稿、检查结果、候选事实和风格样本。",
+  full: "允许完整本地作者操作，包括人工初始化（seed）、协作草稿决策和 CandidateFact（候选事实）审阅决策。"
 };
 
 const stepLabels: Record<string, string> = {

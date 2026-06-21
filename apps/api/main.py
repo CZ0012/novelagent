@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
+import json
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from typing import Literal
 
 from storygraph.core.agent_config import (
     AgentPermissionLevel,
@@ -24,6 +26,15 @@ from storygraph.core.errors import ContractError, GraphStoreError
 from storygraph.core.ids import new_id, slug_id
 from storygraph.core.time import utc_now
 from storygraph.demo import PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
+from storygraph.models.proposal import (
+    ProposalArtifact,
+    ProposalArtifactType,
+    ProposalBodyFormat,
+    ProposalCreatedVia,
+    ProposalProvenance,
+    ProposalRef,
+)
+from storygraph.models.common import EvidenceItem
 from storygraph.models.style import StyleSample
 from storygraph.services import (
     AuthorCanonSeedService,
@@ -35,7 +46,13 @@ from storygraph.services import (
     RuleBasedStateExtractor,
     create_scene_writer,
 )
-from storygraph.stores import CandidateStore, SQLiteCandidateStore, SQLiteDraftStore, SQLiteStyleSampleStore
+from storygraph.stores import (
+    CandidateStore,
+    SQLiteCandidateStore,
+    SQLiteDraftStore,
+    SQLiteProposalStore,
+    SQLiteStyleSampleStore,
+)
 from storygraph.stores.graph_factory import open_configured_graph_store, save_configured_graph_store
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
 from storygraph.workflows import SceneGenerationWorkflow
@@ -144,12 +161,89 @@ class DraftRequest(BaseModel):
     summary: str | None = None
 
 
+class StateExtractionRequest(BaseModel):
+    output_target: Literal["candidate_store", "proposal_workspace"] = "candidate_store"
+
+
+class SceneGenerationRunRequest(BaseModel):
+    output_target: Literal["draft_store", "proposal_workspace"] = "draft_store"
+
+
+class ProposalCreateRequest(BaseModel):
+    id: str | None = None
+    artifact_type: ProposalArtifactType
+    title: str = Field(..., min_length=1)
+    body: str = ""
+    body_format: ProposalBodyFormat = "markdown"
+    target_refs: list[ProposalRef] = Field(default_factory=list)
+    source_refs: list[ProposalRef] = Field(default_factory=list)
+    created_by: str = Field("author", min_length=1)
+    created_via: ProposalCreatedVia = "manual"
+    workflow_run_id: str | None = None
+    model_ref: str | None = None
+    provenance_note: str | None = None
+
+
+class ProposalUpdateRequest(BaseModel):
+    title: str | None = None
+    body: str | None = None
+    body_format: ProposalBodyFormat | None = None
+    target_refs: list[ProposalRef] | None = None
+    source_refs: list[ProposalRef] | None = None
+    actor: str = Field("author", min_length=1)
+    created_via: ProposalCreatedVia = "manual"
+    note: str | None = None
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class ProposalReviseRequest(BaseModel):
+    title: str | None = None
+    body: str | None = None
+    body_format: ProposalBodyFormat | None = None
+    target_refs: list[ProposalRef] | None = None
+    source_refs: list[ProposalRef] | None = None
+    actor: str = Field("agent", min_length=1)
+    created_via: ProposalCreatedVia = "llm"
+    note: str | None = None
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class ProposalSubmitReviewRequest(BaseModel):
+    actor: str = Field("author", min_length=1)
+    note: str | None = None
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class ProposalReviewRequest(BaseModel):
+    decision: Literal["accepted", "rejected"]
+    reviewer: str = Field("author", min_length=1)
+    note: str | None = None
+    expected_version: int = Field(..., ge=1)
+
+
+class ProposalDecisionRequest(ReviewRequest):
+    expected_version: int = Field(..., ge=1)
+
+
+class ProposalPromoteDraftRequest(BaseModel):
+    scene_id: str = Field(..., min_length=1)
+    summary: str | None = None
+    actor: str = Field("author", min_length=1)
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class ProposalExtractCandidatesRequest(BaseModel):
+    source_draft_id: str = Field(..., min_length=1)
+    actor: str = Field("author", min_length=1)
+    expected_version: int | None = Field(default=None, ge=1)
+
+
 class EditAcceptRequest(ReviewRequest):
     patch_properties: dict = Field(default_factory=dict)
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.0")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.2")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
@@ -176,6 +270,9 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     candidate_store = SQLiteCandidateStore(
         settings.candidate_store_path if use_persistent_stores else ":memory:"
     )
+    proposal_store = SQLiteProposalStore(
+        settings.proposal_store_path if use_persistent_stores else ":memory:"
+    )
     workflow_store = SQLiteWorkflowStore(
         settings.workflow_store_path if use_persistent_stores else ":memory:"
     )
@@ -195,6 +292,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         extractor=extractor,
         workflow_store=workflow_store,
         review_service=review,
+        proposal_store=proposal_store,
         runtime_kind=settings.workflow_runtime,
         checkpoint_path=str(settings.workflow_checkpoint_path),
     )
@@ -444,6 +542,286 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
+    @app.post("/projects/{project_id}/proposals")
+    def create_proposal(project_id: str, request: ProposalCreateRequest) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        try:
+            _ensure_project_exists(graph, project_id)
+            now = utc_now()
+            proposal = ProposalArtifact(
+                id=request.id or new_id("proposal"),
+                project_id=project_id,
+                artifact_type=request.artifact_type,
+                status="drafting",
+                title=request.title,
+                body=request.body,
+                body_format=request.body_format,
+                target_refs=request.target_refs,
+                source_refs=request.source_refs,
+                provenance=ProposalProvenance(
+                    created_by=request.created_by,
+                    created_via=request.created_via,
+                    workflow_run_id=request.workflow_run_id,
+                    model_ref=request.model_ref,
+                    note=request.provenance_note,
+                ),
+                version=1,
+                created_at=now,
+                updated_at=now,
+            )
+            return proposal_store.create(proposal).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.get("/projects/{project_id}/proposals")
+    def list_proposals(
+        project_id: str,
+        status: str | None = None,
+        artifact_type: str | None = None,
+    ) -> dict:
+        proposals = proposal_store.list(
+            project_id=project_id,
+            status=status,
+            artifact_type=artifact_type,
+        )
+        return {"proposals": [proposal.model_dump() for proposal in proposals]}
+
+    @app.get("/projects/{project_id}/proposals/{proposal_id}")
+    def get_proposal(project_id: str, proposal_id: str, version: int | None = None) -> dict:
+        try:
+            proposal = proposal_store.get(proposal_id, version=version)
+            _ensure_proposal_project(proposal, project_id)
+            return proposal.model_dump()
+        except ContractError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/projects/{project_id}/proposals/{proposal_id}/versions")
+    def proposal_versions(project_id: str, proposal_id: str) -> dict:
+        try:
+            versions = proposal_store.history(proposal_id)
+            if versions:
+                _ensure_proposal_project(versions[-1], project_id)
+            return {"versions": [proposal.model_dump() for proposal in versions]}
+        except ContractError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.patch("/projects/{project_id}/proposals/{proposal_id}")
+    def update_proposal(
+        project_id: str,
+        proposal_id: str,
+        request: ProposalUpdateRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        try:
+            _ensure_proposal_project(proposal_store.get(proposal_id), project_id)
+            proposal = proposal_store.revise(
+                proposal_id,
+                actor=request.actor,
+                created_via=request.created_via,
+                title=request.title,
+                body=request.body,
+                body_format=request.body_format,
+                target_refs=request.target_refs,
+                source_refs=request.source_refs,
+                note=request.note,
+                expected_version=request.expected_version,
+                status="author_revised",
+            )
+            return proposal.model_dump()
+        except ContractError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/revise")
+    def revise_proposal(
+        project_id: str,
+        proposal_id: str,
+        request: ProposalReviseRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        try:
+            existing = proposal_store.get(proposal_id)
+            _ensure_proposal_project(existing, project_id)
+            body = request.body
+            if body is None:
+                _ensure_proposal_artifact_type(existing, "scene_draft")
+                target_scene_id = _proposal_target_scene_id(existing)
+                context_pack = context_builder.build(project_id=project_id, scene_id=target_scene_id)
+                body = create_scene_writer(settings, draft_store).draft(context_pack).text
+            proposal = proposal_store.revise(
+                proposal_id,
+                actor=request.actor,
+                created_via=request.created_via,
+                title=request.title,
+                body=body,
+                body_format=request.body_format,
+                target_refs=request.target_refs,
+                source_refs=request.source_refs,
+                note=request.note,
+                expected_version=request.expected_version,
+                status="agent_revised",
+            )
+            return proposal.model_dump()
+        except ContractError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/submit-review")
+    def submit_proposal_review(
+        project_id: str,
+        proposal_id: str,
+        request: ProposalSubmitReviewRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        try:
+            _ensure_proposal_project(proposal_store.get(proposal_id), project_id)
+            proposal = proposal_store.mark_ready(
+                proposal_id,
+                actor=request.actor,
+                note=request.note,
+                expected_version=request.expected_version,
+            )
+            return proposal.model_dump()
+        except ContractError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/review")
+    def review_proposal(
+        project_id: str,
+        proposal_id: str,
+        request: ProposalReviewRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            _ensure_proposal_project(proposal_store.get(proposal_id), project_id)
+            proposal = proposal_store.review(
+                proposal_id,
+                decision=request.decision,
+                reviewer=request.reviewer,
+                note=request.note,
+                expected_version=request.expected_version,
+            )
+            return proposal.model_dump()
+        except ContractError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/accept")
+    def accept_proposal(project_id: str, proposal_id: str, request: ProposalDecisionRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            _ensure_proposal_project(proposal_store.get(proposal_id), project_id)
+            proposal = proposal_store.review(
+                proposal_id,
+                decision="accepted",
+                reviewer=request.reviewer,
+                note=request.note,
+                expected_version=request.expected_version,
+            )
+            return proposal.model_dump()
+        except ContractError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/reject")
+    def reject_proposal(project_id: str, proposal_id: str, request: ProposalDecisionRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            _ensure_proposal_project(proposal_store.get(proposal_id), project_id)
+            proposal = proposal_store.review(
+                proposal_id,
+                decision="rejected",
+                reviewer=request.reviewer,
+                note=request.note,
+                expected_version=request.expected_version,
+            )
+            return proposal.model_dump()
+        except ContractError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/derive-draft")
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/promote/draft")
+    def promote_proposal_to_draft(
+        project_id: str,
+        proposal_id: str,
+        request: ProposalPromoteDraftRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            proposal = proposal_store.get(proposal_id)
+            _ensure_proposal_project(proposal, project_id)
+            _ensure_proposal_promotable(proposal, request.expected_version)
+            _ensure_proposal_artifact_type(proposal, "scene_draft")
+            graph_query.scene_node(project_id=project_id, scene_id=request.scene_id)
+            draft = draft_store.create_draft(
+                project_id=project_id,
+                scene_id=request.scene_id,
+                text=proposal.body,
+                summary=request.summary or f"由协作草稿 {proposal.id} v{proposal.version} 转为场景草稿。",
+            )
+            updated_proposal = proposal_store.record_derived_ref(
+                proposal_id,
+                derived_ref=ProposalRef(
+                    kind="draft",
+                    ref=draft.id,
+                    note=f"Current scene draft derived from proposal v{proposal.version}.",
+                ),
+                actor=request.actor,
+                note="Promoted proposal content to Draft Store.",
+                expected_version=proposal.version,
+            )
+            return {"proposal": updated_proposal.model_dump(), "draft": draft.model_dump()}
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/submit-canon-review")
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/promote/candidate-facts")
+    def promote_proposal_to_candidate_facts(
+        project_id: str,
+        proposal_id: str,
+        request: ProposalExtractCandidatesRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            proposal = proposal_store.get(proposal_id)
+            _ensure_proposal_project(proposal, project_id)
+            _ensure_proposal_promotable(proposal, request.expected_version)
+            _ensure_proposal_artifact_type(proposal, "fact_draft")
+            source_draft = draft_store.get_draft(request.source_draft_id)
+            if source_draft.project_id != project_id:
+                raise HTTPException(status_code=404, detail="这个项目中没有找到来源草稿。")
+            candidates = [
+                _candidate_with_proposal_evidence(candidate, proposal)
+                for candidate in extractor.extract(project_id=project_id, draft=source_draft)
+            ]
+            if not candidates:
+                return {
+                    "proposal": proposal.model_dump(),
+                    "source_draft": source_draft.model_dump(),
+                    "candidates": [],
+                }
+            submitted = review.submit(candidates)
+            updated_proposal = proposal
+            for candidate in submitted:
+                updated_proposal = proposal_store.record_derived_ref(
+                    proposal_id,
+                    derived_ref=ProposalRef(
+                        kind="candidate_fact",
+                        ref=candidate.id,
+                        note=f"CandidateFact extracted from proposal v{proposal.version}.",
+                    ),
+                    actor=request.actor,
+                    note="Recorded CandidateFact derived from proposal content.",
+                    expected_version=updated_proposal.version,
+                )
+            return {
+                "proposal": updated_proposal.model_dump(),
+                "source_draft": source_draft.model_dump(),
+                "candidates": [candidate.model_dump() for candidate in submitted],
+            }
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="没有找到来源草稿。") from exc
+        except (ContractError, GraphStoreError, ValueError) as exc:
+            if isinstance(exc, ValueError):
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise _contract_http_exception(exc) from exc
+
     @app.get("/demo")
     def demo() -> dict:
         return {"project_id": PROJECT_ID, "scene_id": SCENE_ID}
@@ -568,12 +946,55 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         return checker.check(context_pack=context_pack, draft=draft).model_dump()
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/extract-state")
-    def extract_state(project_id: str, scene_id: str) -> dict:
+    def extract_state(
+        project_id: str,
+        scene_id: str,
+        request: StateExtractionRequest | None = None,
+    ) -> dict:
         require_permission(AgentPermissionLevel.READ_GENERATE)
+        request = request or StateExtractionRequest()
         draft = draft_store.latest_for_scene(project_id, scene_id)
         if draft is None:
             raise HTTPException(status_code=404, detail="这个场景还没有草稿。")
         candidates = extractor.extract(project_id=project_id, draft=draft)
+        if request.output_target == "proposal_workspace":
+            now = utc_now()
+            proposal = ProposalArtifact(
+                id=new_id("proposal"),
+                project_id=project_id,
+                artifact_type="fact_draft",
+                status="agent_revised",
+                title=f"候选事实提案：{scene_id}",
+                body=json.dumps(
+                    {
+                        "source_draft_id": draft.id,
+                        "candidate_previews": [
+                            candidate.model_dump() for candidate in candidates
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                body_format="structured_json",
+                target_refs=[
+                    ProposalRef(kind="scene", ref=scene_id),
+                    ProposalRef(kind="draft", ref=draft.id),
+                ],
+                source_refs=[ProposalRef(kind="draft", ref=draft.id)],
+                provenance=ProposalProvenance(
+                    created_by="agent",
+                    created_via="api",
+                    note="State extraction wrote CandidateFact previews to Proposal Store.",
+                ),
+                version=1,
+                created_at=now,
+                updated_at=now,
+            )
+            return {
+                "proposal": proposal_store.create(proposal).model_dump(),
+                "candidate_previews": [candidate.model_dump() for candidate in candidates],
+                "candidates": [],
+            }
         try:
             review.submit(candidates)
         except ContractError as exc:
@@ -581,8 +1002,13 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         return {"candidates": [candidate.model_dump() for candidate in candidates]}
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/runs/scene-generation")
-    def run_scene_generation(project_id: str, scene_id: str) -> dict:
+    def run_scene_generation(
+        project_id: str,
+        scene_id: str,
+        request: SceneGenerationRunRequest | None = None,
+    ) -> dict:
         require_permission(AgentPermissionLevel.READ_GENERATE)
+        request = request or SceneGenerationRunRequest()
         workflow = SceneGenerationWorkflow(
             context_builder=context_builder,
             writer=create_scene_writer(settings, draft_store),
@@ -590,17 +1016,25 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             extractor=extractor,
             workflow_store=workflow_store,
             review_service=review,
+            proposal_store=proposal_store,
             runtime_kind=settings.workflow_runtime,
             checkpoint_path=str(settings.workflow_checkpoint_path),
         )
         try:
-            result = workflow.run(project_id=project_id, scene_id=scene_id)
+            result = workflow.run(
+                project_id=project_id,
+                scene_id=scene_id,
+                output_target=request.output_target,
+            )
         finally:
             workflow.close()
         return {
             "context_pack": result.context_pack.model_dump(),
-            "draft": result.draft.model_dump(),
-            "continuity_report": result.continuity_report.model_dump(),
+            "draft": result.draft.model_dump() if result.draft else None,
+            "proposal": result.proposal.model_dump() if result.proposal else None,
+            "continuity_report": (
+                result.continuity_report.model_dump() if result.continuity_report else None
+            ),
             "candidates": [candidate.model_dump() for candidate in result.candidates],
             "workflow_run": result.workflow_run.model_dump() if result.workflow_run else None,
         }
@@ -701,6 +1135,64 @@ def _ensure_candidate_project(
         raise HTTPException(status_code=404, detail="这个项目中没有找到该候选事实。")
 
 
+def _ensure_project_exists(graph, project_id: str) -> None:
+    graph.get_node(project_id)
+
+
+def _ensure_proposal_project(proposal: ProposalArtifact, project_id: str) -> None:
+    if proposal.project_id != project_id:
+        raise HTTPException(status_code=404, detail="这个项目中没有找到该协作草稿。")
+
+
+def _ensure_proposal_promotable(
+    proposal: ProposalArtifact,
+    expected_version: int | None,
+) -> None:
+    if expected_version is not None and proposal.version != expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "协作草稿版本已变化："
+                f"期望 v{expected_version}，当前 v{proposal.version}。"
+            ),
+        )
+    if proposal.status != "accepted":
+        raise HTTPException(status_code=409, detail="只有已接受的协作草稿可以执行提升。")
+
+
+def _ensure_proposal_artifact_type(
+    proposal: ProposalArtifact,
+    artifact_type: str,
+) -> None:
+    if proposal.artifact_type != artifact_type:
+        raise HTTPException(
+            status_code=409,
+            detail=f"该操作要求协作草稿类型为 {artifact_type}。",
+        )
+
+
+def _proposal_target_scene_id(proposal: ProposalArtifact) -> str:
+    scene_ref = next((ref.ref for ref in proposal.target_refs if ref.kind == "scene"), None)
+    if not scene_ref:
+        raise HTTPException(status_code=409, detail="该协作草稿缺少目标场景。")
+    return scene_ref
+
+
+def _candidate_with_proposal_evidence(candidate, proposal: ProposalArtifact):
+    return candidate.model_copy(
+        update={
+            "evidence": [
+                *candidate.evidence,
+                EvidenceItem(
+                    kind="proposal_artifact",
+                    ref=f"{proposal.id}@v{proposal.version}",
+                    note="Explicitly promoted from an accepted proposal artifact.",
+                ),
+            ]
+        }
+    )
+
+
 def _contract_http_exception(exc: ContractError | GraphStoreError) -> HTTPException:
     if isinstance(exc, GraphStoreError):
         return _graph_http_exception(exc)
@@ -724,9 +1216,9 @@ def _csv(value: str | None) -> list[str] | None:
 def _agent_settings_payload(config: AgentRuntimeConfig) -> dict:
     response = config_response(config).model_dump()
     response["permission_descriptions"] = {
-        "read_only": "只能读取 canon（正典）、草稿、上下文包、运行记录和待审事实。",
-        "read_generate": "可读取并生成草稿、检查结果、候选事实和风格样本。",
-        "full": "允许完整本地作者操作，包括人工初始化（seed）和 CandidateFact（候选事实）审阅决策。",
+        "read_only": "只能读取 canon（正典）、草稿、协作草稿、上下文包、运行记录和待审事实。",
+        "read_generate": "可读取并生成草稿、协作草稿、检查结果、候选事实和风格样本。",
+        "full": "允许完整本地作者操作，包括人工初始化（seed）、协作草稿决策和 CandidateFact（候选事实）审阅决策。",
     }
     return response
 

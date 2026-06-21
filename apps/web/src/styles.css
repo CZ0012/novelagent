@@ -417,6 +417,7 @@ h1 {
 
 .meta,
 .library-panel,
+.proposal-panel,
 .draft-surface,
 .run-panel,
 .inspector,
@@ -669,7 +670,7 @@ h1 {
 
 .reader-bridge > div {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -690,6 +691,176 @@ h1 {
   font-size: 16px;
   line-height: 1.68;
   color: #17201d;
+}
+
+.proposal-panel {
+  flex: 0 0 auto;
+  border-radius: 8px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: 44px minmax(320px, 40vh);
+}
+
+.proposal-header {
+  border-bottom: 1px solid var(--line);
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.proposal-header > div:first-child span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.proposal-header small,
+.proposal-list span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.proposal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.proposal-header-actions select,
+.proposal-fields select,
+.proposal-fields input,
+.proposal-meta input {
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--ink);
+  outline: 0;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.proposal-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(140px, 0.32fr) minmax(230px, 1fr) minmax(170px, 0.38fr);
+}
+
+.proposal-list {
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  background: #fbfcfc;
+  padding: 8px;
+}
+
+.proposal-list button {
+  width: 100%;
+  min-height: 64px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  display: block;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.proposal-list button.selected {
+  color: #073f3a;
+  background: var(--teal-soft);
+}
+
+.proposal-list strong,
+.proposal-list span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proposal-list strong {
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+
+.proposal-editor {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 44px minmax(0, 1fr) auto;
+  border-right: 1px solid var(--line);
+}
+
+.proposal-fields {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 5px 10px;
+}
+
+.proposal-textarea {
+  font-size: 16px;
+  line-height: 1.62;
+  padding: 16px 18px;
+}
+
+.proposal-textarea:disabled,
+.proposal-fields input:disabled,
+.proposal-fields select:disabled {
+  color: #697470;
+  background: #f4f6f5;
+}
+
+.proposal-actions,
+.proposal-side-actions {
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+}
+
+.proposal-actions button,
+.proposal-side-actions button {
+  min-height: 34px;
+  padding: 6px 9px;
+  font-size: 12px;
+  white-space: normal;
+  text-align: center;
+  justify-content: center;
+}
+
+.proposal-meta {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.proposal-meta label {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.proposal-meta label span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.proposal-side-actions {
+  border: 0;
+  padding: 4px 0 0;
 }
 
 .draft-surface {

@@ -67,9 +67,13 @@ The quote should be short and only long enough for review.
 
 Each evidence item should include:
 
-- `kind`: `draft_text`, `context_pack`, `graph_fact`, or `author_instruction`
+- `kind`: `draft_text`, `context_pack`, `graph_fact`, `author_instruction`, or `proposal_artifact`
 - `ref`
 - `note`
+
+`proposal_artifact` evidence is supporting provenance only. It must not replace
+the required `source_scene_id`, `source_draft_id`, or `source_span` taken from a
+real Draft Store source.
 
 ## Proposed Graph Patch
 

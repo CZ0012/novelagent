@@ -1,6 +1,6 @@
 [package]
 name = "storygraph-agent-desktop"
-version = "0.1.1"
+version = "0.1.2"
 description = "StoryGraph Agent desktop shell"
 authors = ["StoryGraph Agent"]
 edition = "2021"
