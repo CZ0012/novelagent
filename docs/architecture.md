@@ -943,7 +943,7 @@ Neo4j / SQLite / Vector Store 本地连接
 
 核心界面模块：
 
-- Project Workspace：项目、卷、章节、场景树；Web/桌面工作台必须从后端 `/projects` 读取真实项目树，不能把前端 sampleData/fixture 当成真实 workspace。
+- Project Workspace：项目、卷、章节、场景树；Web/桌面工作台必须从后端 `/projects` 读取真实项目树，不能把前端 fixture 或占位数据当成真实 workspace。
 - Scene Editor：正文编辑器、版本切换、局部改写、批注。
 - Context Pack Inspector：写作前上下文包，可查看、锁定、调整硬约束。
 - Agent Run Panel：展示工作流当前节点、事件、检查结果和失败重试；场景工作流按钮应明确包含 `build_context`、`write_draft`、`check_continuity`、`extract_state`、`human_review`。
@@ -966,7 +966,7 @@ Neo4j / SQLite / Vector Store 本地连接
 - 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.1_x64-setup.exe` 及 Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.1_x64-setup.exe.sig`。这些产物是本地源码构建输出，不是已发布签名 release channel。当前验证产物不包含 `nsis.zip`。
 - FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地操作者授权分级，不是身份认证；保存设置页或调用 `/settings/agent` 代表本地操作者显式授权，因此可升降权限并立即生效；CLI 当前不执行同一权限闸门。
 - React/Vite 工作台当前支持本地 `.txt`、`.md`、`.markdown`、`.docx` 文件和文件夹导入到前端资料树/阅读器。默认导入内容只保存在浏览器内存，不写 Draft Store、StyleSample Store、Candidate Store 或 Graph Store。作者可显式把 ready 文档保存为当前场景 Draft Store 草稿、保存为 StyleSample Store 风格样本，或先保存草稿后抽取 pending CandidateFact。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
-- Web 工作台的项目树和当前场景选择必须来自后端项目/章节/场景数据；Graph/Timeline 预览或其他 sampleData 只能作为 UI 占位，不得被 Context Pack、Draft Store、CandidateFact 或 Graph Store 当成真实 workspace 来源。
+- Web 工作台的项目树、当前场景选择、Graph 预览和 Timeline 预览必须来自后端项目/章节/场景数据；前端占位数据不得被 Context Pack、Draft Store、CandidateFact 或 Graph Store 当成真实 workspace 来源。
 - 设置页保存 API key、base URL 或模型名称不应自动切换到 LLM writer。LLM 写作只有在 scene writer mode 选择 `llm`、设置已保存、权限至少为 `read_generate`、当前项目/场景有效且 Context Pack 可构建时才应运行。
 
 可安装桌面版的目标：
@@ -983,7 +983,7 @@ Neo4j / SQLite / Vector Store 本地连接
 
 - 桌面层不得直接写 Graph Store、Draft Store、Candidate Store 或 Event Log。
 - 所有 canon 变更仍必须通过后端 human seed API 或 CandidateFact review API。
-- 桌面层不得把前端临时状态、sampleData、LLM 输出、导入文本或用户未确认草稿写入 canon。
+- 桌面层不得把前端临时状态、占位数据、LLM 输出、导入文本或用户未确认草稿写入 canon。
 - 桌面层不得把 GitHub Release metadata、版本号、updater 状态、icon metadata、本地化 labels 或 release notes 写入 Graph Store、Draft Store、Context Pack 或 CandidateFact。
 - 桌面层可以负责进程启动、健康检查、日志位置、workspace 选择和用户设置，但不能持有绕过 ReviewService 的 canon 写入口。
 - 打包文档必须明确区分 PowerShell 命令与 Windows PowerShell 命令。

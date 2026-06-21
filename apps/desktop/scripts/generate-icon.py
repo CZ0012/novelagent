@@ -148,7 +148,6 @@ def draw_rounded_border(pixels: bytearray, size: int) -> None:
 def make_icon(size: int) -> bytearray:
     pixels = bytearray(size * size * 4)
     center_x = size * 0.48
-    center_y = size * 0.46
 
     for y in range(size):
         for x in range(size):

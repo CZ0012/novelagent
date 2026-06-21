@@ -19,6 +19,7 @@ class LLMRequest:
     messages: list[LLMMessage]
     model: str
     temperature: float = 0.2
+    max_tokens: int | None = 2048
     response_format: str | None = "json_object"
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -67,6 +68,8 @@ class OpenAICompatibleProvider:
             ],
             "temperature": request_payload.temperature,
         }
+        if request_payload.max_tokens is not None:
+            payload["max_tokens"] = request_payload.max_tokens
         payload.update(request_payload.extra)
         if self.json_mode and request_payload.response_format == "json_object":
             payload["response_format"] = {"type": "json_object"}
@@ -85,7 +88,11 @@ class OpenAICompatibleProvider:
             with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
                 response_body = response.read().decode("utf-8")
         except error.HTTPError as exc:
-            raise RuntimeError(f"LLM provider request failed with HTTP {exc.code}") from exc
+            response_body = exc.read().decode("utf-8", errors="replace")
+            detail = response_body[:500].replace("\n", " ")
+            raise RuntimeError(
+                f"LLM provider request failed with HTTP {exc.code}: {detail}"
+            ) from exc
         except error.URLError as exc:
             raise RuntimeError(f"LLM provider request failed: {exc.reason}") from exc
 

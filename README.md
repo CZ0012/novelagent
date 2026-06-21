@@ -40,8 +40,8 @@ This MVP can be used through CLI, browser, or a locally built Windows desktop pa
 Use one of these surfaces:
 
 - CLI workspace: best for persistent local MVP runs. It stores JSON and SQLite state under `.storygraph`, `STORYGRAPH_HOME`, or the directory passed with `--workspace`.
-- Persistent FastAPI + React/Vite workbench: best for local authoring through the browser. Start the persistent API backend and the web dev server separately. It reads the real project tree from `/projects`; UI fixture/sample data is not treated as a workspace.
-- Seeded demo FastAPI + React/Vite workbench: best for quick UI experiments. The default `apps.api.main:app` uvicorn entrypoint uses in-memory demo stores unless created with explicit settings.
+- Persistent FastAPI + React/Vite workbench: best for local authoring and real API demonstrations through the browser. Start the persistent API backend and the web dev server separately. It reads the real project tree from `/projects`; frontend fixtures are not treated as a workspace.
+- Explicit seeded demo mode: useful only for quick UI experiments or regression checks. The default `apps.api.main:app` uvicorn entrypoint uses in-memory stores and a bundled fantasy seed unless created with explicit settings, so it is not the real local authoring path.
 - Tauri desktop app: best for direct local use after a source build. It hosts the React workbench, starts or connects to the local FastAPI backend without showing a backend console window, keeps the app running in the system tray when the main window is closed, and can check signed desktop updates from the configured release channel.
 
 All examples below are PowerShell commands. They also work in Windows PowerShell unless your local execution policy, Python launcher, or Node installation differs.
@@ -80,7 +80,7 @@ python -m apps.api.desktop_server
 
 Run those commands in one PowerShell terminal. If `STORYGRAPH_HOME` is not set, the desktop-target backend uses `%LOCALAPPDATA%\StoryGraph Agent\workspace` on Windows when available, or the user home directory fallback. It creates the workspace directory and uses the JSON graph backend. It does not silently seed demo canon; an empty persistent or desktop workspace should show project creation and explicit demo initialization options. Click `Seed Demo` in the workbench or call `POST /demo/seed` only when you want to initialize the bundled fantasy demo.
 
-For a quick seeded in-memory API instead, run:
+For a quick seeded in-memory API for development experiments only, run:
 
 ```powershell
 python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8000
@@ -262,7 +262,7 @@ The LLM writer reads `storygraph/prompts/scene_writer.md`, asks for JSON output,
 
 ## Graph Backend
 
-The local CLI uses the JSON graph backend by default. The seeded demo API uses in-memory stores unless it is started through persistent settings. To point API or CLI graph operations at Neo4j, install the optional dependency and set:
+The local CLI uses the JSON graph backend by default. The real browser and desktop authoring paths should use the persistent desktop-target backend above; the seeded in-memory API is only a quick development/demo surface. To point API or CLI graph operations at Neo4j, install the optional dependency and set:
 
 ```powershell
 python -m pip install -e ".[neo4j]"
@@ -305,7 +305,7 @@ LangGraph checkpoints are stored at `langgraph_checkpoints.sqlite` inside the St
 ## Canon Safety Rules
 
 - The Graph Store is the source of truth for canon state.
-- Draft text, generated summaries, imported text, style samples, UI sample data, and model hypotheses must not directly mutate canon.
+- Draft text, generated summaries, imported text, style samples, frontend placeholders, and model hypotheses must not directly mutate canon.
 - Automated extraction may only produce `CandidateFact` records or proposed graph patches.
 - A candidate fact becomes canon only after explicit human review.
 - Every canon write must have provenance: source scene, source draft or author seed, rationale, reviewer decision, and event log entry.

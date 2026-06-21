@@ -46,5 +46,6 @@ def test_openai_compatible_provider_posts_chat_completions(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer secret"
     assert captured["body"]["model"] == "deepseek-chat"
     assert captured["body"]["messages"] == [{"role": "user", "content": "hello"}]
+    assert captured["body"]["max_tokens"] == 2048
     assert captured["body"]["response_format"] == {"type": "json_object"}
     assert response.content == "{\"text\":\"ok\"}"

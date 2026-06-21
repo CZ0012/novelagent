@@ -28,16 +28,29 @@ Before implementing future work, read that document and the relevant contract fi
 
 ## Multi-Agent Workflow
 
-Subagent role instructions live in:
+Codex development subagent role instructions live in:
 
-- `.codex/agents/director.md`
-- `.codex/agents/graph_agent.md`
-- `.codex/agents/context_agent.md`
-- `.codex/agents/writing_agent.md`
-- `.codex/agents/canon_agent.md`
-- `.codex/agents/qa_agent.md`
+- `.codex/agents/main_agent.md`
+- `.codex/agents/review_agent.md`
+- `.codex/agents/check_agent.md`
+- `.codex/agents/front_agent.md`
+- `.codex/agents/contract_agent.md`
+- `.codex/agents/creation_agent.md`
 
-Use the Director as the coordination layer. The Director should split work, confirm contract boundaries, and keep other agents aligned with `docs/architecture.md`.
+Shared local coordination files live in:
+
+- `.codex/coordination/README.md`
+- `.codex/coordination/board.md`
+- `.codex/coordination/handoffs.md`
+- `.codex/coordination/blockers.md`
+- `.codex/coordination/branches.md`
+- `.codex/coordination/decisions.md`
+
+Use the Main Agent as the planning and coordination layer. The Main Agent should split work, confirm contract boundaries, assign subagents, and keep all agents aligned with `docs/architecture.md`, `contracts/`, and the coordination files above.
+
+The product/runtime contracts may still mention Context Agent, Writing Agent, Canon Agent, Graph Agent, or QA Agent as StoryGraph workflow modules. Do not treat those contract names as the current Codex development subagent roster unless a task explicitly instantiates one of them as a specialized Creation Agent.
+
+For asynchronous work, agents should update the local Markdown coordination files instead of relying on hidden chat state. Use git branches to make parallel changes visible: record each task branch in `.codex/coordination/branches.md`, prefer branch names like `codex/sg-123-short-scope`, and use handoff records when one agent finds a problem that another owner must fix. Coordination files are planning artifacts only; they must not contain secrets, API keys, private draft prose, or runtime canon state.
 
 ## Canon Safety Rules
 
