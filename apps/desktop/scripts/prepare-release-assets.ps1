@@ -41,7 +41,9 @@ $latest = [ordered]@{
 }
 
 $latestPath = Join-Path $bundleDir "latest.json"
-$latest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $latestPath -Encoding utf8
+$latestJson = $latest | ConvertTo-Json -Depth 5 -Compress
+$utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+[System.IO.File]::WriteAllText($latestPath, "$latestJson`n", $utf8NoBom)
 
 Write-Host "Release assets ready:"
 Write-Host "  $releaseAssetPath"
