@@ -27,13 +27,14 @@ On startup, the Rust shell:
 - defaults the workspace to `%LOCALAPPDATA%\StoryGraph Agent\workspace`;
 - creates or reuses that persistent workspace without seeding demo canon automatically;
 - checks `/health` on the configured backend URL;
-- reuses an already-running local backend when it is healthy;
+- reuses an already-running local backend only when it is healthy and its `/health` workspace matches the configured desktop workspace;
+- reports a clear settings-panel conflict when the configured URL is occupied by a backend from another workspace;
 - otherwise starts the bundled `storygraph-backend` sidecar when present, falling back to `python -m apps.api.desktop_server` during source development;
 - passes `STORYGRAPH_HOME` and `STORYGRAPH_GRAPH_BACKEND=json` to that backend process;
 - starts the managed backend without showing a stray Windows console window;
 - writes backend stdout/stderr logs under `%LOCALAPPDATA%\StoryGraph Agent\logs`.
 - keeps a system tray icon while running; closing the main window hides it to the tray instead of exiting;
-- treats the tray menu item `退出 StoryGraph Agent` as the real app exit path, stopping only the backend process that this desktop shell started before exiting.
+- treats the tray menu item `退出 StoryGraph Agent` as the real app exit path, stopping only the backend process tree that this desktop shell started before exiting.
 
 The desktop commands are intentionally narrow: settings load/save, backend status, backend start, backend stop, local path reporting, and signed updater checks/install through Tauri's updater plugin. They do not write canon.
 
@@ -101,8 +102,11 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.2_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.2_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.3_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.3_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.3_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.3_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
 If `build:with-web` fails before Tauri starts, fix the `apps/web` build first. The desktop package owns Tauri packaging and backend process orchestration; the React/Vite workbench remains owned by `apps/web`.

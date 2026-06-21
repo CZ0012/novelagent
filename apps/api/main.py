@@ -243,7 +243,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.2")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.3")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),

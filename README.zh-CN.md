@@ -110,6 +110,7 @@ npm --prefix apps/web run build
 - `apps/desktop/package.json`：Tauri 开发、后端 sidecar 生成和构建 npm scripts。
 - `apps/desktop/scripts/build-backend-sidecar.ps1`：用 Windows PowerShell 和 PyInstaller 打包 `apps.api.desktop_server` 的后端 sidecar。
 - `apps/desktop/scripts/build-installer.ps1`：用 Windows PowerShell 重建 Web 资源、重建后端 sidecar，并运行带 updater 签名产物的 Tauri 安装器构建。
+- `apps/desktop/scripts/prepare-release-assets.ps1`：用 Windows PowerShell 复制无空格的 GitHub Release 资产名，并写入当前版本的 `latest.json`。
 - `apps/desktop/scripts/generate-icon.py`：无第三方依赖的科幻应用图标生成脚本，会生成源 PNG 和 `.ico`。
 - `apps/desktop/src-tauri/Cargo.toml` 和 `src/main.rs`：Rust 桌面壳，包含 desktop settings、backend status、backend start、backend stop、本地路径查询命令，以及托盘最小化/退出生命周期。
 - `apps/desktop/src-tauri/capabilities/default.json`：Tauri v2 主窗口 capability 边界。
@@ -127,7 +128,7 @@ npm --prefix apps/desktop run build:installer
 生成的安装器路径是：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.2_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.3_x64-setup.exe
 ```
 
 其他常用桌面命令：
@@ -147,21 +148,20 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.2_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.2_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.3_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.3_x64-setup.exe.sig
 ```
 
-完整安装器构建会用 `--noconsole` 重新生成 PyInstaller 后端 sidecar，重新构建 React/Vite 工作台，并运行 `tauri build`。Tauri 壳启动 sidecar 时也会使用 Windows `CREATE_NO_WINDOW`，所以打包版不应再出现额外的空后端终端窗口。关闭桌面主窗口会隐藏到系统托盘；使用托盘菜单里的 `退出 StoryGraph Agent` 才会停止受管后端并退出应用。这些安装器、`setup.exe.sig` updater 签名、后端 sidecar 和 release exe 是本地输出，不会提交到仓库，也还不是已发布 release。
+完整安装器构建会用 `--noconsole` 重新生成 PyInstaller 后端 sidecar，重新构建 React/Vite 工作台，并运行 `tauri build`。Tauri 壳启动 sidecar 时也会使用 Windows `CREATE_NO_WINDOW`，所以打包版不应再出现额外的空后端终端窗口。关闭桌面主窗口会隐藏到系统托盘；使用托盘菜单里的 `退出 StoryGraph Agent` 才会停止受管后端进程树并退出应用。如果 8000 端口上已有健康后端但工作区不同，桌面设置页会提示冲突，不再把该进程当作当前桌面 workspace。这些安装器、`setup.exe.sig` updater 签名、后端 sidecar 和 release exe 是本地输出，不会提交到仓库，也还不是已发布 release。
 
 工作台设置页包含“版本与更新”。在 Tauri 桌面运行时，它使用 `tauri-plugin-updater` 检查签名 endpoint `https://github.com/CZ0012/novelagent/releases/latest/download/latest.json`，安装时会先停止受管后端，再安装更新并重启应用。在普通浏览器运行时，它会降级为 GitHub Release 检查；如果发现新版，会提供 Windows 安装器下载链接。
 
 版本更新必须保持 `VERSION`、`pyproject.toml`、`apps/web/package.json`、`apps/web/src/version.ts`、`apps/desktop/package.json`、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json` 同步。这里的 GitHub 只作为软件发布/更新通道；本地小说 workspace、canon、草稿、导入文档、项目设置和审阅状态不会自动同步到 GitHub。
 
-当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.2_x64-setup.exe.sig`。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
+当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.3_x64-setup.exe.sig`。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
 
 仍缺失或未验证：
 
-- 仓库外发布的签名 release 安装器和 `latest.json`。
 - 自动化桌面 smoke tests：安装、卸载、后端 health、工作台加载和 workspace 持久化。
 - 后端 sidecar 与安装器的生产级 Authenticode 代码签名。
 

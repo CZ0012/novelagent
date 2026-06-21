@@ -1249,6 +1249,31 @@ textarea {
   color: var(--red);
 }
 
+.desktop-backend-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  align-items: start;
+  margin-top: 10px;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.desktop-backend-card.warning {
+  border-color: #edd08d;
+  background: #fff6dd;
+  color: #7c5d1a;
+}
+
+.desktop-backend-card.danger {
+  border-color: #f4b8b0;
+  background: var(--red-soft);
+  color: var(--red);
+}
+
 .update-card small {
   color: var(--muted);
 }
@@ -1284,6 +1309,11 @@ textarea {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.settings-actions.compact {
+  justify-content: flex-start;
+  margin-top: 10px;
 }
 
 .empty-state {

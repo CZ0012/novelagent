@@ -151,6 +151,26 @@ type UpdateStatus = {
   canInstall?: boolean;
 };
 
+type DesktopSettings = {
+  backendUrl: string;
+  workspacePath: string;
+  autoStartBackend: boolean;
+  pythonExecutable: string;
+  backendModule: string;
+};
+
+type DesktopBackendStatus = {
+  backendUrl: string;
+  reachable: boolean;
+  workspaceCompatible: boolean;
+  managed: boolean;
+  pid?: number | null;
+  workspacePath: string;
+  healthWorkspacePath?: string | null;
+  health?: Record<string, unknown> | null;
+  error?: string | null;
+};
+
 type GitHubRelease = {
   tag_name?: string;
   html_url?: string;
@@ -258,6 +278,9 @@ export default function App() {
     state: "idle",
     message: "尚未检查更新。"
   });
+  const [desktopSettings, setDesktopSettings] = useState<DesktopSettings | null>(null);
+  const [desktopBackend, setDesktopBackend] = useState<DesktopBackendStatus | null>(null);
+  const [desktopBackendChecked, setDesktopBackendChecked] = useState(() => !isDesktopRuntime());
   const [libraryDocuments, setLibraryDocuments] = useState<LibraryDocument[]>([]);
   const [selectedLibraryDocumentId, setSelectedLibraryDocumentId] = useState<string | null>(null);
   const [expandedLibraryPaths, setExpandedLibraryPaths] = useState<Set<string>>(
@@ -312,6 +335,35 @@ export default function App() {
     } finally {
       setBusy(null);
     }
+  }, []);
+
+  const refreshDesktopBackend = useCallback(async (mode: "status" | "start" = "status") => {
+    if (!isDesktopRuntime()) {
+      setDesktopBackendChecked(true);
+      return null;
+    }
+
+    const settings = await invoke<DesktopSettings>("load_desktop_settings");
+    setDesktopSettings(settings);
+    setApiBase(settings.backendUrl);
+
+    const status = await invoke<DesktopBackendStatus>(
+      mode === "start" ? "start_backend" : "backend_status"
+    );
+    setDesktopBackend(status);
+    setDesktopBackendChecked(true);
+    if (status.error && (!status.reachable || !status.workspaceCompatible)) {
+      setError(status.error);
+    }
+    return status;
+  }, []);
+
+  const stopDesktopBackend = useCallback(async () => {
+    if (!isDesktopRuntime()) return;
+    const status = await invoke<DesktopBackendStatus>("stop_backend");
+    setDesktopBackend(status);
+    setDesktopBackendChecked(true);
+    setNotice(status.reachable ? "已请求停止受管后端；仍检测到外部后端在运行。" : "受管后端已停止。");
   }, []);
 
   const addLibraryFiles = useCallback(async (files: File[]) => {
@@ -1143,11 +1195,34 @@ export default function App() {
   );
 
   useEffect(() => {
-    refreshWorkspace(projectId, sceneId).catch((exc) => {
+    if (!isDesktopRuntime()) return;
+    refreshDesktopBackend("start").catch((exc) => {
+      setDesktopBackendChecked(true);
+      setError(toErrorMessage(exc));
+    });
+  }, [refreshDesktopBackend]);
+
+  useEffect(() => {
+    if (isDesktopRuntime() && !desktopBackendChecked) return;
+    if (isDesktopRuntime() && !desktopBackend) {
+      setWorkspaceLoaded(true);
+      return;
+    }
+    if (isDesktopRuntime() && desktopBackend && !desktopBackend.workspaceCompatible) {
+      setWorkspaceLoaded(true);
+      setError(desktopBackend.error ?? "当前桌面后端工作区与设置不一致，请先处理后端连接。");
+      return;
+    }
+    refreshWorkspace().catch((exc) => {
       setWorkspaceLoaded(true);
       setError(toErrorMessage(exc));
     });
-  }, [apiBase]);
+  }, [
+    apiBase,
+    desktopBackend?.workspaceCompatible,
+    desktopBackendChecked,
+    refreshWorkspace
+  ]);
 
   useEffect(() => {
     refreshFacts().catch(() => undefined);
@@ -1209,6 +1284,8 @@ export default function App() {
     (!agentSettings.api_key_configured || !agentSettings.llm_base_url || !agentSettings.llm_model);
   const canRunScene = hasScene && canGenerate && !writerNeedsKey;
   const currentChapterId = selectedProject?.chapters[0]?.id ?? "";
+  const backendStatusLabel = desktopBackend ? formatDesktopBackendLabel(desktopBackend) : "FastAPI";
+  const backendStatusTone = desktopBackend ? desktopBackendTone(desktopBackend) : "good";
 
   return (
     <div className="workbench">
@@ -1229,7 +1306,7 @@ export default function App() {
           />
         </label>
         <div className="top-actions">
-          <StatusDot label="FastAPI" tone="good" />
+          <StatusDot label={backendStatusLabel} tone={backendStatusTone} />
           <StatusDot label={permissionLabels[agentSettings?.permission_level ?? "full"]} tone={permissionTone(agentSettings?.permission_level)} />
           <StatusDot label={`v${APP_VERSION}`} tone="neutral" />
           <button className="icon-button" title="设置" type="button" onClick={() => setActiveTab("settings")}>
@@ -1558,10 +1635,15 @@ export default function App() {
               apiKeyInput={apiKeyInput}
               busy={busy}
               clearApiKey={clearApiKey}
+              desktopBackend={desktopBackend}
+              desktopSettings={desktopSettings}
               form={agentForm}
               onApiKeyChange={setApiKeyInput}
               onClearApiKeyChange={setClearApiKey}
               onFormChange={setAgentForm}
+              onBackendRefresh={() => runAction("desktop-backend", () => refreshDesktopBackend("status").then(() => undefined))}
+              onBackendStart={() => runAction("desktop-backend", () => refreshDesktopBackend("start").then(() => undefined))}
+              onBackendStop={() => runAction("desktop-backend", stopDesktopBackend)}
               onRefresh={() => runAction("settings", refreshAgentSettings)}
               onSave={() => runAction("settings", saveAgentSettings)}
               onInstallUpdate={() => runAction("update-install", installAvailableUpdate)}
@@ -2452,8 +2534,13 @@ function AgentSettingsInspector({
   apiKeyInput,
   busy,
   clearApiKey,
+  desktopBackend,
+  desktopSettings,
   form,
   onApiKeyChange,
+  onBackendRefresh,
+  onBackendStart,
+  onBackendStop,
   onClearApiKeyChange,
   onFormChange,
   onRefresh,
@@ -2466,8 +2553,13 @@ function AgentSettingsInspector({
   apiKeyInput: string;
   busy: string | null;
   clearApiKey: boolean;
+  desktopBackend: DesktopBackendStatus | null;
+  desktopSettings: DesktopSettings | null;
   form: AgentSettingsUpdate;
   onApiKeyChange: (value: string) => void;
+  onBackendRefresh: () => void;
+  onBackendStart: () => void;
+  onBackendStop: () => void;
   onClearApiKeyChange: (value: boolean) => void;
   onFormChange: React.Dispatch<React.SetStateAction<AgentSettingsUpdate>>;
   onRefresh: () => void;
@@ -2485,6 +2577,52 @@ function AgentSettingsInspector({
 
   return (
     <div className="settings-panel">
+      {isDesktopRuntime() && (
+        <section className="settings-block">
+          <div className="settings-title"><Database size={15} /> 桌面后端</div>
+          <MetricRow label="API 地址" value={desktopSettings?.backendUrl ?? "读取中"} />
+          <MetricRow label="配置工作区" value={desktopSettings?.workspacePath ?? "读取中"} />
+          <MetricRow label="运行状态" value={formatDesktopBackendDetail(desktopBackend)} />
+          <MetricRow
+            label="健康检查工作区"
+            value={desktopBackend?.healthWorkspacePath ?? (desktopBackend?.reachable ? "未返回" : "未连接")}
+          />
+          <MetricRow
+            label="进程"
+            value={
+              desktopBackend?.pid
+                ? `${desktopBackend.managed ? "受管" : "外部"} PID ${desktopBackend.pid}`
+                : desktopBackend?.reachable
+                  ? "外部或未知进程"
+                  : "未运行"
+            }
+          />
+          {desktopBackend?.error && (
+            <div className={`desktop-backend-card ${desktopBackend.workspaceCompatible ? "warning" : "danger"}`}>
+              <AlertTriangle size={15} />
+              <span>{desktopBackend.error}</span>
+            </div>
+          )}
+          {desktopBackend?.reachable && !desktopBackend.managed && desktopBackend.workspaceCompatible && (
+            <div className="desktop-backend-card warning">
+              <AlertTriangle size={15} />
+              <span>当前连接的是外部后端；退出桌面壳不会停止这个进程。</span>
+            </div>
+          )}
+          <div className="settings-actions compact">
+            <button onClick={onBackendRefresh} type="button" disabled={busy === "desktop-backend"}>
+              <RefreshCw size={15} /> 刷新后端
+            </button>
+            <button onClick={onBackendStart} type="button" disabled={busy === "desktop-backend"}>
+              <Play size={15} /> 启动/连接
+            </button>
+            <button onClick={onBackendStop} type="button" disabled={busy === "desktop-backend" || !desktopBackend?.managed}>
+              <X size={15} /> 停止受管后端
+            </button>
+          </div>
+        </section>
+      )}
+
       <section className="settings-block">
         <div className="settings-title"><Wand2 size={15} /> 核心模型</div>
         <label>
@@ -2979,6 +3117,25 @@ function formatWriter(settings: AgentSettings | null): string {
   return "本地规则";
 }
 
+function formatDesktopBackendLabel(status: DesktopBackendStatus): string {
+  if (!status.reachable) return "后端未连接";
+  if (!status.workspaceCompatible) return "后端工作区冲突";
+  return status.managed ? "受管 FastAPI" : "外部 FastAPI";
+}
+
+function formatDesktopBackendDetail(status: DesktopBackendStatus | null): string {
+  if (!status) return "读取中";
+  if (!status.reachable) return "未连接";
+  if (!status.workspaceCompatible) return "工作区冲突";
+  return status.managed ? "已连接，桌面受管" : "已连接，外部进程";
+}
+
+function desktopBackendTone(status: DesktopBackendStatus): "good" | "warning" | "danger" | "neutral" {
+  if (!status.reachable || !status.workspaceCompatible) return "danger";
+  if (!status.managed) return "warning";
+  return "good";
+}
+
 async function readLibraryFiles(files: File[]): Promise<ImportSummary> {
   let skipped = 0;
   const candidates: Array<{ file: File; index: number }> = [];
@@ -3173,7 +3330,11 @@ function formatFileSize(bytes: number): string {
 }
 
 function toErrorMessage(exc: unknown): string {
-  return exc instanceof Error ? exc.message : String(exc);
+  const message = exc instanceof Error ? exc.message : String(exc);
+  if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
+    return "无法连接本机 FastAPI 后端。请在“设置 > 桌面后端”检查 8000 端口是否被旧后端占用，或先启动/连接受管后端。";
+  }
+  return message;
 }
 
 function isDesktopRuntime(): boolean {

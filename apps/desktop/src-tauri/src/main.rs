@@ -11,7 +11,10 @@ use std::{
     net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     thread,
     time::Duration,
 };
@@ -27,17 +30,25 @@ const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_MENU_SHOW: &str = "show-main-window";
 const TRAY_MENU_QUIT: &str = "quit-storygraph-agent";
 
-#[derive(Default)]
 struct BackendProcess {
     child: Mutex<Option<Child>>,
+    shutting_down: AtomicBool,
+}
+
+impl Default for BackendProcess {
+    fn default() -> Self {
+        Self {
+            child: Mutex::new(None),
+            shutting_down: AtomicBool::new(false),
+        }
+    }
 }
 
 impl Drop for BackendProcess {
     fn drop(&mut self) {
         if let Ok(mut guard) = self.child.lock() {
             if let Some(mut child) = guard.take() {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_child_tree(&mut child);
             }
         }
     }
@@ -70,9 +81,11 @@ impl Default for DesktopSettings {
 struct BackendStatus {
     backend_url: String,
     reachable: bool,
+    workspace_compatible: bool,
     managed: bool,
     pid: Option<u32>,
     workspace_path: String,
+    health_workspace_path: Option<String>,
     health: Option<Value>,
     error: Option<String>,
 }
@@ -95,10 +108,10 @@ fn load_desktop_settings() -> Result<DesktopSettings, String> {
 #[tauri::command]
 fn save_desktop_settings(settings: DesktopSettings) -> Result<DesktopSettings, String> {
     if settings.backend_url.trim().is_empty() {
-        return Err("backendUrl must not be empty".to_string());
+        return Err("后端 API 地址不能为空。".to_string());
     }
     if settings.workspace_path.trim().is_empty() {
-        return Err("workspacePath must not be empty".to_string());
+        return Err("工作区路径不能为空。".to_string());
     }
     write_settings(&settings)?;
     Ok(settings)
@@ -125,6 +138,10 @@ fn backend_status(state: tauri::State<'_, BackendProcess>) -> Result<BackendStat
 
 #[tauri::command]
 fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatus, String> {
+    if state.shutting_down.load(Ordering::SeqCst) {
+        return Err("StoryGraph Agent 正在退出，已取消启动后端。".to_string());
+    }
+
     let settings = read_settings()?;
     let current = status_for(&settings, &state);
     if current.reachable {
@@ -134,7 +151,10 @@ fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatu
     let mut guard = state
         .child
         .lock()
-        .map_err(|_| "backend process lock was poisoned".to_string())?;
+        .map_err(|_| "后端进程锁已损坏。".to_string())?;
+    if state.shutting_down.load(Ordering::SeqCst) {
+        return Err("StoryGraph Agent 正在退出，已取消启动后端。".to_string());
+    }
     if let Some(child) = guard.as_mut() {
         if child
             .try_wait()
@@ -147,10 +167,9 @@ fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatu
     }
 
     fs::create_dir_all(&settings.workspace_path)
-        .map_err(|error| format!("failed to create workspace directory: {error}"))?;
+        .map_err(|error| format!("无法创建工作区目录：{error}"))?;
     let log_dir = app_data_dir().join("logs");
-    fs::create_dir_all(&log_dir)
-        .map_err(|error| format!("failed to create log directory: {error}"))?;
+    fs::create_dir_all(&log_dir).map_err(|error| format!("无法创建日志目录：{error}"))?;
     let stdout = log_file(&log_dir, "backend.log")?;
     let stderr = log_file(&log_dir, "backend.err.log")?;
 
@@ -170,8 +189,18 @@ fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatu
 
     let child = command
         .spawn()
-        .map_err(|error| format!("failed to start FastAPI backend: {error}"))?;
+        .map_err(|error| format!("无法启动 FastAPI 后端：{error}"))?;
     *guard = Some(child);
+
+    if state.shutting_down.load(Ordering::SeqCst) {
+        if let Some(child) = guard.as_mut() {
+            kill_child_tree(child);
+        }
+        *guard = None;
+        drop(guard);
+        return Ok(status_for(&settings, &state));
+    }
+
     drop(guard);
 
     wait_for_backend(&settings, &state)
@@ -219,16 +248,19 @@ fn sidecar_backend_path() -> Option<PathBuf> {
 #[tauri::command]
 fn stop_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatus, String> {
     let settings = read_settings()?;
+    stop_managed_backend(&state)?;
+    Ok(status_for(&settings, &state))
+}
+
+fn stop_managed_backend(state: &BackendProcess) -> Result<(), String> {
     let mut guard = state
         .child
         .lock()
-        .map_err(|_| "backend process lock was poisoned".to_string())?;
+        .map_err(|_| "后端进程锁已损坏。".to_string())?;
     if let Some(mut child) = guard.take() {
-        let _ = child.kill();
-        let _ = child.wait();
+        kill_child_tree(&mut child);
     }
-    drop(guard);
-    Ok(status_for(&settings, &state))
+    Ok(())
 }
 
 fn main() {
@@ -283,7 +315,7 @@ fn main() {
             stop_backend
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run StoryGraph Agent desktop shell");
+        .expect("StoryGraph Agent 桌面壳运行失败");
 }
 
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
@@ -316,7 +348,8 @@ fn show_main_window(app: &tauri::AppHandle) {
 
 fn quit_desktop_app(app: &tauri::AppHandle) {
     let state = app.state::<BackendProcess>();
-    let _ = stop_backend(state);
+    state.shutting_down.store(true, Ordering::SeqCst);
+    let _ = stop_managed_backend(&state);
     app.exit(0);
 }
 
@@ -340,18 +373,35 @@ fn status_for(
     state: &tauri::State<'_, BackendProcess>,
 ) -> BackendStatus {
     reap_finished_child(state);
-    let (health, error) = match fetch_health(&settings.backend_url) {
+    let (health, fetch_error) = match fetch_health(&settings.backend_url) {
         Ok(value) => (Some(value), None),
         Err(error) => (None, Some(error)),
     };
     let (managed, pid) = managed_process(state);
+    let health_workspace_path = health.as_ref().and_then(extract_health_workspace);
+    let workspace_compatible = match (health.as_ref(), health_workspace_path.as_deref()) {
+        (Some(_), Some(path)) => paths_equivalent(path, &settings.workspace_path),
+        (Some(_), None) => false,
+        (None, _) => false,
+    };
+    let error = if health.is_some() && !workspace_compatible {
+        Some(workspace_mismatch_message(
+            &settings.backend_url,
+            health_workspace_path.as_deref(),
+            &settings.workspace_path,
+        ))
+    } else {
+        fetch_error
+    };
 
     BackendStatus {
         backend_url: settings.backend_url.clone(),
         reachable: health.is_some(),
+        workspace_compatible,
         managed,
         pid,
         workspace_path: settings.workspace_path.clone(),
+        health_workspace_path,
         health,
         error,
     }
@@ -382,12 +432,12 @@ fn fetch_health(base_url: &str) -> Result<Value, String> {
     let endpoint = parse_local_http_url(base_url)?;
     let mut addrs = (endpoint.host.as_str(), endpoint.port)
         .to_socket_addrs()
-        .map_err(|error| format!("failed to resolve backend host: {error}"))?;
+        .map_err(|error| format!("无法解析后端主机：{error}"))?;
     let addr = addrs
         .next()
-        .ok_or_else(|| "backend host did not resolve to an address".to_string())?;
+        .ok_or_else(|| "后端主机没有解析到可用地址。".to_string())?;
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(500))
-        .map_err(|error| format!("backend is not reachable: {error}"))?;
+        .map_err(|error| format!("无法连接后端：{error}"))?;
     stream
         .set_read_timeout(Some(Duration::from_millis(1200)))
         .map_err(|error| error.to_string())?;
@@ -400,23 +450,22 @@ fn fetch_health(base_url: &str) -> Result<Value, String> {
     );
     stream
         .write_all(request.as_bytes())
-        .map_err(|error| format!("failed to request backend health: {error}"))?;
+        .map_err(|error| format!("无法请求后端健康检查：{error}"))?;
 
     let mut response = String::new();
     stream
         .read_to_string(&mut response)
-        .map_err(|error| format!("failed to read backend health: {error}"))?;
+        .map_err(|error| format!("无法读取后端健康检查响应：{error}"))?;
     let (head, body) = response
         .split_once("\r\n\r\n")
-        .ok_or_else(|| "backend returned an invalid HTTP response".to_string())?;
+        .ok_or_else(|| "后端返回了无效的 HTTP 响应。".to_string())?;
     if !head.starts_with("HTTP/1.1 200") && !head.starts_with("HTTP/1.0 200") {
         return Err(format!(
-            "backend health returned non-200 status: {}",
+            "后端健康检查返回非 200 状态：{}",
             head.lines().next().unwrap_or("unknown")
         ));
     }
-    serde_json::from_str(body.trim())
-        .map_err(|error| format!("backend health was not JSON: {error}"))
+    serde_json::from_str(body.trim()).map_err(|error| format!("后端健康检查不是 JSON：{error}"))
 }
 
 struct LocalHttpEndpoint {
@@ -428,7 +477,7 @@ struct LocalHttpEndpoint {
 fn parse_local_http_url(base_url: &str) -> Result<LocalHttpEndpoint, String> {
     let rest = base_url
         .strip_prefix("http://")
-        .ok_or_else(|| "only local http:// backend URLs are supported".to_string())?;
+        .ok_or_else(|| "桌面版只支持本机 http:// 后端地址。".to_string())?;
     let (host_port, base_path) = match rest.split_once('/') {
         Some((host_port, path)) => (host_port, format!("/{path}")),
         None => (rest, String::new()),
@@ -437,13 +486,13 @@ fn parse_local_http_url(base_url: &str) -> Result<LocalHttpEndpoint, String> {
         Some((host, port)) => {
             let port = port
                 .parse::<u16>()
-                .map_err(|_| "backend URL port must be a number".to_string())?;
+                .map_err(|_| "后端 API 地址端口必须是数字。".to_string())?;
             (host.to_string(), port)
         }
         None => (host_port.to_string(), 80),
     };
     if !matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1") {
-        return Err("desktop backend URL must point to localhost".to_string());
+        return Err("桌面版后端 API 地址必须指向 localhost。".to_string());
     }
     let prefix = base_path.trim_end_matches('/');
     let path = if prefix.is_empty() {
@@ -461,22 +510,19 @@ fn read_settings() -> Result<DesktopSettings, String> {
         write_settings(&settings)?;
         return Ok(settings);
     }
-    let content = fs::read_to_string(&path)
-        .map_err(|error| format!("failed to read desktop settings: {error}"))?;
-    serde_json::from_str(&content)
-        .map_err(|error| format!("failed to parse desktop settings: {error}"))
+    let content =
+        fs::read_to_string(&path).map_err(|error| format!("无法读取桌面设置：{error}"))?;
+    serde_json::from_str(&content).map_err(|error| format!("无法解析桌面设置：{error}"))
 }
 
 fn write_settings(settings: &DesktopSettings) -> Result<(), String> {
     let path = settings_path();
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create desktop settings directory: {error}"))?;
+        fs::create_dir_all(parent).map_err(|error| format!("无法创建桌面设置目录：{error}"))?;
     }
     let payload = serde_json::to_string_pretty(settings)
-        .map_err(|error| format!("failed to serialize desktop settings: {error}"))?;
-    fs::write(path, format!("{payload}\n"))
-        .map_err(|error| format!("failed to write desktop settings: {error}"))
+        .map_err(|error| format!("无法序列化桌面设置：{error}"))?;
+    fs::write(path, format!("{payload}\n")).map_err(|error| format!("无法写入桌面设置：{error}"))
 }
 
 fn log_file(dir: &Path, file_name: &str) -> Result<File, String> {
@@ -484,7 +530,64 @@ fn log_file(dir: &Path, file_name: &str) -> Result<File, String> {
         .create(true)
         .append(true)
         .open(dir.join(file_name))
-        .map_err(|error| format!("failed to open backend log file: {error}"))
+        .map_err(|error| format!("无法打开后端日志文件：{error}"))
+}
+
+fn extract_health_workspace(health: &Value) -> Option<String> {
+    health
+        .get("workspace")
+        .and_then(Value::as_str)
+        .map(|value| value.to_string())
+}
+
+fn workspace_mismatch_message(
+    backend_url: &str,
+    health_workspace_path: Option<&str>,
+    expected_workspace_path: &str,
+) -> String {
+    let actual = health_workspace_path.unwrap_or("未知工作区");
+    format!(
+        "检测到 {backend_url} 上已有后端在运行，但它的工作区是“{actual}”，不是当前桌面工作区“{expected_workspace_path}”。请停止占用该端口的旧后端，或在桌面设置中改用其他本机 API 地址。"
+    )
+}
+
+fn paths_equivalent(left: &str, right: &str) -> bool {
+    normalize_path_for_compare(left) == normalize_path_for_compare(right)
+}
+
+fn normalize_path_for_compare(path: &str) -> String {
+    let mut normalized = path.trim().replace('/', "\\");
+    if let Some(stripped) = normalized.strip_prefix(r"\\?\") {
+        normalized = stripped.to_string();
+    }
+    while normalized.ends_with('\\') && normalized.len() > 3 {
+        normalized.pop();
+    }
+    #[cfg(windows)]
+    {
+        normalized.to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        normalized
+    }
+}
+
+fn kill_child_tree(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        let pid = child.id().to_string();
+        let mut command = Command::new("taskkill");
+        command
+            .args(["/PID", pid.as_str(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command.creation_flags(CREATE_NO_WINDOW);
+        let _ = command.status();
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn settings_path() -> PathBuf {

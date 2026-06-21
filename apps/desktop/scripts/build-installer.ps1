@@ -42,3 +42,8 @@ try {
 } finally {
     Pop-Location
 }
+
+& (Join-Path $scriptDir "prepare-release-assets.ps1")
+if ($LASTEXITCODE -ne 0) {
+    throw "Release asset preparation failed."
+}

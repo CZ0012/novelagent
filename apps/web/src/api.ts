@@ -366,7 +366,15 @@ export async function apiPatch<T>(
 
 async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  let payload: any = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    if (!response.ok) {
+      throw new Error(text || response.statusText);
+    }
+    throw new Error("后端返回了无法解析的 JSON。");
+  }
   if (!response.ok) {
     const detail = payload?.detail?.message ?? payload?.detail ?? response.statusText;
     throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
