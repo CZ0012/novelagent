@@ -1,0 +1,78 @@
+{
+  "project": {
+    "title": "Fantasy Demo",
+    "genre": "fantasy",
+    "language": "zh-CN",
+    "target_length": "demo",
+    "narrative_pov": "third-person limited"
+  },
+  "chapter": {
+    "title": "The Old Bell Tower",
+    "status": "planned"
+  },
+  "characters": {
+    "character_linj": {
+      "name": "Lin Jin",
+      "role": "protagonist",
+      "desire": "Find the missing sealed letter.",
+      "current_status": "searching"
+    },
+    "character_helianya": {
+      "name": "Helian Ya",
+      "role": "faction agent",
+      "current_status": "secretly protective"
+    }
+  },
+  "organization": {
+    "name": "Silver Crow Society",
+    "goal": "Control the tower district."
+  },
+  "location": {
+    "name": "Old Bell Tower",
+    "type": "tower",
+    "current_status": "controlled by the Silver Crow Society"
+  },
+  "item": {
+    "name": "Half Black Wax Seal",
+    "type": "clue",
+    "current_status": "missing"
+  },
+  "secret": {
+    "content": "Lin Jin carries royal blood.",
+    "truth_status": "true",
+    "reveal_plan": "Do not reveal before scene_005."
+  },
+  "foreshadowing": {
+    "clue_text": "The bell rings earlier than expected.",
+    "hidden_meaning": "The underground bell array has been activated.",
+    "status": "seeded",
+    "importance": "high"
+  },
+  "world_rule": {
+    "domain": "knowledge",
+    "rule": "Royal lineage secrets require explicit scene-level reveal events.",
+    "severity": "high"
+  },
+  "scene": {
+    "title": "The Tower Search",
+    "timeline_position": "three days after the capital coup",
+    "goal": "search for the missing sealed letter",
+    "conflict": "the tower is controlled by a hostile faction",
+    "outcome": "Lin Jin finds a physical clue but not the lineage truth.",
+    "emotional_turn": "suspicion sharpens into wary resolve",
+    "must_include": ["bell rings early", "half black wax seal"],
+    "must_not_violate": ["Lin Jin learns secret_lineage"],
+    "style_constraints": {
+      "pov": "third-person limited",
+      "tone": "cold and restrained",
+      "dialogue_style": "short lines with subtext",
+      "banned_patterns": ["omniscient explanation"]
+    }
+  },
+  "relations": {
+    "rel_linj_knows_helianya": {
+      "strength": -0.2,
+      "public_status": "uneasy acquaintance"
+    }
+  }
+}

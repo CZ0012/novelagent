@@ -1,6 +1,6 @@
 [package]
 name = "storygraph-agent-desktop"
-version = "0.1.3"
+version = "0.1.4"
 description = "StoryGraph Agent 桌面壳"
 authors = ["StoryGraph Agent"]
 edition = "2021"

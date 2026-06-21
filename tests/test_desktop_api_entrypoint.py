@@ -34,17 +34,45 @@ def test_desktop_json_runtime_seeds_demo_only_by_explicit_full_permission_reques
     payload = seeded.json()
     assert payload["project_id"] == PROJECT_ID
     assert payload["nodes_created"] == 11
+    assert payload["nodes_updated"] == 0
     assert payload["relationships_created"] == 5
+    assert payload["relationships_updated"] == 0
     assert settings.graph_path.exists()
 
     project = client.get(f"/projects/{PROJECT_ID}")
     assert project.status_code == 200
     assert project.json()["source_ref"] == "demo:fantasy_project_v1"
+    assert project.json()["properties"]["title"] == "奇幻演示"
 
     repeated = client.post("/demo/seed")
     assert repeated.status_code == 200
     assert repeated.json()["nodes_created"] == 0
-    assert len(repeated.json()["nodes_skipped"]) == 11
+    assert repeated.json()["nodes_updated"] == 11
+    assert repeated.json()["relationships_updated"] == 5
+    assert repeated.json()["nodes_skipped"] == []
+
+
+def test_demo_seed_can_localize_existing_builtin_demo_nodes(tmp_path):
+    settings = _json_settings(tmp_path)
+    client = TestClient(create_app(settings))
+
+    english = client.post(
+        "/demo/seed",
+        json={"locale": "en-US", "overwrite_existing": False},
+    )
+    assert english.status_code == 200
+    project = client.get(f"/projects/{PROJECT_ID}")
+    assert project.json()["properties"]["title"] == "Fantasy Demo"
+
+    localized = client.post(
+        "/demo/seed",
+        json={"locale": "zh-CN", "overwrite_existing": True},
+    )
+
+    assert localized.status_code == 200
+    assert localized.json()["nodes_updated"] == 11
+    project = client.get(f"/projects/{PROJECT_ID}")
+    assert project.json()["properties"]["title"] == "奇幻演示"
 
 
 def test_read_generate_permission_blocks_demo_seed(tmp_path):

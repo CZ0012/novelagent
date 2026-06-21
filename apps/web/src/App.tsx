@@ -62,6 +62,7 @@ import {
   apiPost,
   apiPut
 } from "./api";
+import { localizeStatus, localizeText } from "./localization";
 import { APP_VERSION, GITHUB_LATEST_RELEASE_API } from "./version";
 import "./styles.css";
 
@@ -902,7 +903,9 @@ export default function App() {
     const result = await apiPost<DemoSeedResult>(apiBase, "/demo/seed", {
       reviewer: "author",
       rationale: "作者从工作台明确初始化内置奇幻演示项目。",
-      source_ref: "demo:workbench_seed"
+      source_ref: "demo:workbench_seed",
+      locale: "zh-CN",
+      overwrite_existing: true
     });
     await refreshWorkspace(result.project_id, result.scene_id);
     const pack = await apiPost<ContextPack>(
@@ -914,8 +917,10 @@ export default function App() {
     await refreshGraphPreview(result.project_id);
     setActiveTab("context");
     await refreshFacts();
+    const updated =
+      (result.nodes_updated ?? 0) + (result.relationships_updated ?? 0);
     setNotice(
-      `演示项目已就绪：写入 ${result.nodes_created} 个节点、${result.relationships_created} 条关系。`
+      `演示项目已就绪：写入 ${result.nodes_created} 个节点、${result.relationships_created} 条关系；本地化更新 ${updated} 项。`
     );
   }, [apiBase, refreshFacts, refreshGraphPreview, refreshLatestDraft, refreshWorkspace]);
 
@@ -976,7 +981,7 @@ export default function App() {
   const startNewProposal = useCallback(() => {
     setSelectedProposalId(null);
     setProposalArtifactType("scene_draft");
-    setProposalTitle(selectedScene ? `${selectedScene.title} 协作草稿` : "");
+    setProposalTitle(selectedScene ? `${localizeText(selectedScene.title)} 协作草稿` : "");
     setProposalText("");
     setProposalSourceDraftId(draft?.id ?? "");
   }, [draft, selectedScene]);
@@ -1374,10 +1379,10 @@ export default function App() {
         <main className="editor">
           <section className="scene-toolbar">
             <div>
-              <h1>{selectedScene?.title ?? (hasWorkspace ? "请选择场景" : "空工作区")}</h1>
+              <h1>{localizeText(selectedScene?.title) || (hasWorkspace ? "请选择场景" : "空工作区")}</h1>
               <p>
                 {hasScene
-                  ? `${sceneId} / 视角 ${contextPack?.pov_character_id || selectedScene?.pov_character_id || "未设置"}`
+                  ? `${sceneId} / 视角 ${localizeText(contextPack?.pov_character_id || selectedScene?.pov_character_id) || "未设置"}`
                   : "创建项目、章节和场景后，草稿与 Agent 工作流才会接入后端。"}
               </p>
             </div>
@@ -1418,7 +1423,7 @@ export default function App() {
 
           <section className="state-strip" aria-label="当前工作流状态">
             <StatusDot
-              label={`项目：${selectedProject?.title ?? "未创建"}`}
+              label={`项目：${localizeText(selectedProject?.title) || "未创建"}`}
               tone={hasWorkspace ? "good" : "warning"}
             />
             <StatusDot
@@ -1955,7 +1960,7 @@ function ProjectSidebar({
               >
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
-                    {project.title}
+                    {localizeText(project.title)}
                   </option>
                 ))}
               </select>
@@ -1992,8 +1997,8 @@ function ProjectSidebar({
               <div key={chapter.id} className="chapter">
                 <div className="chapter-row">
                   <BookOpen size={15} />
-                  <span>{chapter.title}</span>
-                  <small>{chapter.status ?? "planned"}</small>
+                  <span>{localizeText(chapter.title)}</span>
+                  <small>{formatStatus(chapter.status ?? "planned")}</small>
                 </div>
                 {chapter.scenes.length ? (
                   chapter.scenes.map((scene) => (
@@ -2004,8 +2009,8 @@ function ProjectSidebar({
                       type="button"
                     >
                       <ChevronRight size={14} />
-                      <span>{scene.title}</span>
-                      <small>{scene.status ?? "planned"}</small>
+                      <span>{localizeText(scene.title)}</span>
+                      <small>{formatStatus(scene.status ?? "planned")}</small>
                     </button>
                   ))
                 ) : (
@@ -2121,7 +2126,7 @@ function ProjectSidebar({
             <option value="">选择章节</option>
             {chapters.map((chapter) => (
               <option key={chapter.id} value={chapter.id}>
-                {chapter.title}
+                {localizeText(chapter.title)}
               </option>
             ))}
           </select>
@@ -2782,12 +2787,12 @@ function ContextInspector({ pack }: { pack: ContextPack | null }) {
     <div className="inspector-body">
       <MetricRow label="预算" value={`${pack.budget.estimated_tokens}/${pack.budget.target_tokens}`} />
       <MetricRow label="图查询" value={String(pack.provenance.graph_query_ids.length)} />
-      <ListBlock title="必须包含" items={pack.must_include} />
-      <ListBlock title="禁止违反" items={pack.must_not_violate} tone="danger" />
-      <ListBlock title="关系" items={pack.active_relationships} />
-      <ListBlock title="伏笔" items={pack.unresolved_foreshadowing} />
-      <ListBlock title="缺失上下文" items={pack.missing_context.map((gap) => `${formatSeverity(gap.severity)}: ${gap.ref} - ${formatKnownMessage(gap.message)}`)} tone="warning" />
-      <ListBlock title="已丢弃项目" items={pack.budget.dropped_items} />
+      <ListBlock title="必须包含" items={pack.must_include.map(localizeText)} />
+      <ListBlock title="禁止违反" items={pack.must_not_violate.map(localizeText)} tone="danger" />
+      <ListBlock title="关系" items={pack.active_relationships.map(localizeText)} />
+      <ListBlock title="伏笔" items={pack.unresolved_foreshadowing.map(localizeText)} />
+      <ListBlock title="缺失上下文" items={pack.missing_context.map((gap) => `${formatSeverity(gap.severity)}: ${localizeText(gap.ref)} - ${formatKnownMessage(gap.message)}`)} tone="warning" />
+      <ListBlock title="已丢弃项目" items={pack.budget.dropped_items.map(localizeText)} />
     </div>
   );
 }
@@ -2840,10 +2845,10 @@ function FactsInspector({
       {facts.map((fact) => (
         <div className="fact-row" key={fact.id}>
           <div>
-            <strong>{fact.fact_type}</strong>
-            <span>{fact.subject_id} {fact.relation} {fact.object_id ?? ""}</span>
+            <strong>{localizeText(fact.fact_type)}</strong>
+            <span>{localizeText(fact.subject_id)} {localizeText(fact.relation)} {localizeText(fact.object_id)}</span>
           </div>
-          <p>{fact.rationale}</p>
+          <p>{localizeText(fact.rationale)}</p>
           <div className="fact-actions">
             <button onClick={() => onReview(fact.id, "accept")} disabled={busy !== null || !canReview} type="button"><Check size={14} />接受</button>
             <button onClick={() => onReview(fact.id, "defer")} disabled={busy !== null || !canReview} type="button"><Clock3 size={14} />稍后</button>
@@ -2882,9 +2887,9 @@ function GraphPreview({
         {preview.relationships.length ? (
           preview.relationships.map((edge) => (
             <div key={edge.id}>
-              <span title={edge.source_id}>{edge.source_label}</span>
-              <b>{edge.type}</b>
-              <span title={edge.target_id}>{edge.target_label}</span>
+              <span title={edge.source_id}>{localizeText(edge.source_label)}</span>
+              <b>{localizeText(edge.type)}</b>
+              <span title={edge.target_id}>{localizeText(edge.target_label)}</span>
             </div>
           ))
         ) : (
@@ -2899,7 +2904,7 @@ function GraphPreview({
               key={item.id}
               className={item.id === selectedSceneId ? "current" : item.state}
             >
-              {item.label}
+              {localizeText(item.label)}
             </div>
           ))
         ) : (
@@ -2911,7 +2916,7 @@ function GraphPreview({
 }
 
 function Meta({ label, value }: { label: string; value: string }) {
-  return <div className="meta"><span>{label}</span><strong>{value || "缺失"}</strong></div>;
+  return <div className="meta"><span>{label}</span><strong>{localizeText(value) || "缺失"}</strong></div>;
 }
 
 function MetricRow({ label, value }: { label: string; value: string }) {
@@ -3031,6 +3036,7 @@ const stepLabels: Record<string, string> = {
 const statusLabels: Record<string, string> = {
   idle: "空闲",
   pending: "等待中",
+  planned: "已规划",
   running: "运行中",
   completed: "已完成",
   pass: "通过",
@@ -3368,7 +3374,7 @@ function formatDateTime(value: string): string {
 
 function formatStatus(status: string | null | undefined): string {
   if (!status) return "无";
-  return statusLabels[status] ?? status;
+  return statusLabels[status] ?? localizeStatus(status) ?? status;
 }
 
 function formatSeverity(severity: string): string {

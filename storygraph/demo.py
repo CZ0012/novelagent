@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from storygraph.localization import load_demo_locale
 from storygraph.stores.memory_graph import InMemoryGraphStore
 
 
@@ -14,18 +17,13 @@ SECRET_ID = "secret_lineage"
 ITEM_ID = "item_black_seal_half"
 
 
-def build_fantasy_demo_graph() -> InMemoryGraphStore:
+def build_fantasy_demo_graph(locale: str | None = None) -> InMemoryGraphStore:
+    text = load_demo_locale(locale)
     graph = InMemoryGraphStore()
     graph.seed_canon_node(
         node_id=PROJECT_ID,
         node_type="Project",
-        properties={
-            "title": "Fantasy Demo",
-            "genre": "fantasy",
-            "language": "zh-CN",
-            "target_length": "demo",
-            "narrative_pov": "third-person limited",
-        },
+        properties=_section(text, "project"),
     )
     graph.seed_canon_node(
         node_id=CHAPTER_ID,
@@ -34,63 +32,38 @@ def build_fantasy_demo_graph() -> InMemoryGraphStore:
             "project_id": PROJECT_ID,
             "volume_index": 1,
             "chapter_index": 1,
-            "title": "The Old Bell Tower",
-            "status": "planned",
+            **_section(text, "chapter"),
         },
     )
     graph.seed_canon_node(
         node_id=POV_CHARACTER_ID,
         node_type="Character",
-        properties={
-            "name": "Lin Jin",
-            "role": "protagonist",
-            "desire": "Find the missing sealed letter.",
-            "current_status": "searching",
-        },
+        properties=_section(text, "characters", POV_CHARACTER_ID),
     )
     graph.seed_canon_node(
         node_id="character_helianya",
         node_type="Character",
-        properties={
-            "name": "Helian Ya",
-            "role": "faction agent",
-            "current_status": "secretly protective",
-        },
+        properties=_section(text, "characters", "character_helianya"),
     )
     graph.seed_canon_node(
         node_id="organization_silver_crow",
         node_type="Organization",
-        properties={
-            "name": "Silver Crow Society",
-            "goal": "Control the tower district.",
-        },
+        properties=_section(text, "organization"),
     )
     graph.seed_canon_node(
         node_id=LOCATION_ID,
         node_type="Location",
-        properties={
-            "name": "Old Bell Tower",
-            "type": "tower",
-            "current_status": "controlled by the Silver Crow Society",
-        },
+        properties=_section(text, "location"),
     )
     graph.seed_canon_node(
         node_id=ITEM_ID,
         node_type="Item",
-        properties={
-            "name": "Half Black Wax Seal",
-            "type": "clue",
-            "current_status": "missing",
-        },
+        properties=_section(text, "item"),
     )
     graph.seed_canon_node(
         node_id=SECRET_ID,
         node_type="Secret",
-        properties={
-            "content": "Lin Jin carries royal blood.",
-            "truth_status": "true",
-            "reveal_plan": "Do not reveal before scene_005.",
-        },
+        properties=_section(text, "secret"),
     )
     graph.seed_canon_node(
         node_id="foreshadowing_early_bell",
@@ -98,20 +71,13 @@ def build_fantasy_demo_graph() -> InMemoryGraphStore:
         properties={
             "seed_scene_id": SCENE_ID,
             "payoff_scene_id": "scene_005",
-            "clue_text": "The bell rings earlier than expected.",
-            "hidden_meaning": "The underground bell array has been activated.",
-            "status": "seeded",
-            "importance": "high",
+            **_section(text, "foreshadowing"),
         },
     )
     graph.seed_canon_node(
         node_id="worldrule_secret_reveals",
         node_type="WorldRule",
-        properties={
-            "domain": "knowledge",
-            "rule": "Royal lineage secrets require explicit scene-level reveal events.",
-            "severity": "high",
-        },
+        properties=_section(text, "world_rule"),
     )
     graph.seed_canon_node(
         node_id=SCENE_ID,
@@ -120,23 +86,10 @@ def build_fantasy_demo_graph() -> InMemoryGraphStore:
             "project_id": PROJECT_ID,
             "chapter_id": CHAPTER_ID,
             "scene_index": 3,
-            "title": "The Tower Search",
             "pov_character_id": POV_CHARACTER_ID,
             "location_id": LOCATION_ID,
-            "timeline_position": "three days after the capital coup",
-            "goal": "search for the missing sealed letter",
-            "conflict": "the tower is controlled by a hostile faction",
-            "outcome": "Lin Jin finds a physical clue but not the lineage truth.",
-            "emotional_turn": "suspicion sharpens into wary resolve",
             "required_characters": [POV_CHARACTER_ID, "character_helianya"],
-            "must_include": ["bell rings early", "half black wax seal"],
-            "must_not_violate": ["Lin Jin learns secret_lineage"],
-            "style_constraints": {
-                "pov": "third-person limited",
-                "tone": "cold and restrained",
-                "dialogue_style": "short lines with subtext",
-                "banned_patterns": ["omniscient explanation"],
-            },
+            **_section(text, "scene"),
         },
     )
     graph.seed_canon_relation(
@@ -162,7 +115,7 @@ def build_fantasy_demo_graph() -> InMemoryGraphStore:
         relation_type="KNOWS",
         source_id=POV_CHARACTER_ID,
         target_id="character_helianya",
-        properties={"strength": -0.2, "public_status": "uneasy acquaintance"},
+        properties=_section(text, "relations", "rel_linj_knows_helianya"),
     )
     graph.seed_canon_relation(
         relation_id="rel_foreshadowing_points_to_secret",
@@ -172,3 +125,9 @@ def build_fantasy_demo_graph() -> InMemoryGraphStore:
     )
     return graph
 
+
+def _section(payload: dict[str, Any], *keys: str) -> dict[str, Any]:
+    current: Any = payload
+    for key in keys:
+        current = current[key]
+    return dict(current)

@@ -154,6 +154,8 @@ class DemoSeedRequest(BaseModel):
         min_length=1,
     )
     source_ref: str = Field("demo:fantasy_project_v1", min_length=1)
+    locale: str = "zh-CN"
+    overwrite_existing: bool = True
 
 
 class DraftRequest(BaseModel):
@@ -243,7 +245,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.3")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.4")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
@@ -830,9 +832,11 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     def seed_demo(request: DemoSeedRequest | None = None) -> dict:
         require_permission(AgentPermissionLevel.FULL)
         request = request or DemoSeedRequest()
-        demo_graph = build_fantasy_demo_graph()
+        demo_graph = build_fantasy_demo_graph(locale=request.locale)
         nodes_created = 0
+        nodes_updated = 0
         relationships_created = 0
+        relationships_updated = 0
         nodes_skipped: list[str] = []
         relationships_skipped: list[str] = []
 
@@ -850,7 +854,20 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             except GraphStoreError as exc:
                 if exc.category != "duplicate_id":
                     raise _graph_http_exception(exc) from exc
-                nodes_skipped.append(node.id)
+                if request.overwrite_existing:
+                    try:
+                        graph.update_node(
+                            node.id,
+                            node.properties,
+                            reviewer=request.reviewer,
+                            rationale=request.rationale,
+                            source_ref=request.source_ref,
+                        )
+                        nodes_updated += 1
+                    except GraphStoreError as update_exc:
+                        raise _graph_http_exception(update_exc) from update_exc
+                else:
+                    nodes_skipped.append(node.id)
 
         for relation in sorted(demo_graph.relationships.values(), key=lambda item: item.id):
             try:
@@ -868,14 +885,29 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             except GraphStoreError as exc:
                 if exc.category != "duplicate_id":
                     raise _graph_http_exception(exc) from exc
-                relationships_skipped.append(relation.id)
+                if request.overwrite_existing:
+                    try:
+                        graph.update_relation(
+                            relation.id,
+                            relation.properties,
+                            reviewer=request.reviewer,
+                            rationale=request.rationale,
+                            source_ref=request.source_ref,
+                        )
+                        relationships_updated += 1
+                    except GraphStoreError as update_exc:
+                        raise _graph_http_exception(update_exc) from update_exc
+                else:
+                    relationships_skipped.append(relation.id)
 
         persist_graph()
         return {
             "project_id": PROJECT_ID,
             "scene_id": SCENE_ID,
             "nodes_created": nodes_created,
+            "nodes_updated": nodes_updated,
             "relationships_created": relationships_created,
+            "relationships_updated": relationships_updated,
             "nodes_skipped": nodes_skipped,
             "relationships_skipped": relationships_skipped,
         }
@@ -1026,6 +1058,16 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 scene_id=scene_id,
                 output_target=request.output_target,
             )
+        except ContractError as exc:
+            raise _contract_http_exception(exc) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "category": "workflow_failed",
+                    "message": f"工作流运行失败：{exc}",
+                },
+            ) from exc
         finally:
             workflow.close()
         return {

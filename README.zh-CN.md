@@ -128,7 +128,7 @@ npm --prefix apps/desktop run build:installer
 生成的安装器路径是：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.3_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe
 ```
 
 其他常用桌面命令：
@@ -148,8 +148,8 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.3_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.3_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe.sig
 ```
 
 完整安装器构建会用 `--noconsole` 重新生成 PyInstaller 后端 sidecar，重新构建 React/Vite 工作台，并运行 `tauri build`。Tauri 壳启动 sidecar 时也会使用 Windows `CREATE_NO_WINDOW`，所以打包版不应再出现额外的空后端终端窗口。关闭桌面主窗口会隐藏到系统托盘；使用托盘菜单里的 `退出 StoryGraph Agent` 才会停止受管后端进程树并退出应用。如果 8000 端口上已有健康后端但工作区不同，桌面设置页会提示冲突，不再把该进程当作当前桌面 workspace。这些安装器、`setup.exe.sig` updater 签名、后端 sidecar 和 release exe 是本地输出，不会提交到仓库，也还不是已发布 release。
@@ -158,7 +158,7 @@ apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.3_x64-set
 
 版本更新必须保持 `VERSION`、`pyproject.toml`、`apps/web/package.json`、`apps/web/src/version.ts`、`apps/desktop/package.json`、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json` 同步。这里的 GitHub 只作为软件发布/更新通道；本地小说 workspace、canon、草稿、导入文档、项目设置和审阅状态不会自动同步到 GitHub。
 
-当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.3_x64-setup.exe.sig`。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
+当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.4_x64-setup.exe.sig`。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
 
 仍缺失或未验证：
 
@@ -260,7 +260,7 @@ $env:STORYGRAPH_LLM_MODEL="deepseek-chat"
 
 在 Web 或桌面设置面板里，输入 API key 只表示保存了凭据引用，并不等于启用 LLM 写作。作者还需要选择 OpenAI-compatible LLM 写作模式、保存设置、具备 `read_generate` 或 `full` 权限，并且当前项目、场景和 Context Pack 有效。
 
-LLM writer 会读取 `storygraph/prompts/scene_writer.md`，要求模型返回 JSON，只把结果保存到 Draft Store，并在本地拒绝遗漏 `must_include` 或直接包含 `must_not_violate` 字面约束的草稿。它不会拿到 Graph Store handle；生成内容中的状态变化仍必须经过 CandidateFact 抽取和人工 review。
+LLM writer 会读取 `storygraph/prompts/scene_writer.md`，要求模型返回 JSON，只把结果保存到 Draft Store，并在本地拒绝遗漏 `must_include` 或直接包含 `must_not_violate` 字面约束的草稿。桌面 sidecar 构建会把 `storygraph/prompts` 和 `storygraph/localization` 作为数据文件打包。它不会拿到 Graph Store handle；生成内容中的状态变化仍必须经过 CandidateFact 抽取和人工 review。
 
 ## Graph Backend
 

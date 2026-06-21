@@ -45,7 +45,10 @@ if ($LASTEXITCODE -ne 0) {
     }
 }
 
-python -m PyInstaller --clean --noconfirm --onefile --noconsole --name storygraph-backend --icon $iconPath --distpath $distDir --workpath (Join-Path $runDir "build") --specpath $runDir --paths $repoRoot $entryPath
+$promptData = (Join-Path $repoRoot "storygraph\prompts") + ";storygraph\prompts"
+$localizationData = (Join-Path $repoRoot "storygraph\localization") + ";storygraph\localization"
+
+python -m PyInstaller --clean --noconfirm --onefile --noconsole --name storygraph-backend --icon $iconPath --distpath $distDir --workpath (Join-Path $runDir "build") --specpath $runDir --paths $repoRoot --add-data $promptData --add-data $localizationData $entryPath
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed to build the StoryGraph backend sidecar."
 }

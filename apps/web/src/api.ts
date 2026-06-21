@@ -315,7 +315,9 @@ export type DemoSeedResult = {
   project_id: string;
   scene_id: string;
   nodes_created: number;
+  nodes_updated?: number;
   relationships_created: number;
+  relationships_updated?: number;
   nodes_skipped: string[];
   relationships_skipped: string[];
 };

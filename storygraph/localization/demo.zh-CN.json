@@ -1,0 +1,78 @@
+{
+  "project": {
+    "title": "奇幻演示",
+    "genre": "奇幻",
+    "language": "zh-CN",
+    "target_length": "演示",
+    "narrative_pov": "第三人称有限视角"
+  },
+  "chapter": {
+    "title": "旧钟塔",
+    "status": "planned"
+  },
+  "characters": {
+    "character_linj": {
+      "name": "林瑾",
+      "role": "主角",
+      "desire": "找到遗失的密封信。",
+      "current_status": "正在搜寻线索"
+    },
+    "character_helianya": {
+      "name": "赫连雅",
+      "role": "敌对派系探员",
+      "current_status": "暗中保护林瑾"
+    }
+  },
+  "organization": {
+    "name": "银鸦会",
+    "goal": "控制钟塔街区。"
+  },
+  "location": {
+    "name": "旧钟塔",
+    "type": "塔楼",
+    "current_status": "被银鸦会控制"
+  },
+  "item": {
+    "name": "半枚黑蜡封",
+    "type": "线索",
+    "current_status": "下落不明"
+  },
+  "secret": {
+    "content": "林瑾身负王室血脉。",
+    "truth_status": "真实",
+    "reveal_plan": "不要在 scene_005 之前揭示。"
+  },
+  "foreshadowing": {
+    "clue_text": "钟声比预期更早响起。",
+    "hidden_meaning": "地下钟阵已经被启动。",
+    "status": "已埋设",
+    "importance": "高"
+  },
+  "world_rule": {
+    "domain": "知识边界",
+    "rule": "王室血脉秘密必须通过明确的场景级揭示事件才能进入角色认知。",
+    "severity": "高"
+  },
+  "scene": {
+    "title": "钟塔搜寻",
+    "timeline_position": "王都政变三日后",
+    "goal": "寻找遗失的密封信",
+    "conflict": "钟塔被敌对派系控制",
+    "outcome": "林瑾找到实体线索，但尚未得知血脉真相。",
+    "emotional_turn": "怀疑转为克制而警觉的决心",
+    "must_include": ["钟声提前响起", "半枚黑蜡封"],
+    "must_not_violate": ["林瑾得知 secret_lineage"],
+    "style_constraints": {
+      "pov": "第三人称有限视角",
+      "tone": "冷峻克制",
+      "dialogue_style": "短句与潜台词",
+      "banned_patterns": ["全知解释"]
+    }
+  },
+  "relations": {
+    "rel_linj_knows_helianya": {
+      "strength": -0.2,
+      "public_status": "互不信任的熟人"
+    }
+  }
+}
