@@ -80,9 +80,9 @@ button.primary {
   background: rgba(255, 255, 255, 0.92);
   border-bottom: 1px solid var(--line);
   display: grid;
-  grid-template-columns: 280px minmax(360px, 1fr) auto;
+  grid-template-columns: 240px minmax(420px, 1fr) minmax(260px, 0.55fr) auto;
   align-items: center;
-  gap: 20px;
+  gap: 12px;
   padding: 0 18px;
 }
 
@@ -150,6 +150,20 @@ button.primary {
   gap: 10px;
 }
 
+.command-bar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.command-bar button {
+  min-height: 32px;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
 .icon-button {
   width: 36px;
   padding: 0;
@@ -192,6 +206,37 @@ button.primary {
   text-transform: uppercase;
   color: #596662;
   font-weight: 800;
+}
+
+details.sidebar-section,
+details.collapsible-panel {
+  display: block;
+}
+
+summary.section-title,
+summary.draft-header,
+summary.run-head {
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.section-title::-webkit-details-marker,
+summary.draft-header::-webkit-details-marker,
+summary.run-head::-webkit-details-marker {
+  display: none;
+}
+
+summary.section-title::after {
+  content: "收起";
+  float: right;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+}
+
+details:not([open]) > summary.section-title::after {
+  content: "展开";
 }
 
 .project-title {
@@ -265,7 +310,7 @@ button.primary {
 
 .scene-tree {
   overflow: auto;
-  padding: 0 10px 12px;
+  padding: 0 0 12px;
 }
 
 .tree-empty {
@@ -396,6 +441,29 @@ h1 {
 .state-strip .status-dot i {
   flex: 0 0 8px;
   margin-top: 4px;
+}
+
+.workspace-tabs {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  box-shadow: var(--shadow);
+}
+
+.workspace-tabs button {
+  flex: 1 1 0;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+}
+
+.workspace-tabs button.active {
+  color: #073f3a;
+  background: var(--teal-soft);
 }
 
 .empty-workspace {
@@ -870,6 +938,14 @@ h1 {
   display: grid;
   grid-template-rows: 42px 1fr 42px;
   overflow: hidden;
+}
+
+.draft-surface.collapsible-panel[open] {
+  display: grid;
+}
+
+.draft-surface.collapsible-panel:not([open]) {
+  min-height: auto;
 }
 
 .draft-header,
@@ -1455,6 +1531,16 @@ textarea {
     flex-wrap: wrap;
   }
 
+  .command-bar {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .command-bar button,
+  .workspace-tabs button {
+    flex: 1 1 120px;
+  }
+
   .sidebar,
   .inspector {
     border: 0;
@@ -1509,6 +1595,10 @@ textarea {
 
   .state-strip {
     align-items: stretch;
+  }
+
+  .workspace-tabs {
+    flex-wrap: wrap;
   }
 
   .state-strip .status-dot {

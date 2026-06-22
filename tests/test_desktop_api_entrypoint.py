@@ -51,6 +51,12 @@ def test_desktop_json_runtime_seeds_demo_only_by_explicit_full_permission_reques
     assert repeated.json()["relationships_updated"] == 5
     assert repeated.json()["nodes_skipped"] == []
 
+    archived = client.post("/demo/archive")
+    assert archived.status_code == 200
+    assert archived.json()["nodes_archived"] == 11
+    assert archived.json()["relationships_archived"] == 5
+    assert client.get("/projects").json()["projects"] == []
+
 
 def test_demo_seed_can_localize_existing_builtin_demo_nodes(tmp_path):
     settings = _json_settings(tmp_path)

@@ -153,6 +153,9 @@ promote it.
 - The source draft belongs to the same project and provides the
   `source_scene_id`, `source_draft_id`, and source span required by
   `candidate_fact_v1`.
+- The `fact_draft` body may contain author-editable explicit fact markers that
+  the backend parses into CandidateFact records, but those markers must remain
+  tied to the supplied real source draft for provenance.
 - The proposal is recorded only as supporting evidence/provenance; proposal
   body is not the sole primary source for a CandidateFact.
 - The resulting CandidateFact records are submitted to ReviewService as pending

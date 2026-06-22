@@ -26,11 +26,13 @@ import {
   Lock,
   Network,
   Play,
+  Redo2,
   RefreshCw,
   Save,
   Settings,
   ShieldCheck,
   SplitSquareVertical,
+  Undo2,
   Wand2,
   X
 } from "lucide-react";
@@ -43,7 +45,9 @@ import {
   ChapterOutline,
   ContextPack,
   ContinuityReport,
+  DemoArchiveResult,
   DemoSeedResult,
+  DocumentFactExtractionResult,
   Draft,
   GraphNodePayload,
   ProposalArtifact,
@@ -67,6 +71,7 @@ import { APP_VERSION, GITHUB_LATEST_RELEASE_API } from "./version";
 import "./styles.css";
 
 type InspectorTab = "context" | "continuity" | "facts" | "settings";
+type WorkspaceTab = "write" | "sources" | "proposals" | "workflow";
 type LibraryDocumentKind = "txt" | "md" | "docx";
 type LibraryDocumentStatus = "ready" | "error";
 
@@ -247,6 +252,7 @@ export default function App() {
   const [projectId, setProjectId] = useState("");
   const [sceneId, setSceneId] = useState("");
   const [activeTab, setActiveTab] = useState<InspectorTab>("context");
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("write");
   const [contextPack, setContextPack] = useState<ContextPack | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draftText, setDraftText] = useState("");
@@ -832,6 +838,7 @@ export default function App() {
       setDraft(saved);
       setDraftText(saved.text);
       setDraftSummary(saved.summary ?? "");
+      setWorkspaceTab("write");
       setNotice(`已把“${document.name}”保存为草稿 v${saved.version}；canon 未改变。`);
       return saved;
     },
@@ -876,9 +883,42 @@ export default function App() {
       );
       await refreshProposals(projectId);
       setSelectedProposalId(proposal.id);
+      setWorkspaceTab("proposals");
       setNotice(`“${document.name}”已保存到协作草稿箱；当前场景草稿和 canon 未改变。`);
     },
     [apiBase, projectId, refreshProposals, sceneId]
+  );
+
+  const extractDocumentFacts = useCallback(
+    async (document: LibraryDocument) => {
+      if (!endpoint || !projectId) throw new Error("请先创建并选择一个项目和场景。");
+      if (document.status !== "ready") throw new Error("这个文档还不能抽取设定。");
+      const result = await apiPost<DocumentFactExtractionResult>(
+        apiBase,
+        `${endpoint}/extract-document-facts`,
+        {
+          title: document.name,
+          text: document.content,
+          source_ref: `import:${document.path}::${document.id}`,
+          max_facts: 16
+        }
+      );
+      setDraft(result.source_draft);
+      setDraftText(result.source_draft.text);
+      setDraftSummary(result.source_draft.summary ?? "");
+      await refreshProposals(projectId);
+      setSelectedProposalId(result.proposal.id);
+      setProposalSourceDraftId(result.source_draft.id);
+      setWorkspaceTab("proposals");
+      setActiveTab("facts");
+      const suffix = result.truncated ? " 源文档较长，本次只读取前部片段。" : "";
+      setNotice(
+        result.candidate_previews.length
+          ? `已生成 fact_draft 设定草稿，包含 ${result.candidate_previews.length} 条候选预览；canon 未改变。${suffix}`
+          : `已生成 fact_draft 设定草稿，但未发现可抽取事实；canon 未改变。${suffix}`
+      );
+    },
+    [apiBase, endpoint, projectId, refreshProposals]
   );
 
   const saveDocumentAsDraftAndExtract = useCallback(
@@ -917,6 +957,7 @@ export default function App() {
     await refreshGraphPreview(result.project_id);
     setActiveTab("context");
     await refreshFacts();
+    setWorkspaceTab("write");
     const updated =
       (result.nodes_updated ?? 0) + (result.relationships_updated ?? 0);
     setNotice(
@@ -924,10 +965,27 @@ export default function App() {
     );
   }, [apiBase, refreshFacts, refreshGraphPreview, refreshLatestDraft, refreshWorkspace]);
 
+  const archiveDemo = useCallback(async () => {
+    const result = await apiPost<DemoArchiveResult>(apiBase, "/demo/archive");
+    await refreshWorkspace();
+    setContextPack(null);
+    setDraft(null);
+    setDraftText("");
+    setDraftSummary("");
+    setRun(null);
+    setRunEvents([]);
+    setContinuityReport(null);
+    await refreshFacts();
+    setNotice(
+      `内置演示已从工作区移除：归档 ${result.nodes_archived} 个节点、${result.relationships_archived} 条关系。`
+    );
+  }, [apiBase, refreshFacts, refreshWorkspace]);
+
   const buildContext = useCallback(async () => {
     if (!endpoint) throw new Error("请先选择场景。");
     const pack = await apiPost<ContextPack>(apiBase, `${endpoint}/context-pack`);
     setContextPack(pack);
+    setWorkspaceTab("write");
     setActiveTab("context");
     setNotice("上下文包已刷新。");
   }, [apiBase, endpoint]);
@@ -940,6 +998,7 @@ export default function App() {
     });
     setDraft(saved);
     setNotice(`草稿 v${saved.version} 已保存。`);
+    setWorkspaceTab("write");
   }, [apiBase, draftSummary, draftText, endpoint]);
 
   const generateDraft = useCallback(async () => {
@@ -951,6 +1010,7 @@ export default function App() {
     setDraftText(saved.text);
     setDraftSummary(saved.summary ?? "");
     setNotice(`草稿 v${saved.version} 已生成。`);
+    setWorkspaceTab("write");
   }, [apiBase, endpoint]);
 
   const runScene = useCallback(async () => {
@@ -968,6 +1028,7 @@ export default function App() {
     setDraftSummary(result.draft.summary ?? "");
     setRun(result.workflow_run);
     setContinuityReport(result.continuity_report);
+    setWorkspaceTab("workflow");
     setActiveTab(result.continuity_report.issues.length > 0 ? "continuity" : "context");
     const events = await apiGet<{ events: WorkflowStep[] }>(
       apiBase,
@@ -1059,6 +1120,7 @@ export default function App() {
       );
       await refreshProposals(projectId);
       setSelectedProposalId(revised.id);
+      setWorkspaceTab("proposals");
       setNotice(`Agent 已修订协作草稿为 v${revised.version}；当前场景草稿未被覆盖。`);
       return;
     }
@@ -1081,6 +1143,7 @@ export default function App() {
     } else if (refreshed[0]) {
       setSelectedProposalId(refreshed[0].id);
     }
+    setWorkspaceTab("proposals");
     setNotice("Agent 已生成 scene_draft 协作草稿；当前场景草稿未被覆盖。");
   }, [apiBase, endpoint, projectId, refreshProposals, selectedProposal]);
 
@@ -1093,6 +1156,7 @@ export default function App() {
     }>(apiBase, `${endpoint}/extract-state`, { output_target: "proposal_workspace" });
     await refreshProposals(projectId);
     setSelectedProposalId(result.proposal.id);
+    setWorkspaceTab("proposals");
     setNotice(
       result.candidate_previews.length
         ? `已生成 fact_draft 协作草稿，包含 ${result.candidate_previews.length} 条候选预览。`
@@ -1287,7 +1351,20 @@ export default function App() {
   const writerNeedsKey =
     agentSettings?.scene_writer === "llm" &&
     (!agentSettings.api_key_configured || !agentSettings.llm_base_url || !agentSettings.llm_model);
+  const llmConfigured = Boolean(
+    agentSettings?.api_key_configured && agentSettings.llm_base_url && agentSettings.llm_model
+  );
   const canRunScene = hasScene && canGenerate && !writerNeedsKey;
+  const canExtractDocumentFacts = hasScene && canGenerate && llmConfigured;
+  const runEditCommand = useCallback((command: "undo" | "redo") => {
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLInputElement ||
+      active instanceof HTMLTextAreaElement
+    ) {
+      document.execCommand(command);
+    }
+  }, []);
   const currentChapterId = selectedProject?.chapters[0]?.id ?? "";
   const backendStatusLabel = desktopBackend ? formatDesktopBackendLabel(desktopBackend) : "FastAPI";
   const backendStatusTone = desktopBackend ? desktopBackendTone(desktopBackend) : "good";
@@ -1301,6 +1378,48 @@ export default function App() {
             <strong>StoryGraph Agent</strong>
             <span>长篇小说安全写作台</span>
           </div>
+        </div>
+        <div className="command-bar" aria-label="全局命令">
+          <button
+            type="button"
+            onClick={() => runAction("save", saveDraft)}
+            disabled={!canGenerate || !hasScene || busy !== null}
+            title="保存当前场景草稿"
+          >
+            <Save size={15} /> 保存
+          </button>
+          <button type="button" onClick={() => runEditCommand("undo")} title="撤销当前输入框编辑">
+            <Undo2 size={15} /> 撤销
+          </button>
+          <button type="button" onClick={() => runEditCommand("redo")} title="重做当前输入框编辑">
+            <Redo2 size={15} /> 重做
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              runAction("workspace", async () => {
+                await refreshWorkspace(projectId, sceneId);
+              })
+            }
+            disabled={busy !== null}
+            title="刷新后端项目树"
+          >
+            <RefreshCw size={15} /> 刷新
+          </button>
+          <button type="button" onClick={() => setWorkspaceTab("sources")} title="打开本地资料与 LLM 抽设定">
+            <Library size={15} /> 资料
+          </button>
+          <button type="button" onClick={() => setWorkspaceTab("proposals")} title="打开协作草稿箱">
+            <SplitSquareVertical size={15} /> 草稿箱
+          </button>
+          <button
+            type="button"
+            onClick={() => runAction("run", runScene)}
+            disabled={!canRunScene || busy !== null}
+            title="根据当前 canon/context 运行场景写作工作流"
+          >
+            <Play size={15} /> 写作
+          </button>
         </div>
         <label className="api-control">
           <Database size={15} />
@@ -1338,6 +1457,7 @@ export default function App() {
             onCreateProject={() => runAction("create-project", createProject)}
             onCreateScene={() => runAction("create-scene", createScene)}
             onCreateWorldRule={() => runAction("create-world-rule", createWorldRule)}
+            onArchiveDemo={() => runAction("archive-demo", archiveDemo)}
             onLocationFormChange={setLocationForm}
             onProjectFormChange={setProjectForm}
             onRefresh={() =>
@@ -1414,9 +1534,9 @@ export default function App() {
                 onClick={() => runAction("run", runScene)}
                 type="button"
                 disabled={!canRunScene}
-                title="运行 build_context、write_draft、check_continuity、extract_state、human_review。"
+                title="根据当前场景 canon/context 写场景草稿，再做质检和候选事实抽取。不会读取本地资料区。"
               >
-                <Play size={16} /> 运行 Agent 工作流
+                <Play size={16} /> 运行场景写作工作流
               </button>
             </div>
           </section>
@@ -1436,6 +1556,13 @@ export default function App() {
             />
           </section>
 
+          <section className="workspace-tabs" aria-label="主工作区">
+            <TabButton active={workspaceTab === "write"} onClick={() => setWorkspaceTab("write")} icon={<FileText size={15} />} label="写作" />
+            <TabButton active={workspaceTab === "sources"} onClick={() => setWorkspaceTab("sources")} icon={<Library size={15} />} label="资料" />
+            <TabButton active={workspaceTab === "proposals"} onClick={() => setWorkspaceTab("proposals")} icon={<SplitSquareVertical size={15} />} label="协作草稿" />
+            <TabButton active={workspaceTab === "workflow"} onClick={() => setWorkspaceTab("workflow")} icon={<Activity size={15} />} label="工作流" />
+          </section>
+
           {(error || notice) && (
             <div className={`message ${error ? "error" : "notice"}`}>
               {error ? <AlertTriangle size={16} /> : <Check size={16} />}
@@ -1453,16 +1580,19 @@ export default function App() {
             </section>
           )}
 
-          <section className="meta-grid" aria-label="场景元数据">
-            <Meta label="目标" value={contextPack?.scene_goal || selectedScene?.goal || ""} />
-            <Meta label="冲突" value={contextPack?.conflict || selectedScene?.conflict || ""} />
-            <Meta
-              label="时间线"
-              value={contextPack?.timeline_position || selectedScene?.timeline_position || ""}
-            />
-            <Meta label="地点" value={contextPack?.location_id || selectedScene?.location_id || ""} />
-          </section>
+          {workspaceTab === "write" && (
+            <section className="meta-grid" aria-label="场景元数据">
+              <Meta label="目标" value={contextPack?.scene_goal || selectedScene?.goal || ""} />
+              <Meta label="冲突" value={contextPack?.conflict || selectedScene?.conflict || ""} />
+              <Meta
+                label="时间线"
+                value={contextPack?.timeline_position || selectedScene?.timeline_position || ""}
+              />
+              <Meta label="地点" value={contextPack?.location_id || selectedScene?.location_id || ""} />
+            </section>
+          )}
 
+          {workspaceTab === "sources" && (
           <section className="library-panel" aria-label="本地资料库">
             <div className="library-header">
               <div>
@@ -1521,9 +1651,13 @@ export default function App() {
               </div>
               <DocumentReader
                 busy={busy}
+                canExtractDocumentFacts={canExtractDocumentFacts}
                 canGenerate={canGenerate}
                 document={selectedLibraryDocument}
                 hasScene={hasScene}
+                onExtractDocumentFacts={(document) =>
+                  runAction("document-facts", () => extractDocumentFacts(document))
+                }
                 onExtract={(document) =>
                   runAction("import-extract", () => saveDocumentAsDraftAndExtract(document))
                 }
@@ -1541,7 +1675,9 @@ export default function App() {
               />
             </div>
           </section>
+          )}
 
+          {workspaceTab === "proposals" && (
           <ProposalInbox
             busy={busy}
             canGenerate={canGenerate}
@@ -1579,12 +1715,14 @@ export default function App() {
             proposals={visibleProposals}
             selectedProposal={selectedProposal}
           />
+          )}
 
-          <section className="draft-surface">
-            <div className="draft-header">
+          {workspaceTab === "write" && (
+          <details className="draft-surface collapsible-panel" open>
+            <summary className="draft-header">
               <span>场景草稿</span>
               <small>{draft ? `v${draft.version} / ${draft.id}` : "本地未保存草稿"}</small>
-            </div>
+            </summary>
             <textarea
               value={draftText}
               onChange={(event) => setDraftText(event.target.value)}
@@ -1597,16 +1735,18 @@ export default function App() {
               onChange={(event) => setDraftSummary(event.target.value)}
               aria-label="草稿摘要"
             />
-          </section>
+          </details>
+          )}
 
-          <section className="run-panel">
-            <div className="run-head">
+          {workspaceTab === "workflow" && (
+          <details className="run-panel collapsible-panel" open>
+            <summary className="run-head">
               <div>
                 <span>智能体运行</span>
                 <small>{run?.id ?? "尚未运行"}</small>
               </div>
               <StatusDot label={formatStatus(run?.status ?? "idle")} tone={statusTone(run?.status)} />
-            </div>
+            </summary>
             <div className="step-track">
               {(runEvents.length ? runEvents : fallbackSteps).map((step) => (
                 <div key={step.name} className={`step ${step.status}`}>
@@ -1615,7 +1755,8 @@ export default function App() {
                 </div>
               ))}
             </div>
-          </section>
+          </details>
+          )}
         </main>
 
         <aside className="inspector">
@@ -1894,6 +2035,7 @@ function ProjectSidebar({
   onCreateProject,
   onCreateScene,
   onCreateWorldRule,
+  onArchiveDemo,
   onLocationFormChange,
   onProjectFormChange,
   onRefresh,
@@ -1926,6 +2068,7 @@ function ProjectSidebar({
   onCreateProject: () => void;
   onCreateScene: () => void;
   onCreateWorldRule: () => void;
+  onArchiveDemo: () => void;
   onLocationFormChange: React.Dispatch<React.SetStateAction<LocationForm>>;
   onProjectFormChange: React.Dispatch<React.SetStateAction<ProjectForm>>;
   onRefresh: () => void;
@@ -1945,12 +2088,13 @@ function ProjectSidebar({
 }) {
   const chapters = selectedProject?.chapters ?? [];
   const sceneChapterId = sceneForm.chapter_id || currentChapterId;
+  const selectedBuiltinDemo = selectedProject?.id === "project_fantasy_demo";
 
   return (
     <>
       <div className="sidebar-scroll">
-        <section className="sidebar-section">
-          <div className="section-title">真实工作区</div>
+        <details className="sidebar-section workspace-section" open>
+          <summary className="section-title">真实工作区</summary>
           {workspaceLoaded && hasWorkspace ? (
             <>
               <select
@@ -1988,8 +2132,17 @@ function ProjectSidebar({
             >
               <Database size={15} /> 初始化演示
             </button>
+            {selectedBuiltinDemo && (
+              <button
+                disabled={!canReview || busy !== null}
+                onClick={onArchiveDemo}
+                title={canReview ? "仅移除内置演示项目，真实项目不受影响" : "需要完全权限"}
+                type="button"
+              >
+                <X size={15} /> 移除演示
+              </button>
+            )}
           </div>
-        </section>
 
         <nav className="scene-tree" aria-label="后端项目树">
           {selectedProject ? (
@@ -2026,9 +2179,10 @@ function ProjectSidebar({
             />
           )}
         </nav>
+        </details>
 
-        <section className="sidebar-section seed-panel">
-          <div className="section-title">创建我的小说项目</div>
+        <details className="sidebar-section seed-panel" open>
+          <summary className="section-title">创建我的小说项目</summary>
           <input
             placeholder="项目名称"
             value={projectForm.title}
@@ -2080,10 +2234,10 @@ function ProjectSidebar({
           >
             <Save size={15} /> 创建项目
           </button>
-        </section>
+        </details>
 
-        <section className="sidebar-section seed-panel">
-          <div className="section-title">章节 / 场景</div>
+        <details className="sidebar-section seed-panel" open>
+          <summary className="section-title">章节 / 场景</summary>
           <input
             placeholder="章节标题"
             value={chapterForm.title}
@@ -2230,10 +2384,10 @@ function ProjectSidebar({
               }))
             }
           />
-        </section>
+        </details>
 
-        <section className="sidebar-section seed-panel">
-          <div className="section-title">人物 / 地点 / 规则</div>
+        <details className="sidebar-section seed-panel">
+          <summary className="section-title">人物 / 地点 / 规则</summary>
           <input
             placeholder="人物名称"
             value={characterForm.name}
@@ -2317,7 +2471,7 @@ function ProjectSidebar({
               <Save size={15} /> 规则
             </button>
           </div>
-        </section>
+        </details>
       </div>
       <div className="sidebar-footer">
         <ShieldCheck size={16} />
@@ -2434,19 +2588,23 @@ function LibraryTreeItem({
 
 function DocumentReader({
   busy,
+  canExtractDocumentFacts,
   canGenerate,
   document: doc,
   hasScene,
   onExtract,
+  onExtractDocumentFacts,
   onSaveDraft,
   onSaveProposal,
   onSaveStyle
 }: {
   busy: string | null;
+  canExtractDocumentFacts: boolean;
   canGenerate: boolean;
   document: LibraryDocument | null;
   hasScene: boolean;
   onExtract: (document: LibraryDocument) => void;
+  onExtractDocumentFacts: (document: LibraryDocument) => void;
   onSaveDraft: (document: LibraryDocument) => void;
   onSaveProposal: (document: LibraryDocument) => void;
   onSaveStyle: (document: LibraryDocument) => void;
@@ -2464,6 +2622,7 @@ function DocumentReader({
   }
 
   const canBridge = doc.status === "ready" && canGenerate && hasScene && busy === null;
+  const canUseLlmExtraction = doc.status === "ready" && canExtractDocumentFacts && busy === null;
 
   return (
     <div className="document-reader">
@@ -2505,12 +2664,20 @@ function DocumentReader({
             <Wand2 size={14} /> 存为风格样本
           </button>
           <button
-            disabled={!canBridge}
-            onClick={() => onExtract(doc)}
-            title="先保存为草稿，再抽取 pending CandidateFact；仍需人工审阅才可能进入 canon。"
+            disabled={!canUseLlmExtraction}
+            onClick={() => onExtractDocumentFacts(doc)}
+            title="把导入资料发送给已配置的 LLM，生成可编辑 fact_draft；不会自动进入 canon。"
             type="button"
           >
-            <ShieldCheck size={14} /> 抽取待审事实
+            <ShieldCheck size={14} /> LLM 抽设定草稿
+          </button>
+          <button
+            disabled={!canBridge}
+            onClick={() => onExtract(doc)}
+            title="保存为草稿后，仅解析文中已有的 [[fact:...]] 显式标记。"
+            type="button"
+          >
+            <ShieldCheck size={14} /> 解析显式标记
           </button>
         </div>
       </div>

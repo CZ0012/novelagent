@@ -79,7 +79,7 @@ $env:STORYGRAPH_HOME="D:\storygraph-workspaces\demo"
 python -m apps.api.desktop_server
 ```
 
-这些命令在同一个 PowerShell 终端运行即可。如果没有设置 `STORYGRAPH_HOME`，桌面目标后端会优先使用 Windows 的 `%LOCALAPPDATA%\StoryGraph Agent\workspace`，否则退回用户 home 目录。它会创建 workspace 目录并使用 JSON graph backend。它不会静默 seed demo canon；持久化或桌面空 workspace 应显示创建项目或显式初始化演示的入口。需要初始化内置 fantasy demo 时，在工作台点击 `Seed Demo`，或调用 `POST /demo/seed`。
+这些命令在同一个 PowerShell 终端运行即可。如果没有设置 `STORYGRAPH_HOME`，桌面目标后端会优先使用 Windows 的 `%LOCALAPPDATA%\StoryGraph Agent\workspace`，否则退回用户 home 目录。它会创建 workspace 目录并使用 JSON graph backend。它不会静默 seed demo canon；持久化或桌面空 workspace 应显示创建项目或显式初始化演示的入口。需要初始化内置 fantasy demo 时，在工作台点击 `Seed Demo`，或调用 `POST /demo/seed`。如果之前已经初始化了内置演示，可在工作台使用“移除演示”，或调用 `POST /demo/archive`，把旧钟塔/钟塔搜寻从当前项目树归档掉。
 
 如果只想启动用于开发实验的快速内存 demo API，可以运行：
 
@@ -128,7 +128,7 @@ npm --prefix apps/desktop run build:installer
 生成的安装器路径是：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe
 ```
 
 其他常用桌面命令：
@@ -148,8 +148,8 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe.sig
 ```
 
 完整安装器构建会用 `--noconsole` 重新生成 PyInstaller 后端 sidecar，重新构建 React/Vite 工作台，并运行 `tauri build`。Tauri 壳启动 sidecar 时也会使用 Windows `CREATE_NO_WINDOW`，所以打包版不应再出现额外的空后端终端窗口。关闭桌面主窗口会隐藏到系统托盘；使用托盘菜单里的 `退出 StoryGraph Agent` 才会停止受管后端进程树并退出应用。如果 8000 端口上已有健康后端但工作区不同，桌面设置页会提示冲突，不再把该进程当作当前桌面 workspace。这些安装器、`setup.exe.sig` updater 签名、后端 sidecar 和 release exe 是本地输出，不会提交到仓库，也还不是已发布 release。
@@ -158,7 +158,7 @@ apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-set
 
 版本更新必须保持 `VERSION`、`pyproject.toml`、`apps/web/package.json`、`apps/web/src/version.ts`、`apps/desktop/package.json`、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json` 同步。这里的 GitHub 只作为软件发布/更新通道；本地小说 workspace、canon、草稿、导入文档、项目设置和审阅状态不会自动同步到 GitHub。
 
-当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.4_x64-setup.exe.sig`。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
+当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.5_x64-setup.exe.sig`。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
 
 仍缺失或未验证：
 
@@ -216,9 +216,10 @@ React/Vite 工作台可以导入本地 `.txt`、`.md`、`.markdown` 和 `.docx` 
 - 保存为当前场景的 Draft Store 草稿。
 - 保存为 Proposal Store 中的 `proposal_artifact_v1` 协作草稿。
 - 保存为 StyleSample Store 风格样本，作为 P6 软风格参考。
+- 使用已配置的 OpenAI-compatible LLM 读取导入资料，生成可编辑的 `fact_draft` 协作草稿和 CandidateFact 预览；这一步会保存一个来源 Draft 作为 provenance，但不会写 canon。
 - 先保存为当前场景草稿，再运行状态抽取，生成 pending `CandidateFact`。
 
-Proposal artifact 是非 canon 的协作记录。已接受的 `scene_draft` proposal 可以显式提升为 Draft Store 草稿；已接受的 `fact_draft` proposal 只有在提供真实 Draft Store `source_draft_id` 时，才能提交 pending CandidateFact。这些路径仍然需要正常的后端项目/场景与权限检查。它们都不会直接写 Graph Store canon；抽取出的候选事实必须保持 pending，直到人工 review 执行 accept 或 edit-accept，并带上 provenance。
+Proposal artifact 是非 canon 的协作记录。已接受的 `scene_draft` proposal 可以显式提升为 Draft Store 草稿；已接受的 `fact_draft` proposal 只有在提供真实 Draft Store `source_draft_id` 时，才能提交 pending CandidateFact。提交 `fact_draft` 时，后端读取作者可编辑过的显式 fact 标记，而不是绕过 proposal 正文。这些路径仍然需要正常的后端项目/场景与权限检查。它们都不会直接写 Graph Store canon；抽取出的候选事实必须保持 pending，直到人工 review 执行 accept 或 edit-accept，并带上 provenance。
 
 CLI 文件输入仍然非常窄：
 

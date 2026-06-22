@@ -122,6 +122,13 @@ export type ProposalDraftPromotionResult = {
   draft: Draft;
 };
 
+export type DocumentFactExtractionResult = {
+  proposal: ProposalArtifact;
+  source_draft: Draft;
+  candidate_previews: CandidateFact[];
+  truncated: boolean;
+};
+
 export type ProposalCandidatePromotionResult = {
   proposal: ProposalArtifact;
   source_draft: Draft;
@@ -320,6 +327,12 @@ export type DemoSeedResult = {
   relationships_updated?: number;
   nodes_skipped: string[];
   relationships_skipped: string[];
+};
+
+export type DemoArchiveResult = {
+  project_id: string;
+  nodes_archived: number;
+  relationships_archived: number;
 };
 
 export async function apiGet<T>(baseUrl: string, path: string): Promise<T> {

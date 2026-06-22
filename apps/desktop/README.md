@@ -38,7 +38,7 @@ On startup, the Rust shell:
 
 The desktop commands are intentionally narrow: settings load/save, backend status, backend start, backend stop, local path reporting, and signed updater checks/install through Tauri's updater plugin. They do not write canon.
 
-Inside the hosted workbench, the project tree comes from the backend `/projects` response. A fresh persistent desktop workspace should show project creation and explicit demo initialization options; frontend placeholders must not be treated as a real workspace.
+Inside the hosted workbench, the project tree comes from the backend `/projects` response. A fresh persistent desktop workspace should show project creation and explicit demo initialization options; frontend placeholders must not be treated as a real workspace. If the bundled demo has already been initialized, the workbench can archive that built-in demo so the project tree returns to an empty author workspace.
 
 Local document import remains a browser-memory reader by default. From the reader, an author can explicitly save a ready document as a Proposal Store collaboration draft, save it as the current scene Draft Store draft, save it as a StyleSample Store style sample, or save it as a draft and then extract pending `CandidateFact` records. None of those paths directly writes Graph Store canon.
 
@@ -102,10 +102,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.4_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.4_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.5_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.5_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -159,7 +159,7 @@ Run the persistent desktop-target backend directly:
 python -m apps.api.desktop_server
 ```
 
-That entrypoint starts `apps.api.desktop:app`, uses a persistent StoryGraph workspace, defaults to the JSON graph backend, and does not seed canon automatically. Use the workbench `Seed Demo` action or `POST /demo/seed` when you want to explicitly initialize the bundled fantasy demo.
+That entrypoint starts `apps.api.desktop:app`, uses a persistent StoryGraph workspace, defaults to the JSON graph backend, and does not seed canon automatically. Use the workbench `Seed Demo` action or `POST /demo/seed` when you want to explicitly initialize the bundled fantasy demo. Use `POST /demo/archive` or the workbench demo removal action to archive the built-in demo without touching real author-created projects.
 
 Agent settings persist with the backend workspace. Saving the permission level in the Web or desktop settings panel is treated as explicit local operator authorization, so it can lower or raise the backend `permission_level` immediately. Canon-changing routes still require `full` permission plus reviewer/rationale/source provenance, and generated or imported facts still go through CandidateFact review. Saving an API key only stores the credential reference; LLM drafting also requires selecting the LLM writing mode, saving settings, having `read_generate` or `full` permission, and running with a valid project, scene, and Context Pack.
 

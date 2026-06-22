@@ -18,8 +18,18 @@ class RuleBasedStateExtractor:
     """Extracts explicit test/demo fact markers without inferring hidden intent."""
 
     def extract(self, *, project_id: str, draft: Draft) -> list[CandidateFact]:
+        return self.extract_from_text(project_id=project_id, draft=draft, text=draft.text)
+
+    def extract_from_text(
+        self,
+        *,
+        project_id: str,
+        draft: Draft,
+        text: str,
+        supporting_evidence: list[EvidenceItem] | None = None,
+    ) -> list[CandidateFact]:
         candidates: list[CandidateFact] = []
-        for match in FACT_MARKER_RE.finditer(draft.text):
+        for match in FACT_MARKER_RE.finditer(text):
             raw_fields = self._parse_marker(match.group("body"))
             subject_id = raw_fields["subject"]
             relation = raw_fields["relation"]
@@ -39,6 +49,13 @@ class RuleBasedStateExtractor:
                 properties=patch_properties,
                 source_ref=draft.id,
             )
+            source_span = self._source_span(
+                draft=draft,
+                marker_text=match.group(0),
+                marker_start=match.start(),
+                marker_end=match.end(),
+                quote=raw_fields.get("quote"),
+            )
             candidates.append(
                 CandidateFact(
                     id=candidate_id,
@@ -50,11 +67,7 @@ class RuleBasedStateExtractor:
                     value=raw_fields.get("value"),
                     source_scene_id=draft.scene_id,
                     source_draft_id=draft.id,
-                    source_span=SourceSpan(
-                        start_offset=match.start(),
-                        end_offset=match.end(),
-                        quote=match.group(0)[:200],
-                    ),
+                    source_span=source_span,
                     confidence=confidence,
                     status="DRAFT_FACT",
                     rationale=rationale,
@@ -62,9 +75,10 @@ class RuleBasedStateExtractor:
                         EvidenceItem(
                             kind="draft_text",
                             ref=draft.id,
-                            quote=match.group(0)[:200],
+                            quote=source_span.quote,
                             note="Explicit extraction marker.",
-                        )
+                        ),
+                        *(supporting_evidence or []),
                     ],
                     proposed_graph_patch=patch,
                     created_at=utc_now(),
@@ -104,5 +118,35 @@ class RuleBasedStateExtractor:
             "confidence",
             "operation",
             "rationale",
+            "quote",
         }
         return {key: value for key, value in fields.items() if key not in reserved}
+
+    @staticmethod
+    def _source_span(
+        *,
+        draft: Draft,
+        marker_text: str,
+        marker_start: int,
+        marker_end: int,
+        quote: str | None,
+    ) -> SourceSpan:
+        normalized_quote = quote.strip() if quote else ""
+        if normalized_quote:
+            quote_start = draft.text.find(normalized_quote)
+            if quote_start >= 0:
+                return SourceSpan(
+                    start_offset=quote_start,
+                    end_offset=quote_start + len(normalized_quote),
+                    quote=normalized_quote[:200],
+                )
+            return SourceSpan(
+                start_offset=0,
+                end_offset=0,
+                quote=normalized_quote[:200],
+            )
+        return SourceSpan(
+            start_offset=marker_start,
+            end_offset=marker_end,
+            quote=marker_text[:200],
+        )

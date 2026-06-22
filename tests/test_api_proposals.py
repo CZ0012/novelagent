@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from apps.api.main import create_app
 from storygraph.core.config import StoryGraphSettings
+from storygraph.services.llm_provider import LLMResponse
 
 
 def test_api_proposal_lifecycle_is_versioned_and_non_canon(tmp_path):
@@ -270,7 +271,7 @@ def test_api_fact_draft_promotion_uses_real_source_draft(tmp_path):
             "id": "proposal_fact_draft",
             "artifact_type": "fact_draft",
             "title": "候选事实协作稿",
-            "body": "作者确认从真实草稿中抽取该事实。",
+            "body": marker,
             "target_refs": [{"kind": "draft", "ref": draft["id"]}],
         },
     )
@@ -294,6 +295,54 @@ def test_api_fact_draft_promotion_uses_real_source_draft(tmp_path):
     assert promoted.json()["candidates"][0]["evidence"][-1]["kind"] == "proposal_artifact"
     assert promoted.json()["proposal"]["derived_refs"][-1]["kind"] == "candidate_fact"
     assert pending.json()["facts"][0]["id"] == "fact_from_proposal"
+    assert client.get(f"/projects/{project_id}/graph/preview").json() == graph_before
+
+
+def test_api_document_fact_extraction_creates_editable_fact_draft(tmp_path, monkeypatch):
+    class FakeProvider:
+        def generate(self, request):
+            return LLMResponse(
+                content=(
+                    '{"facts":[{"id":"fact_linjin_status",'
+                    '"fact_type":"CharacterState",'
+                    '"subject":"character_linj",'
+                    '"relation":"HAS_STATE",'
+                    '"object":null,'
+                    '"operation":"update_node",'
+                    '"confidence":0.87,'
+                    '"rationale":"资料说明林瑾正在寻找遗失信件。",'
+                    '"quote":"林瑾正在寻找遗失信件",'
+                    '"properties":{"current_status":"寻找遗失信件"}}]}'
+                )
+            )
+
+    monkeypatch.setattr("apps.api.main.create_llm_provider", lambda settings: FakeProvider())
+    settings = _json_settings(tmp_path)
+    settings.llm_base_url = "https://api.example.test/v1"
+    settings.llm_api_key = "test-key"
+    settings.llm_model = "test-model"
+    client = TestClient(create_app(settings))
+    project_id = _create_project_with_scene(client)
+    graph_before = client.get(f"/projects/{project_id}/graph/preview").json()
+
+    response = client.post(
+        f"/projects/{project_id}/scenes/scene_opening/extract-document-facts",
+        json={
+            "title": "设定资料.docx",
+            "text": "林瑾正在寻找遗失信件。其他段落。",
+            "source_ref": "import:local-doc",
+        },
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["proposal"]["artifact_type"] == "fact_draft"
+    assert "[[fact:id=fact_linjin_status" in payload["proposal"]["body"]
+    assert payload["source_draft"]["summary"] == "导入资料源：设定资料.docx"
+    assert payload["candidate_previews"][0]["source_draft_id"] == payload["source_draft"]["id"]
+    assert payload["candidate_previews"][0]["source_span"]["quote"] == "林瑾正在寻找遗失信件"
+    assert payload["candidate_previews"][0]["evidence"][-1]["kind"] == "proposal_artifact"
+    assert client.get(f"/projects/{project_id}/facts/pending").json()["facts"] == []
     assert client.get(f"/projects/{project_id}/graph/preview").json() == graph_before
 
 

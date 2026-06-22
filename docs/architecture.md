@@ -985,12 +985,12 @@ Neo4j / SQLite / Vector Store 本地连接
 
 - `apps/desktop` 已是可构建的 Tauri shell，包含 npm scripts、Rust crate、Windows icon、后端启动/停止/状态命令、系统托盘隐藏/退出生命周期、PyInstaller backend sidecar 和 NSIS bundle 配置。
 - 当前可运行入口是 CLI、FastAPI + React/Vite Web 工作台、面向桌面宿主的持久化后端入口 `python -m apps.api.desktop_server`，以及源码构建的 Tauri 桌面应用。
-- `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。持久化或桌面空 workspace 应显示创建项目或显式初始化演示的入口。需要默认 demo project 时，应在工作台点击 `Seed Demo` 或调用 `POST /demo/seed`，该路径仍要求 full 权限并记录 reviewer、rationale 和 source_ref。
+- `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。持久化或桌面空 workspace 应显示创建项目或显式初始化演示的入口。需要默认 demo project 时，应在工作台点击 `Seed Demo` 或调用 `POST /demo/seed`，该路径仍要求 full 权限并记录 reviewer、rationale 和 source_ref。已初始化的内置 demo 可以通过工作台或 `POST /demo/archive` 归档为非当前 canon 项目，以便回到空项目树。
 - 默认 `apps.api.main:app` 开发入口可用于本地 demo；不传入 settings 时它使用 seeded in-memory stores，不应被描述为完整桌面产品或持久化作者项目入口。
-- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe` 及 Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe.sig`。这些产物是本地源码构建输出，不是已发布签名 release channel。当前验证产物不包含 `nsis.zip`。
+- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe` 及 Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe.sig`。这些产物是本地源码构建输出，不是已发布签名 release channel。当前验证产物不包含 `nsis.zip`。
 - 桌面壳只应复用健康且 `/health.workspace` 与配置工作区一致的本机后端；如果端口被其他工作区的旧后端占用，应在设置页报告冲突，而不是继续加载旧 workspace 的项目树。
 - FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地操作者授权分级，不是身份认证；保存设置页或调用 `/settings/agent` 代表本地操作者显式授权，因此可升降权限并立即生效；CLI 当前不执行同一权限闸门。
-- React/Vite 工作台当前支持本地 `.txt`、`.md`、`.markdown`、`.docx` 文件和文件夹导入到前端资料树/阅读器。默认导入内容只保存在浏览器内存，不写 Proposal Store、Draft Store、StyleSample Store、Candidate Store 或 Graph Store。作者可显式把 ready 文档保存为 Proposal Store 协作草稿、当前场景 Draft Store 草稿、StyleSample Store 风格样本，或先保存草稿后抽取 pending CandidateFact。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
+- React/Vite 工作台当前支持本地 `.txt`、`.md`、`.markdown`、`.docx` 文件和文件夹导入到前端资料树/阅读器。默认导入内容只保存在浏览器内存，不写 Proposal Store、Draft Store、StyleSample Store、Candidate Store 或 Graph Store。作者可显式把 ready 文档保存为 Proposal Store 协作草稿、当前场景 Draft Store 草稿、StyleSample Store 风格样本，或让已配置的 OpenAI-compatible LLM 通读资料后生成 `fact_draft` 协作草稿和 CandidateFact 预览；LLM 资料抽取会保存来源 Draft 用作 provenance，但不会直接写 Candidate Store 或 Graph Store。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
 - Web 工作台的项目树、当前场景选择、Graph 预览和 Timeline 预览必须来自后端项目/章节/场景数据；前端占位数据不得被 Context Pack、Draft Store、CandidateFact 或 Graph Store 当成真实 workspace 来源。
 - 设置页保存 API key、base URL 或模型名称不应自动切换到 LLM writer。LLM 写作只有在 scene writer mode 选择 `llm`、设置已保存、权限至少为 `read_generate`、当前项目/场景有效且 Context Pack 可构建时才应运行。
 
@@ -1002,7 +1002,7 @@ Neo4j / SQLite / Vector Store 本地连接
 - 默认使用本地持久化工作区，避免作者误以为内存 demo 是正式项目存储。
 - 保留 CLI 与 API 的可用性，桌面版只是更友好的宿主，不替代后端契约。
 - 打包必须包含 Windows icon/bundle 资源，并记录 clean checkout 上的构建与 smoke test 结果。
-- 文档或文件夹导入内容若进入后端处理，必须先落入 Proposal Store、Draft Store、StyleSample Store 或 pending CandidateFact；仅用于前端阅读器时可停留在浏览器内存，但不得绕过 ReviewService 直接写 Graph Store。
+- 文档或文件夹导入内容若进入后端处理，必须先落入 Proposal Store、Draft Store、StyleSample Store 或 pending CandidateFact；仅用于前端阅读器时可停留在浏览器内存，但不得绕过 ReviewService 直接写 Graph Store。LLM 从导入资料抽出的设定必须先表现为作者可编辑的 `fact_draft` 或 pending CandidateFact，不得自动提交 canon。
 
 边界控制：
 
@@ -1231,6 +1231,7 @@ POST /projects/{project_id}/scenes/{scene_id}/draft
 POST /projects/{project_id}/scenes/{scene_id}/revise
 POST /projects/{project_id}/scenes/{scene_id}/runs/scene-generation
 POST /projects/{project_id}/scenes/{scene_id}/runs/scene-generation { "output_target": "proposal_workspace" }
+POST /projects/{project_id}/scenes/{scene_id}/extract-document-facts
 ```
 
 ### 14.5 Proposal Workspace
@@ -1254,6 +1255,7 @@ POST /projects/{project_id}/proposals/{proposal_id}/promote/candidate-facts
 ```http
 POST /projects/{project_id}/scenes/{scene_id}/check-continuity
 POST /projects/{project_id}/scenes/{scene_id}/extract-state
+POST /demo/archive
 ```
 
 ### 14.7 Review

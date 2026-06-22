@@ -40,10 +40,12 @@ from storygraph.services import (
     AuthorCanonSeedService,
     ContextPackBuilder,
     GraphQueryService,
+    LLMDocumentFactExtractor,
     ReviewService,
     RuleBasedContinuityChecker,
     RuleBasedSceneWriter,
     RuleBasedStateExtractor,
+    create_llm_provider,
     create_scene_writer,
 )
 from storygraph.stores import (
@@ -54,6 +56,7 @@ from storygraph.stores import (
     SQLiteStyleSampleStore,
 )
 from storygraph.stores.graph_factory import open_configured_graph_store, save_configured_graph_store
+from storygraph.stores.memory_graph import InMemoryGraphStore
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
 from storygraph.workflows import SceneGenerationWorkflow
 
@@ -167,6 +170,13 @@ class StateExtractionRequest(BaseModel):
     output_target: Literal["candidate_store", "proposal_workspace"] = "candidate_store"
 
 
+class DocumentFactExtractionRequest(BaseModel):
+    title: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1)
+    source_ref: str = Field(..., min_length=1)
+    max_facts: int = Field(16, ge=1, le=32)
+
+
 class SceneGenerationRunRequest(BaseModel):
     output_target: Literal["draft_store", "proposal_workspace"] = "draft_store"
 
@@ -245,7 +255,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.4")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.5")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
@@ -788,10 +798,18 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             source_draft = draft_store.get_draft(request.source_draft_id)
             if source_draft.project_id != project_id:
                 raise HTTPException(status_code=404, detail="这个项目中没有找到来源草稿。")
-            candidates = [
-                _candidate_with_proposal_evidence(candidate, proposal)
-                for candidate in extractor.extract(project_id=project_id, draft=source_draft)
-            ]
+            candidates = extractor.extract_from_text(
+                project_id=project_id,
+                draft=source_draft,
+                text=proposal.body,
+                supporting_evidence=[
+                    EvidenceItem(
+                        kind="proposal_artifact",
+                        ref=proposal.id,
+                        note=f"CandidateFact extracted from proposal v{proposal.version}.",
+                    )
+                ],
+            )
             if not candidates:
                 return {
                     "proposal": proposal.model_dump(),
@@ -910,6 +928,56 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             "relationships_updated": relationships_updated,
             "nodes_skipped": nodes_skipped,
             "relationships_skipped": relationships_skipped,
+        }
+
+    @app.post("/demo/archive")
+    def archive_demo() -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        if not isinstance(graph, InMemoryGraphStore):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "category": "backend_unsupported",
+                    "message": "当前 Graph backend 不支持本地归档内置演示项目。",
+                },
+            )
+        demo_graph = build_fantasy_demo_graph(locale="zh-CN")
+        now = utc_now()
+        archived_nodes = 0
+        archived_relationships = 0
+        for relation_id in demo_graph.relationships:
+            relation = graph.relationships.get(relation_id)
+            if relation and relation.status == "CANON":
+                graph.relationships[relation_id] = relation.model_copy(
+                    update={
+                        "status": "DEPRECATED",
+                        "updated_at": now,
+                        "reviewer": "author",
+                        "reviewed_at": now,
+                        "rationale": "作者从工作台移除内置演示项目。",
+                        "source_ref": "demo:archive",
+                    }
+                )
+                archived_relationships += 1
+        for node_id in demo_graph.nodes:
+            node = graph.nodes.get(node_id)
+            if node and node.status == "CANON":
+                graph.nodes[node_id] = node.model_copy(
+                    update={
+                        "status": "DEPRECATED",
+                        "updated_at": now,
+                        "reviewer": "author",
+                        "reviewed_at": now,
+                        "rationale": "作者从工作台移除内置演示项目。",
+                        "source_ref": "demo:archive",
+                    }
+                )
+                archived_nodes += 1
+        persist_graph()
+        return {
+            "project_id": PROJECT_ID,
+            "nodes_archived": archived_nodes,
+            "relationships_archived": archived_relationships,
         }
 
     @app.get("/projects/{project_id}/graph/query")
@@ -1032,6 +1100,77 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         except ContractError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"candidates": [candidate.model_dump() for candidate in candidates]}
+
+    @app.post("/projects/{project_id}/scenes/{scene_id}/extract-document-facts")
+    def extract_document_facts(
+        project_id: str,
+        scene_id: str,
+        request: DocumentFactExtractionRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        _require_llm_configured(settings)
+        graph_query.scene_node(project_id=project_id, scene_id=scene_id)
+        source_draft = draft_store.create_draft(
+            project_id=project_id,
+            scene_id=scene_id,
+            text=request.text,
+            summary=f"导入资料源：{request.title}",
+        )
+        extractor_service = LLMDocumentFactExtractor(
+            provider=create_llm_provider(settings),
+            model=settings.llm_model,
+            max_facts=request.max_facts,
+        )
+        fact_draft = extractor_service.extract(
+            project_id=project_id,
+            scene_id=scene_id,
+            source_draft=source_draft,
+        )
+        now = utc_now()
+        proposal = ProposalArtifact(
+            id=new_id("proposal"),
+            project_id=project_id,
+            artifact_type="fact_draft",
+            status="agent_revised",
+            title=f"资料设定提案：{request.title}",
+            body=fact_draft.body,
+            body_format="markdown",
+            target_refs=[
+                ProposalRef(kind="scene", ref=scene_id),
+                ProposalRef(kind="draft", ref=source_draft.id),
+            ],
+            source_refs=[
+                ProposalRef(kind="draft", ref=source_draft.id),
+                ProposalRef(kind="import", ref=request.source_ref),
+            ],
+            provenance=ProposalProvenance(
+                created_by="agent",
+                created_via="llm",
+                note="LLM extracted explicit fact markers from imported source material.",
+            ),
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+        proposal = proposal_store.create(proposal)
+        candidate_previews = extractor.extract_from_text(
+            project_id=project_id,
+            draft=source_draft,
+            text=proposal.body,
+            supporting_evidence=[
+                EvidenceItem(
+                    kind="proposal_artifact",
+                    ref=proposal.id,
+                    note="LLM fact_draft generated from imported source material.",
+                )
+            ],
+        )
+        return {
+            "proposal": proposal.model_dump(),
+            "source_draft": source_draft.model_dump(),
+            "candidate_previews": [candidate.model_dump() for candidate in candidate_previews],
+            "truncated": fact_draft.truncated,
+        }
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/runs/scene-generation")
     def run_scene_generation(
@@ -1220,19 +1359,22 @@ def _proposal_target_scene_id(proposal: ProposalArtifact) -> str:
     return scene_ref
 
 
-def _candidate_with_proposal_evidence(candidate, proposal: ProposalArtifact):
-    return candidate.model_copy(
-        update={
-            "evidence": [
-                *candidate.evidence,
-                EvidenceItem(
-                    kind="proposal_artifact",
-                    ref=f"{proposal.id}@v{proposal.version}",
-                    note="Explicitly promoted from an accepted proposal artifact.",
-                ),
-            ]
-        }
-    )
+def _require_llm_configured(settings: StoryGraphSettings) -> None:
+    missing = []
+    if not settings.llm_base_url:
+        missing.append("base URL")
+    if not settings.llm_api_key:
+        missing.append("API key")
+    if not settings.llm_model:
+        missing.append("model")
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "category": "llm_not_configured",
+                "message": "LLM 资料抽取需要先配置：" + "、".join(missing),
+            },
+        )
 
 
 def _contract_http_exception(exc: ContractError | GraphStoreError) -> HTTPException:

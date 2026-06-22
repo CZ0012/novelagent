@@ -79,7 +79,7 @@ $env:STORYGRAPH_HOME="D:\storygraph-workspaces\demo"
 python -m apps.api.desktop_server
 ```
 
-Run those commands in one PowerShell terminal. If `STORYGRAPH_HOME` is not set, the desktop-target backend uses `%LOCALAPPDATA%\StoryGraph Agent\workspace` on Windows when available, or the user home directory fallback. It creates the workspace directory and uses the JSON graph backend. It does not silently seed demo canon; an empty persistent or desktop workspace should show project creation and explicit demo initialization options. Click `Seed Demo` in the workbench or call `POST /demo/seed` only when you want to initialize the bundled fantasy demo.
+Run those commands in one PowerShell terminal. If `STORYGRAPH_HOME` is not set, the desktop-target backend uses `%LOCALAPPDATA%\StoryGraph Agent\workspace` on Windows when available, or the user home directory fallback. It creates the workspace directory and uses the JSON graph backend. It does not silently seed demo canon; an empty persistent or desktop workspace should show project creation and explicit demo initialization options. Click `Seed Demo` in the workbench or call `POST /demo/seed` only when you want to initialize the bundled fantasy demo. If the demo was already initialized, use the workbench demo removal action or call `POST /demo/archive` to archive the Old Bell Tower demo from the current project tree.
 
 For a quick seeded in-memory API for development experiments only, run:
 
@@ -128,7 +128,7 @@ npm --prefix apps/desktop run build:installer
 The generated installer is:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe
 ```
 
 Other useful desktop commands:
@@ -148,8 +148,8 @@ Verified local build output from `npm --prefix apps/desktop run build:installer`
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.4_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe.sig
 ```
 
 The full installer build regenerates the PyInstaller backend sidecar with `--noconsole`, rebuilds the React/Vite workbench, and runs `tauri build`. The Tauri shell also starts the sidecar with Windows `CREATE_NO_WINDOW`, so the packaged app should not show a stray backend terminal window. Closing the main desktop window hides it to the system tray; use the tray menu item `退出 StoryGraph Agent` to stop the managed backend process tree and exit the app. If port 8000 already has a healthy backend with a different workspace, the desktop settings panel reports the conflict instead of treating that process as the current desktop workspace. The generated installer, `setup.exe.sig` updater signature, backend sidecar, and release executables are local outputs, not checked-in release artifacts.
@@ -158,7 +158,7 @@ The in-app settings panel includes a `Version & Updates` section. In the Tauri d
 
 Version updates must keep `VERSION`, `pyproject.toml`, `apps/web/package.json`, `apps/web/src/version.ts`, `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, canon, drafts, imported documents, project settings, and review state are not synchronized to GitHub.
 
-For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.4_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.5_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 
@@ -216,9 +216,10 @@ From the reader, the author may explicitly send a ready imported document throug
 - Save as the current scene draft in Draft Store.
 - Save as a `proposal_artifact_v1` collaboration draft in Proposal Store.
 - Save as a StyleSample Store style sample for P6 soft style retrieval.
+- Use the configured OpenAI-compatible LLM to read imported source material and create an editable `fact_draft` proposal plus CandidateFact previews. This stores a source Draft for provenance, but it does not write canon.
 - Save as the current scene draft and then run state extraction, which can create pending `CandidateFact` records.
 
-Proposal artifacts are non-canon workspace records. Accepted `scene_draft` proposals can be explicitly promoted to Draft Store; accepted `fact_draft` proposals can submit pending CandidateFacts only from a real Draft Store `source_draft_id`. These paths require the normal backend project/scene and permission checks. They still do not write Graph Store canon directly; extracted candidates remain pending until human review accepts or edit-accepts them with provenance.
+Proposal artifacts are non-canon workspace records. Accepted `scene_draft` proposals can be explicitly promoted to Draft Store; accepted `fact_draft` proposals can submit pending CandidateFacts only from a real Draft Store `source_draft_id`. When promoting a `fact_draft`, the backend reads the explicit fact markers from the author-editable proposal body rather than bypassing it. These paths require the normal backend project/scene and permission checks. They still do not write Graph Store canon directly; extracted candidates remain pending until human review accepts or edit-accepts them with provenance.
 
 CLI file inputs are still intentionally narrow:
 
