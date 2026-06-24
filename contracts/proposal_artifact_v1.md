@@ -56,6 +56,7 @@ not Draft Store records, not CandidateFact records, and not Graph Store canon.
 - `scene_rebuild`
 - `canon_patch`
 - `outline_draft`
+- `project_structure_draft`
 
 ## Statuses
 
@@ -160,6 +161,22 @@ promote it.
   body is not the sole primary source for a CandidateFact.
 - The resulting CandidateFact records are submitted to ReviewService as pending
   review items and are not committed to Graph Store.
+
+`project_structure_draft` proposals MAY be applied to official project
+structure only when:
+
+- `status` is `accepted`.
+- `review_decision.status` is `accepted`.
+- The proposal `body_format` is `structured_json`.
+- The body contains a bounded JSON object with proposed `chapters` and nested
+  `scenes`; it must not contain the full imported manuscript.
+- The caller has the local permission level required for author-write actions.
+- Applying the proposal may create Chapter and Scene Graph Store nodes with
+  author-review provenance, but it must not create CandidateFacts, canon facts,
+  characters, locations, world rules, or other story bible nodes in the same
+  action.
+- The proposal is recorded as provenance for created Chapter/Scene nodes and
+  derived refs are recorded back on the proposal.
 
 ## Canon Safety Invariants
 

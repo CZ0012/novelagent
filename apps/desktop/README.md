@@ -159,7 +159,7 @@ Run the persistent desktop-target backend directly:
 python -m apps.api.desktop_server
 ```
 
-That entrypoint starts `apps.api.desktop:app`, uses a persistent StoryGraph workspace, defaults to the JSON graph backend, and does not seed canon automatically. Use the workbench `Seed Demo` action or `POST /demo/seed` when you want to explicitly initialize the bundled fantasy demo. Use `POST /demo/archive` or the workbench demo removal action to archive the built-in demo without touching real author-created projects.
+That entrypoint starts `apps.api.desktop:app`, uses a persistent StoryGraph workspace, defaults to the JSON graph backend, and does not seed canon automatically. The workbench should guide authors to create a project, import an existing manuscript, generate a non-canon `project_structure_draft`, and apply it only after author review. Use `POST /demo/seed` only when you want to explicitly initialize the bundled fantasy demo for development/onboarding, and use `POST /demo/archive` or the workbench demo removal action to archive the built-in demo without touching real author-created projects.
 
 Agent settings persist with the backend workspace. Saving the permission level in the Web or desktop settings panel is treated as explicit local operator authorization, so it can lower or raise the backend `permission_level` immediately. Canon-changing routes still require `full` permission plus reviewer/rationale/source provenance, and generated or imported facts still go through CandidateFact review. Saving an API key only stores the credential reference; LLM drafting also requires selecting the LLM writing mode, saving settings, having `read_generate` or `full` permission, and running with a valid project, scene, and Context Pack.
 

@@ -3,6 +3,7 @@ name = "storygraph-agent"
 version = "0.1.5"
 description = "Canon-safe long-form fiction writing engine backed by structured story graph contracts."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",

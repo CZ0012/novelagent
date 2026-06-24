@@ -79,7 +79,7 @@ $env:STORYGRAPH_HOME="D:\storygraph-workspaces\demo"
 python -m apps.api.desktop_server
 ```
 
-这些命令在同一个 PowerShell 终端运行即可。如果没有设置 `STORYGRAPH_HOME`，桌面目标后端会优先使用 Windows 的 `%LOCALAPPDATA%\StoryGraph Agent\workspace`，否则退回用户 home 目录。它会创建 workspace 目录并使用 JSON graph backend。它不会静默 seed demo canon；持久化或桌面空 workspace 应显示创建项目或显式初始化演示的入口。需要初始化内置 fantasy demo 时，在工作台点击 `Seed Demo`，或调用 `POST /demo/seed`。如果之前已经初始化了内置演示，可在工作台使用“移除演示”，或调用 `POST /demo/archive`，把旧钟塔/钟塔搜寻从当前项目树归档掉。
+这些命令在同一个 PowerShell 终端运行即可。如果没有设置 `STORYGRAPH_HOME`，桌面目标后端会优先使用 Windows 的 `%LOCALAPPDATA%\StoryGraph Agent\workspace`，否则退回用户 home 目录。它会创建 workspace 目录并使用 JSON graph backend。它不会静默 seed demo canon；持久化或桌面空 workspace 应先显示项目创建，然后允许作者导入已有小说并生成非正典的 `project_structure_draft` 项目结构草稿，作者确认后才应用为正式章节/场景。内置 fantasy demo 仍可通过 `POST /demo/seed` 用于开发/上手测试；如已初始化，可调用 `POST /demo/archive` 把旧钟塔/钟塔搜寻从当前项目树归档掉。
 
 如果只想启动用于开发实验的快速内存 demo API，可以运行：
 
@@ -346,3 +346,7 @@ npm --prefix apps/web run build
 ```powershell
 python -m pytest tests/test_api_agent_settings.py tests/test_api_workflow_runs.py tests/test_cli_task12.py
 ```
+
+## License
+
+StoryGraph Agent 使用 MIT License 授权。详见 [LICENSE](LICENSE)。

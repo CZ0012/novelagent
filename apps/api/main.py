@@ -41,8 +41,10 @@ from storygraph.services import (
     ContextPackBuilder,
     GraphQueryService,
     LLMDocumentFactExtractor,
+    LLMProjectStructureAnalyzer,
     ReviewService,
     RuleBasedContinuityChecker,
+    RuleBasedProjectStructureAnalyzer,
     RuleBasedSceneWriter,
     RuleBasedStateExtractor,
     create_llm_provider,
@@ -67,6 +69,17 @@ class CreateProjectRequest(BaseModel):
     language: str = "zh-CN"
     target_length: str | None = None
     narrative_pov: str | None = None
+
+
+class UpdateProjectRequest(BaseModel):
+    title: str | None = None
+    genre: str | None = None
+    language: str | None = None
+    target_length: str | None = None
+    narrative_pov: str | None = None
+    reviewer: str = Field("author", min_length=1)
+    rationale: str = Field("作者从工作台编辑项目信息。", min_length=1)
+    source_ref: str = Field("author_seed:workbench_project", min_length=1)
 
 
 class AuthorSeedRequest(BaseModel):
@@ -177,6 +190,14 @@ class DocumentFactExtractionRequest(BaseModel):
     max_facts: int = Field(16, ge=1, le=32)
 
 
+class ProjectStructureDraftRequest(BaseModel):
+    title: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1)
+    source_ref: str = Field(..., min_length=1)
+    max_chapters: int = Field(12, ge=1, le=40)
+    max_scenes_per_chapter: int = Field(8, ge=1, le=24)
+
+
 class SceneGenerationRunRequest(BaseModel):
     output_target: Literal["draft_store", "proposal_workspace"] = "draft_store"
 
@@ -248,6 +269,13 @@ class ProposalExtractCandidatesRequest(BaseModel):
     source_draft_id: str = Field(..., min_length=1)
     actor: str = Field("author", min_length=1)
     expected_version: int | None = Field(default=None, ge=1)
+
+
+class ProposalApplyProjectStructureRequest(BaseModel):
+    reviewer: str = Field("author", min_length=1)
+    rationale: str = Field("作者确认导入文档生成的项目结构草稿。", min_length=1)
+    source_ref: str | None = None
+    expected_version: int = Field(..., ge=1)
 
 
 class EditAcceptRequest(ReviewRequest):
@@ -382,6 +410,33 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     def get_project(project_id: str) -> dict:
         try:
             return graph_query.get_node(project_id=project_id, node_id=project_id).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.patch("/projects/{project_id}")
+    def update_project(project_id: str, request: UpdateProjectRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        properties = {
+            key: value
+            for key, value in {
+                "title": request.title,
+                "genre": request.genre,
+                "language": request.language,
+                "target_length": request.target_length,
+                "narrative_pov": request.narrative_pov,
+            }.items()
+            if value is not None
+        }
+        try:
+            node = graph.update_node(
+                project_id,
+                properties,
+                reviewer=request.reviewer,
+                rationale=request.rationale,
+                source_ref=request.source_ref,
+            )
+            persist_graph()
+            return node.model_dump()
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
@@ -551,6 +606,71 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 created_at=utc_now(),
             )
             return style_sample_store.add(sample).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/imports/structure-draft")
+    def create_project_structure_draft(
+        project_id: str,
+        request: ProjectStructureDraftRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        try:
+            _ensure_project_exists(graph, project_id)
+            if _llm_is_configured(settings):
+                analyzer = LLMProjectStructureAnalyzer(
+                    provider=create_llm_provider(settings),
+                    model=settings.llm_model,
+                    max_chapters=request.max_chapters,
+                    max_scenes_per_chapter=request.max_scenes_per_chapter,
+                )
+                model_ref = f"{agent_config.provider_label}/{settings.llm_model}"
+            else:
+                analyzer = RuleBasedProjectStructureAnalyzer(
+                    max_chapters=request.max_chapters,
+                    max_scenes_per_chapter=request.max_scenes_per_chapter,
+                )
+                model_ref = None
+            draft = analyzer.analyze(
+                project_id=project_id,
+                title=request.title,
+                source_text=request.text,
+            )
+            now = utc_now()
+            proposal = ProposalArtifact(
+                id=new_id("proposal"),
+                project_id=project_id,
+                artifact_type="project_structure_draft",
+                status="agent_revised",
+                title=f"项目结构草稿：{request.title}",
+                body=draft.body,
+                body_format="structured_json",
+                target_refs=[ProposalRef(kind="project", ref=project_id)],
+                source_refs=[
+                    ProposalRef(
+                        kind="imported_document",
+                        ref=request.source_ref,
+                        note=f"Imported source document: {request.title}",
+                    )
+                ],
+                provenance=ProposalProvenance(
+                    created_by="agent",
+                    created_via=draft.created_via,  # type: ignore[arg-type]
+                    model_ref=model_ref,
+                    note="Agent proposed project chapters and scenes from an imported document.",
+                ),
+                version=1,
+                created_at=now,
+                updated_at=now,
+            )
+            stored = proposal_store.create(proposal)
+            return {
+                "proposal": stored.model_dump(),
+                "outline": draft.outline,
+                "truncated": draft.truncated,
+            }
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
@@ -837,6 +957,109 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             }
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="没有找到来源草稿。") from exc
+        except (ContractError, GraphStoreError, ValueError) as exc:
+            if isinstance(exc, ValueError):
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/apply/project-structure")
+    def apply_project_structure_proposal(
+        project_id: str,
+        proposal_id: str,
+        request: ProposalApplyProjectStructureRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            proposal = proposal_store.get(proposal_id)
+            _ensure_proposal_project(proposal, project_id)
+            _ensure_proposal_promotable(proposal, request.expected_version)
+            _ensure_proposal_artifact_type(proposal, "project_structure_draft")
+            if proposal.body_format != "structured_json":
+                raise HTTPException(status_code=409, detail="项目结构草稿必须使用 structured_json。")
+            outline = _project_structure_from_proposal(proposal)
+            source_ref = request.source_ref or f"proposal:{proposal.id}@v{proposal.version}"
+            chapters: list[dict] = []
+            scenes: list[dict] = []
+            previous_scene_id: str | None = None
+            for chapter_index, chapter in enumerate(outline["chapters"], start=1):
+                chapter_title = _structure_text(chapter.get("title")) or f"第 {chapter_index} 章"
+                chapter_id = slug_id(
+                    "chapter",
+                    f"{project_id}_{chapter_index}_{chapter_title}",
+                )
+                chapter_node = canon_seed.add_chapter(
+                    project_id=project_id,
+                    node_id=chapter_id,
+                    title=chapter_title,
+                    properties={
+                        "volume_index": 1,
+                        "chapter_index": _structure_int(
+                            chapter.get("chapter_index"), chapter_index
+                        ),
+                        "summary": _structure_text(chapter.get("summary")) or None,
+                        "purpose": _structure_text(chapter.get("purpose")) or None,
+                        "status": "planned",
+                        "source_structure_proposal_id": proposal.id,
+                        "source_structure_proposal_version": proposal.version,
+                    },
+                    reviewer=request.reviewer,
+                    rationale=request.rationale,
+                    source_ref=source_ref,
+                )
+                chapters.append(chapter_node.model_dump())
+                for scene_index, scene in enumerate(chapter.get("scenes", []), start=1):
+                    scene_title = _structure_text(scene.get("title")) or f"场景 {scene_index}"
+                    scene_id = slug_id(
+                        "scene",
+                        f"{project_id}_{chapter_index}_{scene_index}_{scene_title}",
+                    )
+                    scene_node = canon_seed.add_scene(
+                        project_id=project_id,
+                        chapter_id=chapter_node.id,
+                        node_id=scene_id,
+                        title=scene_title,
+                        properties={
+                            "scene_index": _structure_int(scene.get("scene_index"), scene_index),
+                            "summary": _structure_text(scene.get("summary")) or None,
+                            "goal": _structure_text(scene.get("goal")) or None,
+                            "conflict": _structure_text(scene.get("conflict")) or None,
+                            "timeline_position": _structure_text(
+                                scene.get("timeline_position")
+                            ) or None,
+                            "pov_character_id": None,
+                            "location_id": None,
+                            "pov_label": _structure_text(scene.get("pov_label")) or None,
+                            "location_label": _structure_text(scene.get("location_label")) or None,
+                            "status": "planned",
+                            "source_structure_proposal_id": proposal.id,
+                            "source_structure_proposal_version": proposal.version,
+                        },
+                        previous_scene_id=previous_scene_id,
+                        reviewer=request.reviewer,
+                        rationale=request.rationale,
+                        source_ref=source_ref,
+                    )
+                    previous_scene_id = scene_node.id
+                    scenes.append(scene_node.model_dump())
+            persist_graph()
+            updated_proposal = proposal
+            for node in [*chapters, *scenes]:
+                updated_proposal = proposal_store.record_derived_ref(
+                    proposal_id,
+                    derived_ref=ProposalRef(
+                        kind="graph_node",
+                        ref=node["id"],
+                        note=f"{node['type']} created from project structure proposal v{proposal.version}.",
+                    ),
+                    actor=request.reviewer,
+                    note="Applied project structure proposal to Chapter/Scene graph nodes.",
+                    expected_version=updated_proposal.version,
+                )
+            return {
+                "proposal": updated_proposal.model_dump(),
+                "chapters": chapters,
+                "scenes": scenes,
+            }
         except (ContractError, GraphStoreError, ValueError) as exc:
             if isinstance(exc, ValueError):
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1357,6 +1580,47 @@ def _proposal_target_scene_id(proposal: ProposalArtifact) -> str:
     if not scene_ref:
         raise HTTPException(status_code=409, detail="该协作草稿缺少目标场景。")
     return scene_ref
+
+
+def _project_structure_from_proposal(proposal: ProposalArtifact) -> dict:
+    try:
+        payload = json.loads(proposal.body)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=409, detail="项目结构草稿不是有效 JSON。") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=409, detail="项目结构草稿必须是 JSON object。")
+    chapters = payload.get("chapters")
+    if not isinstance(chapters, list) or not chapters:
+        raise HTTPException(status_code=409, detail="项目结构草稿缺少 chapters。")
+    normalized_chapters = []
+    for chapter in chapters:
+        if not isinstance(chapter, dict):
+            continue
+        scenes = chapter.get("scenes")
+        if not isinstance(scenes, list):
+            scenes = []
+        normalized_chapters.append({**chapter, "scenes": [scene for scene in scenes if isinstance(scene, dict)]})
+    if not normalized_chapters:
+        raise HTTPException(status_code=409, detail="项目结构草稿没有可应用的章节。")
+    return {**payload, "chapters": normalized_chapters}
+
+
+def _structure_text(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _structure_int(value, fallback: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return number if number > 0 else fallback
+
+
+def _llm_is_configured(settings: StoryGraphSettings) -> bool:
+    return bool(settings.llm_base_url and settings.llm_api_key and settings.llm_model)
 
 
 def _require_llm_configured(settings: StoryGraphSettings) -> None:

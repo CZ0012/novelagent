@@ -67,7 +67,8 @@ export type ProposalArtifactType =
   | "fact_draft"
   | "scene_rebuild"
   | "canon_patch"
-  | "outline_draft";
+  | "outline_draft"
+  | "project_structure_draft";
 
 export type ProposalStatus =
   | "drafting"
@@ -127,6 +128,40 @@ export type DocumentFactExtractionResult = {
   source_draft: Draft;
   candidate_previews: CandidateFact[];
   truncated: boolean;
+};
+
+export type ProjectStructureDraftResult = {
+  proposal: ProposalArtifact;
+  outline: {
+    schema: "project_structure_draft_v1";
+    project_id: string;
+    source_title: string;
+    summary: string;
+    chapters: Array<{
+      title: string;
+      chapter_index: number;
+      summary: string;
+      purpose: string;
+      scenes: Array<{
+        title: string;
+        scene_index: number;
+        summary: string;
+        goal: string;
+        conflict: string;
+        timeline_position?: string | null;
+        pov_label?: string | null;
+        location_label?: string | null;
+      }>;
+    }>;
+    truncated?: boolean;
+  };
+  truncated: boolean;
+};
+
+export type ProjectStructureApplyResult = {
+  proposal: ProposalArtifact;
+  chapters: GraphNodePayload[];
+  scenes: GraphNodePayload[];
 };
 
 export type ProposalCandidatePromotionResult = {

@@ -79,7 +79,7 @@ $env:STORYGRAPH_HOME="D:\storygraph-workspaces\demo"
 python -m apps.api.desktop_server
 ```
 
-Run those commands in one PowerShell terminal. If `STORYGRAPH_HOME` is not set, the desktop-target backend uses `%LOCALAPPDATA%\StoryGraph Agent\workspace` on Windows when available, or the user home directory fallback. It creates the workspace directory and uses the JSON graph backend. It does not silently seed demo canon; an empty persistent or desktop workspace should show project creation and explicit demo initialization options. Click `Seed Demo` in the workbench or call `POST /demo/seed` only when you want to initialize the bundled fantasy demo. If the demo was already initialized, use the workbench demo removal action or call `POST /demo/archive` to archive the Old Bell Tower demo from the current project tree.
+Run those commands in one PowerShell terminal. If `STORYGRAPH_HOME` is not set, the desktop-target backend uses `%LOCALAPPDATA%\StoryGraph Agent\workspace` on Windows when available, or the user home directory fallback. It creates the workspace directory and uses the JSON graph backend. It does not silently seed demo canon; an empty persistent or desktop workspace should show project creation first, then let authors import an existing manuscript and generate a non-canon `project_structure_draft` before applying confirmed chapters/scenes. The bundled fantasy demo is still available through `POST /demo/seed` for development/onboarding, and `POST /demo/archive` archives it from the current project tree.
 
 For a quick seeded in-memory API for development experiments only, run:
 
@@ -346,3 +346,7 @@ Useful focused checks:
 ```powershell
 python -m pytest tests/test_api_agent_settings.py tests/test_api_workflow_runs.py tests/test_cli_task12.py
 ```
+
+## License
+
+StoryGraph Agent is licensed under the MIT License. See [LICENSE](LICENSE).

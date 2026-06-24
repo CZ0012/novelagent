@@ -27,6 +27,32 @@ Status values: `planned`, `active`, `blocked`, `ready-for-check`, `ready-for-rev
 | SG-004B | done | Check Agent | `codex/sg-004-release-checks` | Verify Python tests, lint, Web build, desktop installer build, updater signature assets, and release hygiene. | Review Agent | `pytest`, `ruff`, Web build, version consistency, full `npm --prefix apps/desktop run build:installer`, and local 0.1.2 release asset checks passed. |
 | SG-004C | done | Release Creation Agent | `codex/sg-004-github-release` | Commit, tag, push, and create GitHub Release `v0.1.2` with installer, `.sig`, and `latest.json`. | Main Agent, Review Agent | Release commit includes the files required for tag `v0.1.2`; GitHub upload verification is the external acceptance gate. |
 | SG-004D | done | Review Agent | `codex/sg-004-release-acceptance` | Confirm GitHub latest release and updater metadata genuinely point to v0.1.2 assets, not local-only outputs. | Main Agent, Check Agent | Final release acceptance requires post-upload `gh release view`, `latest.json`, and asset URL checks. |
+| SG-005 | done | Main Agent | `codex/sg-005-import-structure-draft` | Let authors import an existing novel into an empty project, have the Agent draft chapter/scene structure, and require author confirmation before creating official project tree nodes. | Contract Agent, Front Agent, Backend/API Creation Agent, Check Agent, Review Agent | Closed after implementation: `project_structure_draft` contract/API/UI/docs are in place; Python tests, ruff, Web build, browser smoke, and diff checks pass. |
+
+## SG-005 Acceptance Criteria
+
+- Empty projects can accept an imported local manuscript/document without requiring a pre-existing chapter or scene.
+- Agent analysis creates a non-canon, author-editable `project_structure_draft` proposal that contains proposed chapters and scenes with summaries and source provenance.
+- Official Chapter/Scene Graph Store nodes are created only after the author explicitly accepts and applies the proposal through a backend API.
+- The structure draft/apply flow never writes CandidateFacts or canon facts, and never imports private manuscript prose into coordination files.
+- The left sidebar shows current project information when a project exists, offers explicit Edit and New Project controls, and shows the create form only when requested or when no project exists.
+- Existing manual chapter/scene creation remains available and project-scoped.
+
+## SG-005 Non-Goals
+
+- Do not auto-commit extracted facts, characters, locations, or world rules to canon in this task.
+- Do not build a full manuscript segmentation editor with drag/drop or rich diffing.
+- Do not store imported document content in coordination Markdown or Git.
+- Do not replace `fact_draft` or CandidateFact review flows.
+
+## SG-005 Verification
+
+- Focused API tests for project-level import-to-structure proposal creation and accepted proposal application.
+- Canon safety tests proving structure draft generation does not create Chapter/Scene nodes until explicit apply.
+- Frontend type/build checks for the new project-level import action and sidebar project view/edit/create modes.
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `npm --prefix apps/web run build`
 
 ## SG-003 Acceptance Criteria
 

@@ -39,6 +39,7 @@ Use the existing user-requested branch name if the user asks for one.
 | `codex/sg-004-release-checks` | SG-004B | Check Agent | `codex/sg-004-release-0.1.2` | Verify tests, lint, Web build, installer build, and local release assets. | done | `codex/sg-004-release-0.1.2` |
 | `codex/sg-004-github-release` | SG-004C | Release Creation Agent | `codex/sg-004-release-0.1.2` | Commit, push, tag, and publish GitHub Release assets for v0.1.2. | done | GitHub release `v0.1.2` |
 | `codex/sg-004-release-acceptance` | SG-004D | Review Agent | `codex/sg-004-release-0.1.2` | Verify the published GitHub latest release and updater metadata. | done | `codex/sg-004-release-0.1.2` |
+| `codex/sg-005-import-structure-draft` | SG-005 | Main Agent | `main` | Project-level imported novel analysis, `project_structure_draft` proposals, explicit apply-to-chapters/scenes, and sidebar project view/edit/create cleanup. | done | project default branch when ready |
 
 ## SG-002 Branch Notes
 
@@ -64,6 +65,15 @@ Use the existing user-requested branch name if the user asks for one.
 - Local Tauri output uses `StoryGraph Agent_0.1.2_x64-setup.exe`; GitHub Release upload uses normalized `StoryGraph.Agent_0.1.2_x64-setup.exe` and matching `.sig`, matching the existing v0.1.1 release asset convention.
 - Local verification for the release commit passed: `pytest`, `ruff`, Web build, version consistency, full installer build, and regenerated 0.1.2 `latest.json`.
 - Do not publish local workspaces, canon state, drafts, imported manuscript files, API keys, signing private keys, or generated private prose.
+
+## SG-005 Branch Notes
+
+- Current implementation is on `codex/sg-005-import-structure-draft` from `main` commit `ea19442`.
+- Contract Agent scope: add the smallest `project_structure_draft` proposal boundary and explicit promotion/apply semantics.
+- Front Agent scope: empty project should guide import/analyze first; the sidebar should show project info with Edit/New controls, not a persistent create form or prominent demo initialization.
+- Backend/API Creation Agent scope: project-level imported document analysis may create only a Proposal Artifact; accepted structure proposals can create Chapter/Scene graph nodes through explicit backend apply.
+- Check Agent scope: verify no imported manuscript text, API keys, or generated private prose enter Git or coordination files; generation must not write canon facts or CandidateFacts.
+- Final verification on 2026-06-22: focused project-structure API tests passed, full `python -m pytest -q` passed with 114 passed / 1 skipped, `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, local browser smoke confirmed no prominent demo initialization and import-first empty workspace copy, and `git diff --check` reported no whitespace errors.
 
 ## Branch Entry Template
 

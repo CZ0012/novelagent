@@ -99,6 +99,88 @@ def test_author_can_seed_project_outline_scene_and_world_rule(tmp_path):
     assert pending.json()["facts"] == []
 
 
+def test_author_can_update_project_metadata(tmp_path):
+    client = TestClient(create_app(_json_settings(tmp_path)))
+    project_id = client.post("/projects", json={"title": "旧标题"}).json()["project_id"]
+
+    response = client.patch(
+        f"/projects/{project_id}",
+        json={
+            "title": "新标题",
+            "genre": "science-fantasy",
+            "language": "zh-CN",
+            "target_length": "80万字",
+            "narrative_pov": "多视角",
+        },
+    )
+    project = client.get(f"/projects/{project_id}")
+
+    assert response.status_code == 200
+    assert project.json()["properties"]["title"] == "新标题"
+    assert project.json()["properties"]["genre"] == "science-fantasy"
+    assert project.json()["properties"]["target_length"] == "80万字"
+    assert project.json()["properties"]["narrative_pov"] == "多视角"
+
+
+def test_imported_document_structure_draft_requires_accept_before_project_tree_write(tmp_path):
+    client = TestClient(create_app(_json_settings(tmp_path)))
+    project_id = client.post("/projects", json={"title": "导入项目"}).json()["project_id"]
+    graph_before = client.get(f"/projects/{project_id}/graph/preview").json()
+
+    created = client.post(
+        f"/projects/{project_id}/imports/structure-draft",
+        json={
+            "title": "已有小说.docx",
+            "text": (
+                "第一章 星门开启\n\n"
+                "林瑾在旧港醒来，发现天空挂着陌生星图。\n\n"
+                "她跟随钟声进入地下车站，遇见追索旧史的人。\n\n"
+                "第二章 失落年表\n\n"
+                "众人争夺繁星编年史的残页，城市开始停电。"
+            ),
+            "source_ref": "import:local-doc",
+            "max_chapters": 4,
+            "max_scenes_per_chapter": 3,
+        },
+    )
+    outline_after_create = client.get(f"/projects/{project_id}/outline")
+    pending_after_create = client.get(f"/projects/{project_id}/facts/pending")
+
+    assert created.status_code == 200
+    payload = created.json()
+    assert payload["proposal"]["artifact_type"] == "project_structure_draft"
+    assert payload["proposal"]["body_format"] == "structured_json"
+    assert payload["proposal"]["status"] == "agent_revised"
+    assert payload["outline"]["chapters"][0]["scenes"]
+    assert outline_after_create.json()["chapters"] == []
+    assert pending_after_create.json()["facts"] == []
+    assert client.get(f"/projects/{project_id}/graph/preview").json() == graph_before
+
+    accepted = client.post(
+        f"/projects/{project_id}/proposals/{payload['proposal']['id']}/accept",
+        json={"reviewer": "author", "expected_version": 1},
+    )
+    applied = client.post(
+        f"/projects/{project_id}/proposals/{payload['proposal']['id']}/apply/project-structure",
+        json={
+            "reviewer": "author",
+            "rationale": "作者确认导入生成的章节场景结构。",
+            "expected_version": 2,
+        },
+    )
+    outline_after_apply = client.get(f"/projects/{project_id}/outline")
+    pending_after_apply = client.get(f"/projects/{project_id}/facts/pending")
+
+    assert accepted.status_code == 200
+    assert applied.status_code == 200
+    assert len(applied.json()["chapters"]) == 2
+    assert len(applied.json()["scenes"]) >= 2
+    assert applied.json()["proposal"]["derived_refs"][-1]["kind"] == "graph_node"
+    assert outline_after_apply.json()["chapters"][0]["title"].startswith("第一章")
+    assert outline_after_apply.json()["chapters"][0]["scenes"][0]["status"] == "planned"
+    assert pending_after_apply.json()["facts"] == []
+
+
 def test_latest_draft_endpoint_returns_imported_scene_draft(tmp_path):
     client = TestClient(create_app(_json_settings(tmp_path)))
     project_id = client.post("/projects", json={"title": "草稿项目"}).json()["project_id"]

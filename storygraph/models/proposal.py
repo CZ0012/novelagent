@@ -15,6 +15,7 @@ ProposalArtifactType = Literal[
     "scene_rebuild",
     "canon_patch",
     "outline_draft",
+    "project_structure_draft",
 ]
 
 ProposalStatus = Literal[

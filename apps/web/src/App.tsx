@@ -46,7 +46,6 @@ import {
   ContextPack,
   ContinuityReport,
   DemoArchiveResult,
-  DemoSeedResult,
   DocumentFactExtractionResult,
   Draft,
   GraphNodePayload,
@@ -54,6 +53,8 @@ import {
   ProposalArtifactType,
   ProposalCandidatePromotionResult,
   ProposalDraftPromotionResult,
+  ProjectStructureApplyResult,
+  ProjectStructureDraftResult,
   ProposalStatus,
   ProjectGraphPreview,
   ProjectOutline,
@@ -721,8 +722,29 @@ export default function App() {
     setProjectForm(defaultProjectForm);
     await refreshWorkspace(result.project_id);
     await refreshGraphPreview(result.project_id);
-    setNotice("项目已创建。继续添加章节、场景和基础 canon。");
+    setWorkspaceTab("sources");
+    setNotice("项目已创建。可以先导入已有小说，并生成章节/场景结构草稿。");
   }, [apiBase, projectForm, refreshGraphPreview, refreshWorkspace]);
+
+  const updateProject = useCallback(async () => {
+    if (!projectId) throw new Error("请先选择项目。");
+    if (!projectForm.title.trim()) {
+      throw new Error("项目名称不能为空。");
+    }
+    await apiPatch<GraphNodePayload>(apiBase, `/projects/${projectId}`, {
+      title: projectForm.title.trim(),
+      genre: projectForm.genre.trim() || null,
+      language: projectForm.language.trim() || null,
+      target_length: projectForm.target_length.trim() || null,
+      narrative_pov: projectForm.narrative_pov.trim() || null,
+      reviewer: "author",
+      rationale: "作者从工作台编辑项目信息。",
+      source_ref: "author_seed:workbench_project"
+    });
+    await refreshWorkspace(projectId, sceneId);
+    await refreshGraphPreview(projectId);
+    setNotice("项目信息已更新。");
+  }, [apiBase, projectForm, projectId, refreshGraphPreview, refreshWorkspace, sceneId]);
 
   const createChapter = useCallback(async () => {
     if (!projectId) throw new Error("请先选择或创建项目。");
@@ -863,6 +885,36 @@ export default function App() {
     [apiBase, contextPack, projectId]
   );
 
+  const analyzeDocumentStructure = useCallback(
+    async (document: LibraryDocument) => {
+      if (!projectId) throw new Error("请先创建并选择项目。");
+      if (document.status !== "ready") throw new Error("这个文档还不能生成结构草稿。");
+      const result = await apiPost<ProjectStructureDraftResult>(
+        apiBase,
+        `/projects/${projectId}/imports/structure-draft`,
+        {
+          title: document.name,
+          text: document.content,
+          source_ref: `import:${document.path}::${document.id}`,
+          max_chapters: 24,
+          max_scenes_per_chapter: 12
+        }
+      );
+      await refreshProposals(projectId);
+      setSelectedProposalId(result.proposal.id);
+      setWorkspaceTab("proposals");
+      const sceneCount = result.outline.chapters.reduce(
+        (total, chapter) => total + chapter.scenes.length,
+        0
+      );
+      const suffix = result.truncated ? " 源文档较长，本次只读取前部片段。" : "";
+      setNotice(
+        `已生成项目结构草稿：${result.outline.chapters.length} 章、${sceneCount} 个场景；请在协作草稿箱确认后再应用。${suffix}`
+      );
+    },
+    [apiBase, projectId, refreshProposals]
+  );
+
   const saveDocumentAsProposal = useCallback(
     async (document: LibraryDocument) => {
       if (!projectId || !sceneId) throw new Error("请先创建并选择一个场景。");
@@ -938,32 +990,6 @@ export default function App() {
     },
     [apiBase, endpoint, refreshFacts, saveDocumentAsDraft]
   );
-
-  const seedDemo = useCallback(async () => {
-    const result = await apiPost<DemoSeedResult>(apiBase, "/demo/seed", {
-      reviewer: "author",
-      rationale: "作者从工作台明确初始化内置奇幻演示项目。",
-      source_ref: "demo:workbench_seed",
-      locale: "zh-CN",
-      overwrite_existing: true
-    });
-    await refreshWorkspace(result.project_id, result.scene_id);
-    const pack = await apiPost<ContextPack>(
-      apiBase,
-      `/projects/${result.project_id}/scenes/${result.scene_id}/context-pack`
-    );
-    setContextPack(pack);
-    await refreshLatestDraft(result.project_id, result.scene_id);
-    await refreshGraphPreview(result.project_id);
-    setActiveTab("context");
-    await refreshFacts();
-    setWorkspaceTab("write");
-    const updated =
-      (result.nodes_updated ?? 0) + (result.relationships_updated ?? 0);
-    setNotice(
-      `演示项目已就绪：写入 ${result.nodes_created} 个节点、${result.relationships_created} 条关系；本地化更新 ${updated} 项。`
-    );
-  }, [apiBase, refreshFacts, refreshGraphPreview, refreshLatestDraft, refreshWorkspace]);
 
   const archiveDemo = useCallback(async () => {
     const result = await apiPost<DemoArchiveResult>(apiBase, "/demo/archive");
@@ -1205,6 +1231,38 @@ export default function App() {
     setSelectedProposalId(result.proposal.id);
     setNotice(`已转为当前场景草稿 v${result.draft.version}；canon 未改变。`);
   }, [apiBase, projectId, refreshProposals, sceneId, selectedProposal]);
+
+  const applyProjectStructureProposal = useCallback(async () => {
+    if (!selectedProposal || !projectId) throw new Error("请先选择项目结构草稿。");
+    const result = await apiPost<ProjectStructureApplyResult>(
+      apiBase,
+      `/projects/${projectId}/proposals/${selectedProposal.id}/apply/project-structure`,
+      {
+        reviewer: "author",
+        rationale: "作者确认导入文档生成的项目结构草稿。",
+        expected_version: selectedProposal.version
+      }
+    );
+    await refreshWorkspace(projectId, result.scenes[0]?.id ?? sceneId);
+    await refreshGraphPreview(projectId);
+    await refreshProposals(projectId);
+    setSelectedProposalId(result.proposal.id);
+    if (result.scenes[0]?.id) {
+      setSceneId(result.scenes[0].id);
+      setWorkspaceTab("write");
+    }
+    setNotice(
+      `已应用项目结构：创建 ${result.chapters.length} 个章节、${result.scenes.length} 个场景；canon 事实仍未改变。`
+    );
+  }, [
+    apiBase,
+    projectId,
+    refreshGraphPreview,
+    refreshProposals,
+    refreshWorkspace,
+    sceneId,
+    selectedProposal
+  ]);
 
   const promoteProposalToCandidates = useCallback(async () => {
     if (!selectedProposal || !projectId) throw new Error("请先选择协作草稿。");
@@ -1460,13 +1518,13 @@ export default function App() {
             onArchiveDemo={() => runAction("archive-demo", archiveDemo)}
             onLocationFormChange={setLocationForm}
             onProjectFormChange={setProjectForm}
+            onUpdateProject={() => runAction("update-project", updateProject)}
             onRefresh={() =>
               runAction("workspace", async () => {
                 await refreshWorkspace(projectId, sceneId);
               })
             }
             onSceneFormChange={setSceneForm}
-            onSeedDemo={() => runAction("seed-demo", seedDemo)}
             onSelectProject={(nextProjectId) => {
               const nextProject = projects.find((project) => project.id === nextProjectId);
               const firstScene = nextProject ? flattenScenes(nextProject)[0] : null;
@@ -1499,11 +1557,16 @@ export default function App() {
         <main className="editor">
           <section className="scene-toolbar">
             <div>
-              <h1>{localizeText(selectedScene?.title) || (hasWorkspace ? "请选择场景" : "空工作区")}</h1>
+              <h1>
+                {localizeText(selectedScene?.title) ||
+                  (hasWorkspace ? "导入小说生成项目结构" : "空工作区")}
+              </h1>
               <p>
                 {hasScene
                   ? `${sceneId} / 视角 ${localizeText(contextPack?.pov_character_id || selectedScene?.pov_character_id) || "未设置"}`
-                  : "创建项目、章节和场景后，草稿与 Agent 工作流才会接入后端。"}
+                  : hasWorkspace
+                    ? "先在“资料”中导入已有小说，由 Agent 生成章节/场景结构草稿；作者确认后再写入正式项目树。"
+                    : "先创建项目，再导入已有小说生成章节/场景结构草稿。"}
               </p>
             </div>
             <div className="toolbar-actions">
@@ -1575,7 +1638,7 @@ export default function App() {
               <EmptyState
                 icon={<Database />}
                 title="当前后端没有真实项目"
-                text="持久化/桌面工作区不会静默初始化演示；请创建自己的小说项目，或显式初始化内置演示。"
+                text="请先创建自己的小说项目；创建后可导入已有小说，让 Agent 生成章节和场景结构草稿。"
               />
             </section>
           )}
@@ -1651,10 +1714,15 @@ export default function App() {
               </div>
               <DocumentReader
                 busy={busy}
+                canAnalyzeProjectStructure={Boolean(projectId) && canGenerate}
                 canExtractDocumentFacts={canExtractDocumentFacts}
                 canGenerate={canGenerate}
                 document={selectedLibraryDocument}
+                hasProject={Boolean(projectId)}
                 hasScene={hasScene}
+                onAnalyzeStructure={(document) =>
+                  runAction("document-structure", () => analyzeDocumentStructure(document))
+                }
                 onExtractDocumentFacts={(document) =>
                   runAction("document-facts", () => extractDocumentFacts(document))
                 }
@@ -1686,6 +1754,9 @@ export default function App() {
             filter={proposalStatusFilter}
             hasScene={hasScene}
             onAccept={() => runAction("proposal-accept", () => reviewProposal("accept"))}
+            onApplyProjectStructure={() =>
+              runAction("proposal-structure", applyProjectStructureProposal)
+            }
             onCreateNew={startNewProposal}
             onExtractCandidates={() =>
               runAction("proposal-candidates", promoteProposalToCandidates)
@@ -1813,6 +1884,7 @@ function ProposalInbox({
   filter,
   hasScene,
   onAccept,
+  onApplyProjectStructure,
   onCreateNew,
   onExtractCandidates,
   onExtractFactDraft,
@@ -1842,6 +1914,7 @@ function ProposalInbox({
   filter: ProposalStatus | "all";
   hasScene: boolean;
   onAccept: () => void;
+  onApplyProjectStructure: () => void;
   onCreateNew: () => void;
   onExtractCandidates: () => void;
   onExtractFactDraft: () => void;
@@ -1881,6 +1954,11 @@ function ProposalInbox({
     selectedProposal?.status === "accepted" &&
     selectedProposal.artifact_type === "fact_draft" &&
     Boolean(effectiveSourceDraftId.trim());
+  const canApplyProjectStructure =
+    canReview &&
+    busy === null &&
+    selectedProposal?.status === "accepted" &&
+    selectedProposal.artifact_type === "project_structure_draft";
 
   return (
     <section className="proposal-panel" aria-label="协作草稿箱">
@@ -1978,6 +2056,9 @@ function ProposalInbox({
             <button type="button" onClick={onPromoteDraft} disabled={!canPromoteDraft}>
               <FileText size={14} /> 转为当前场景草稿
             </button>
+            <button type="button" onClick={onApplyProjectStructure} disabled={!canApplyProjectStructure}>
+              <BookOpen size={14} /> 应用为章节/场景
+            </button>
           </div>
         </div>
         <div className="proposal-meta">
@@ -2038,9 +2119,9 @@ function ProjectSidebar({
   onArchiveDemo,
   onLocationFormChange,
   onProjectFormChange,
+  onUpdateProject,
   onRefresh,
   onSceneFormChange,
-  onSeedDemo,
   onSelectProject,
   onSelectScene,
   onWorldRuleFormChange,
@@ -2071,9 +2152,9 @@ function ProjectSidebar({
   onArchiveDemo: () => void;
   onLocationFormChange: React.Dispatch<React.SetStateAction<LocationForm>>;
   onProjectFormChange: React.Dispatch<React.SetStateAction<ProjectForm>>;
+  onUpdateProject: () => void;
   onRefresh: () => void;
   onSceneFormChange: React.Dispatch<React.SetStateAction<SceneForm>>;
-  onSeedDemo: () => void;
   onSelectProject: (projectId: string) => void;
   onSelectScene: (sceneId: string) => void;
   onWorldRuleFormChange: React.Dispatch<React.SetStateAction<WorldRuleForm>>;
@@ -2089,6 +2170,26 @@ function ProjectSidebar({
   const chapters = selectedProject?.chapters ?? [];
   const sceneChapterId = sceneForm.chapter_id || currentChapterId;
   const selectedBuiltinDemo = selectedProject?.id === "project_fantasy_demo";
+  const [projectPanelMode, setProjectPanelMode] = useState<"view" | "create" | "edit">("view");
+  const projectSceneCount = selectedProject ? flattenScenes(selectedProject).length : 0;
+
+  useEffect(() => {
+    if (workspaceLoaded && !hasWorkspace) {
+      setProjectPanelMode("create");
+    }
+  }, [hasWorkspace, workspaceLoaded]);
+
+  const startProjectCreate = () => {
+    onProjectFormChange(defaultProjectForm);
+    setProjectPanelMode("create");
+  };
+
+  const startProjectEdit = () => {
+    if (selectedProject) {
+      onProjectFormChange(projectToForm(selectedProject));
+    }
+    setProjectPanelMode("edit");
+  };
 
   return (
     <>
@@ -2109,6 +2210,18 @@ function ProjectSidebar({
                 ))}
               </select>
               <div className="project-id">{projectId}</div>
+              {selectedProject && (
+                <div className="project-card">
+                  <strong>{localizeText(selectedProject.title)}</strong>
+                  <span>
+                    {selectedProject.genre ?? "未分类"} / {selectedProject.language ?? "未设置语言"}
+                  </span>
+                  <span>
+                    {chapters.length} 章 / {projectSceneCount} 场景
+                  </span>
+                  <span>{String(selectedProject.properties.narrative_pov ?? "未设置视角")}</span>
+                </div>
+              )}
             </>
           ) : (
             <div className="project-empty">
@@ -2126,11 +2239,19 @@ function ProjectSidebar({
             </button>
             <button
               disabled={!canReview || busy !== null}
-              onClick={onSeedDemo}
-              title={canReview ? "显式初始化内置演示项目" : "需要完全权限"}
+              onClick={startProjectCreate}
+              title={canReview ? "创建新的小说项目" : "需要完全权限"}
               type="button"
             >
-              <Database size={15} /> 初始化演示
+              <Database size={15} /> 新建项目
+            </button>
+            <button
+              disabled={!canReview || !selectedProject || busy !== null}
+              onClick={startProjectEdit}
+              title={canReview ? "编辑当前项目信息" : "需要完全权限"}
+              type="button"
+            >
+              <Settings size={15} /> 编辑项目
             </button>
             {selectedBuiltinDemo && (
               <button
@@ -2181,60 +2302,86 @@ function ProjectSidebar({
         </nav>
         </details>
 
-        <details className="sidebar-section seed-panel" open>
-          <summary className="section-title">创建我的小说项目</summary>
-          <input
-            placeholder="项目名称"
-            value={projectForm.title}
-            onChange={(event) =>
-              onProjectFormChange((current) => ({ ...current, title: event.target.value }))
-            }
-          />
-          <div className="compact-grid">
+        {projectPanelMode !== "view" && (
+          <details className="sidebar-section seed-panel" open>
+            <summary className="section-title">
+              {projectPanelMode === "edit" ? "编辑项目信息" : "创建新的小说项目"}
+            </summary>
             <input
-              placeholder="类型"
-              value={projectForm.genre}
+              placeholder="项目名称"
+              value={projectForm.title}
               onChange={(event) =>
-                onProjectFormChange((current) => ({ ...current, genre: event.target.value }))
+                onProjectFormChange((current) => ({ ...current, title: event.target.value }))
+              }
+            />
+            <div className="compact-grid">
+              <input
+                placeholder="类型"
+                value={projectForm.genre}
+                onChange={(event) =>
+                  onProjectFormChange((current) => ({ ...current, genre: event.target.value }))
+                }
+              />
+              <input
+                placeholder="语言"
+                value={projectForm.language}
+                onChange={(event) =>
+                  onProjectFormChange((current) => ({ ...current, language: event.target.value }))
+                }
+              />
+            </div>
+            <input
+              placeholder="目标篇幅"
+              value={projectForm.target_length}
+              onChange={(event) =>
+                onProjectFormChange((current) => ({
+                  ...current,
+                  target_length: event.target.value
+                }))
               }
             />
             <input
-              placeholder="语言"
-              value={projectForm.language}
+              placeholder="叙述视角"
+              value={projectForm.narrative_pov}
               onChange={(event) =>
-                onProjectFormChange((current) => ({ ...current, language: event.target.value }))
+                onProjectFormChange((current) => ({
+                  ...current,
+                  narrative_pov: event.target.value
+                }))
               }
             />
-          </div>
-          <input
-            placeholder="目标篇幅"
-            value={projectForm.target_length}
-            onChange={(event) =>
-              onProjectFormChange((current) => ({
-                ...current,
-                target_length: event.target.value
-              }))
-            }
-          />
-          <input
-            placeholder="叙述视角"
-            value={projectForm.narrative_pov}
-            onChange={(event) =>
-              onProjectFormChange((current) => ({
-                ...current,
-                narrative_pov: event.target.value
-              }))
-            }
-          />
-          <button
-            className="sidebar-action"
-            disabled={!canReview || busy !== null}
-            onClick={onCreateProject}
-            type="button"
-          >
-            <Save size={15} /> 创建项目
-          </button>
-        </details>
+            <div className="compact-grid">
+              <button
+                className="sidebar-action"
+                disabled={!canReview || busy !== null}
+                onClick={() => {
+                  const shouldClose = Boolean(projectForm.title.trim());
+                  if (projectPanelMode === "edit") {
+                    onUpdateProject();
+                  } else {
+                    onCreateProject();
+                  }
+                  if (shouldClose) {
+                    setProjectPanelMode("view");
+                  }
+                }}
+                type="button"
+              >
+                <Save size={15} /> {projectPanelMode === "edit" ? "保存信息" : "创建项目"}
+              </button>
+              {hasWorkspace && (
+                <button
+                  className="sidebar-action"
+                  disabled={busy !== null}
+                  onClick={() => setProjectPanelMode("view")}
+                  type="button"
+                >
+                  <X size={15} /> 取消
+                </button>
+              )}
+            </div>
+          </details>
+        )}
 
         <details className="sidebar-section seed-panel" open>
           <summary className="section-title">章节 / 场景</summary>
@@ -2588,10 +2735,13 @@ function LibraryTreeItem({
 
 function DocumentReader({
   busy,
+  canAnalyzeProjectStructure,
   canExtractDocumentFacts,
   canGenerate,
   document: doc,
+  hasProject,
   hasScene,
+  onAnalyzeStructure,
   onExtract,
   onExtractDocumentFacts,
   onSaveDraft,
@@ -2599,10 +2749,13 @@ function DocumentReader({
   onSaveStyle
 }: {
   busy: string | null;
+  canAnalyzeProjectStructure: boolean;
   canExtractDocumentFacts: boolean;
   canGenerate: boolean;
   document: LibraryDocument | null;
+  hasProject: boolean;
   hasScene: boolean;
+  onAnalyzeStructure: (document: LibraryDocument) => void;
   onExtract: (document: LibraryDocument) => void;
   onExtractDocumentFacts: (document: LibraryDocument) => void;
   onSaveDraft: (document: LibraryDocument) => void;
@@ -2622,7 +2775,9 @@ function DocumentReader({
   }
 
   const canBridge = doc.status === "ready" && canGenerate && hasScene && busy === null;
+  const canBuildStructure = doc.status === "ready" && canAnalyzeProjectStructure && busy === null;
   const canUseLlmExtraction = doc.status === "ready" && canExtractDocumentFacts && busy === null;
+  const noProjectTitle = hasProject ? undefined : "请先创建或选择项目。";
 
   return (
     <div className="document-reader">
@@ -2639,6 +2794,15 @@ function DocumentReader({
       <div className="reader-bridge">
         <span>当前是本地阅读器资料；只有点击下面按钮才会写入后端 Proposal/Draft/StyleSample/CandidateFact。</span>
         <div>
+          <button
+            className="primary"
+            disabled={!canBuildStructure}
+            onClick={() => onAnalyzeStructure(doc)}
+            title={noProjectTitle ?? "从导入小说生成可编辑的项目结构草稿；作者确认后才会创建章节/场景。"}
+            type="button"
+          >
+            <BookOpen size={14} /> 生成项目结构草稿
+          </button>
           <button
             disabled={!canBridge}
             onClick={() => onSaveDraft(doc)}
@@ -3157,7 +3321,8 @@ const proposalTypes: ProposalArtifactType[] = [
   "fact_draft",
   "scene_rebuild",
   "canon_patch",
-  "outline_draft"
+  "outline_draft",
+  "project_structure_draft"
 ];
 
 const proposalStatuses: ProposalStatus[] = [
@@ -3174,7 +3339,8 @@ const proposalTypeLabels: Record<ProposalArtifactType, string> = {
   fact_draft: "事实草稿",
   scene_rebuild: "场景重建",
   canon_patch: "Canon 补丁",
-  outline_draft: "大纲草稿"
+  outline_draft: "大纲草稿",
+  project_structure_draft: "项目结构草稿"
 };
 
 const proposalStatusLabels: Record<ProposalStatus, string> = {
@@ -3258,6 +3424,16 @@ const reviewActionLabels = {
 
 function flattenScenes(project: ProjectOutline): SceneOutline[] {
   return project.chapters.flatMap((chapter) => chapter.scenes);
+}
+
+function projectToForm(project: ProjectOutline): ProjectForm {
+  return {
+    title: project.title ?? "",
+    genre: project.genre ?? String(project.properties.genre ?? "fiction"),
+    language: project.language ?? String(project.properties.language ?? "zh-CN"),
+    target_length: String(project.properties.target_length ?? ""),
+    narrative_pov: String(project.properties.narrative_pov ?? "")
+  };
 }
 
 function findScene(
