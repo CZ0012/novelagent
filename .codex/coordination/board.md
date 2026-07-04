@@ -35,7 +35,7 @@ Status values: `planned`, `active`, `blocked`, `ready-for-check`, `ready-for-rev
 | SG-010 | done | Main Agent | `codex/sg-005-import-structure-draft` | Complete the Web Chapter metadata editor so volume order, purpose, and status can be edited through the same explicit author path as the backend route. | Front Agent, Check Agent | Closed after implementation: Web Chapter form covers backend fields and full verification passes. |
 | SG-011 | done | Main Agent | `codex/sg-005-import-structure-draft` | Complete the Web Scene metadata editor so outcome, emotional turn, previous scene, and status can be edited before Context Pack writing. | Front Agent, Backend/API Creation Agent, Check Agent | Closed after implementation: Web Scene form covers Context Pack planning fields and full verification passes. |
 | SG-012 | done | Main Agent | `codex/sg-005-import-structure-draft` | Let authors edit Scene style constraints used by Context Pack writing, including POV style, tense, tone, rhythm, diction, dialogue style, and banned patterns. | Front Agent, Backend/API Creation Agent, Check Agent | Closed after implementation: Web Scene style constraints flow into Context Pack and full verification passes. |
-| SG-013 | active | Main Agent | `codex/sg-005-import-structure-draft` | Publish the current MVP as software version 0.1.6 with synchronized source versions, GitHub tag/release assets, updater metadata, and pushed branch state. | Release Creation Agent, Check Agent | Build and upload only software release/update artifacts; do not synchronize local novel workspaces or canon data. |
+| SG-013 | done | Main Agent | `codex/sg-005-import-structure-draft` | Publish the current MVP as software version 0.1.6 with synchronized source versions, GitHub tag/release assets, updater metadata, and pushed branch state. | Release Creation Agent, Check Agent | Closed after release: branch/tag pushed, GitHub Release `v0.1.6` is latest, and updater metadata/assets are verified. |
 
 ## SG-005 Acceptance Criteria
 
@@ -191,6 +191,7 @@ Status values: `planned`, `active`, `blocked`, `ready-for-check`, `ready-for-rev
 - `npm --prefix apps/desktop run build:installer`
 - `apps/desktop/scripts/prepare-release-assets.ps1`
 - GitHub tag/release verification for `v0.1.6`.
+- Final verification on 2026-07-04: version consistency passed, full `python -m pytest -q` passed with 118 passed / 1 skipped, `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, `npm --prefix apps/desktop run build:installer` passed, `latest.json` signature/URL verification passed, branch and tag were pushed to GitHub, and GitHub Release `v0.1.6` is marked Latest with installer, `.sig`, and `latest.json` assets.
 
 ## SG-003 Acceptance Criteria
 

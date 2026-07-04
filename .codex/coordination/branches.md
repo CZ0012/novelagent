@@ -47,7 +47,7 @@ Use the existing user-requested branch name if the user asks for one.
 | `codex/sg-005-import-structure-draft` | SG-010 | Main Agent | current branch | Complete Web Chapter metadata form coverage for volume, purpose, and status. | done | project default branch when ready |
 | `codex/sg-005-import-structure-draft` | SG-011 | Main Agent | current branch | Complete Web Scene metadata form coverage for outcome, emotional turn, previous scene, and status. | done | project default branch when ready |
 | `codex/sg-005-import-structure-draft` | SG-012 | Main Agent | current branch | Web Scene style constraint editor for Context Pack writing. | done | project default branch when ready |
-| `codex/sg-005-import-structure-draft` | SG-013 | Main Agent | current branch | Publish 0.1.6 software release/update assets and push GitHub state. | active | GitHub release `v0.1.6` / project default branch when ready |
+| `codex/sg-005-import-structure-draft` | SG-013 | Main Agent | current branch | Publish 0.1.6 software release/update assets and push GitHub state. | done | GitHub release `v0.1.6` / project default branch when ready |
 
 ## SG-002 Branch Notes
 
@@ -137,6 +137,7 @@ Use the existing user-requested branch name if the user asks for one.
 - Current implementation continues on `codex/sg-005-import-structure-draft` because the user asked to publish the accumulated MVP progress after SG-012.
 - GitHub work is only for software release/update distribution: commit/tag/push plus GitHub Release installer, `.sig`, and `latest.json`.
 - Do not publish local story workspace data, canon state, drafts, imported manuscript files, API keys, signing private keys, or generated private prose.
+- Final verification on 2026-07-04: branch and tag were pushed, GitHub Release `v0.1.6` is latest, assets are uploaded, and the latest updater endpoint returns version 0.1.6.
 
 ## Branch Entry Template
 
