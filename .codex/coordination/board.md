@@ -28,6 +28,14 @@ Status values: `planned`, `active`, `blocked`, `ready-for-check`, `ready-for-rev
 | SG-004C | done | Release Creation Agent | `codex/sg-004-github-release` | Commit, tag, push, and create GitHub Release `v0.1.2` with installer, `.sig`, and `latest.json`. | Main Agent, Review Agent | Release commit includes the files required for tag `v0.1.2`; GitHub upload verification is the external acceptance gate. |
 | SG-004D | done | Review Agent | `codex/sg-004-release-acceptance` | Confirm GitHub latest release and updater metadata genuinely point to v0.1.2 assets, not local-only outputs. | Main Agent, Check Agent | Final release acceptance requires post-upload `gh release view`, `latest.json`, and asset URL checks. |
 | SG-005 | done | Main Agent | `codex/sg-005-import-structure-draft` | Let authors import an existing novel into an empty project, have the Agent draft chapter/scene structure, and require author confirmation before creating official project tree nodes. | Contract Agent, Front Agent, Backend/API Creation Agent, Check Agent, Review Agent | Closed after implementation: `project_structure_draft` contract/API/UI/docs are in place; Python tests, ruff, Web build, browser smoke, and diff checks pass. |
+| SG-006 | done | Main Agent | `codex/sg-005-import-structure-draft` | Make applying an accepted `project_structure_draft` repeat-safe so refresh/retry does not duplicate Chapter/Scene canon writes. | Contract Agent, Front Agent, Backend/API Creation Agent, Check Agent | Closed after implementation: API apply is idempotent for same-proposal retries, UI notice distinguishes reuse, contract note is updated, and verification passes. |
+| SG-007 | done | Main Agent | `codex/sg-005-import-structure-draft` | Let authors edit existing Scene metadata after imported structure application so missing POV/location/goal/conflict can be resolved before Context Pack writing. | Contract Agent, Front Agent, Backend/API Creation Agent, Check Agent | Closed after implementation: scene metadata PATCH route, sidebar edit controls, docs, and focused/full verification are complete. |
+| SG-008 | done | Main Agent | `codex/sg-005-import-structure-draft` | Expose project-scoped Character/Location option lists so authors can resolve imported scene POV/location hints into stable IDs without guessing. | Contract Agent, Front Agent, Backend/API Creation Agent, Check Agent | Closed after implementation: read-only list APIs, sidebar POV/location options, docs, and focused/full verification are complete. |
+| SG-009 | done | Main Agent | `codex/sg-005-import-structure-draft` | Let authors edit existing Chapter metadata after imported structure application so generated chapter titles/order/summaries can be corrected without rebuilding the project tree. | Contract Agent, Front Agent, Backend/API Creation Agent, Check Agent | Closed after implementation: chapter metadata PATCH route, sidebar load/save controls, docs, and focused/full verification are complete. |
+| SG-010 | done | Main Agent | `codex/sg-005-import-structure-draft` | Complete the Web Chapter metadata editor so volume order, purpose, and status can be edited through the same explicit author path as the backend route. | Front Agent, Check Agent | Closed after implementation: Web Chapter form covers backend fields and full verification passes. |
+| SG-011 | done | Main Agent | `codex/sg-005-import-structure-draft` | Complete the Web Scene metadata editor so outcome, emotional turn, previous scene, and status can be edited before Context Pack writing. | Front Agent, Backend/API Creation Agent, Check Agent | Closed after implementation: Web Scene form covers Context Pack planning fields and full verification passes. |
+| SG-012 | done | Main Agent | `codex/sg-005-import-structure-draft` | Let authors edit Scene style constraints used by Context Pack writing, including POV style, tense, tone, rhythm, diction, dialogue style, and banned patterns. | Front Agent, Backend/API Creation Agent, Check Agent | Closed after implementation: Web Scene style constraints flow into Context Pack and full verification passes. |
+| SG-013 | active | Main Agent | `codex/sg-005-import-structure-draft` | Publish the current MVP as software version 0.1.6 with synchronized source versions, GitHub tag/release assets, updater metadata, and pushed branch state. | Release Creation Agent, Check Agent | Build and upload only software release/update artifacts; do not synchronize local novel workspaces or canon data. |
 
 ## SG-005 Acceptance Criteria
 
@@ -53,6 +61,136 @@ Status values: `planned`, `active`, `blocked`, `ready-for-check`, `ready-for-rev
 - `python -m pytest -q`
 - `python -m ruff check .`
 - `npm --prefix apps/web run build`
+
+## SG-006 Acceptance Criteria
+
+- Re-applying the same accepted `project_structure_draft` returns the previously derived Chapter/Scene nodes instead of attempting duplicate Graph Store writes.
+- If a target node id already exists from unrelated provenance, the apply action still fails with a conflict.
+- The Web workbench distinguishes a first application from an already-applied retry in its Chinese notice.
+- The behavior remains scoped to Chapter/Scene structure application and does not create CandidateFacts or other story-bible canon nodes.
+
+## SG-006 Verification
+
+- Focused API regression for repeated project-structure apply.
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `npm --prefix apps/web run build`
+- Final verification on 2026-07-04: focused project-structure API tests passed, full `python -m pytest -q` passed with 115 passed / 1 skipped, `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, and `git diff --check` reported no whitespace errors.
+
+## SG-007 Acceptance Criteria
+
+- Authors can update an existing Scene's title, ordering, POV character id, location id, timeline position, goal, conflict, required characters, include/violation constraints, and status through an explicit backend route.
+- The route requires `full` permission, project-scopes the scene, records reviewer/rationale/source provenance, and persists JSON graph updates.
+- Updating Scene metadata does not create CandidateFacts, characters, locations, world rules, drafts, or proposal artifacts.
+- The Web workbench exposes a Chinese-first edit action for the selected scene so imported `pov_label` / `location_label` hints can be resolved into stable ids before Context Pack writing.
+
+## SG-007 Verification
+
+- Focused API regression for selected Scene metadata update and candidate-safety.
+- Frontend type/build checks for selected-scene edit UI.
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `npm --prefix apps/web run build`
+- Final verification on 2026-07-04: focused project-structure API tests passed, full `python -m pytest -q` passed with 116 passed / 1 skipped, `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, and `git diff --check` reported no whitespace errors.
+
+## SG-008 Acceptance Criteria
+
+- FastAPI exposes read-only project-scoped Character and Location lists that return stable IDs and node properties without creating graph events, drafts, candidates, or proposals.
+- Lists include only CANON nodes that belong to the requested project and do not leak other project data.
+- The Web workbench loads these lists for the selected project and offers them as POV/location options in the Scene metadata form while still allowing manual stable IDs.
+- Newly created Character/Location seed actions refresh the option lists and make the created ID visible to the author.
+
+## SG-008 Verification
+
+- Focused API regression for project-scoped Character/Location list filtering.
+- Frontend type/build checks for POV/location option UI.
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `npm --prefix apps/web run build`
+- Final verification on 2026-07-04: focused project-structure API tests passed, full `python -m pytest -q` passed with 117 passed / 1 skipped, `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, and `git diff --check` reported no whitespace errors.
+
+## SG-009 Acceptance Criteria
+
+- Authors can update an existing Chapter's title, volume/chapter order, summary, purpose, and status through an explicit backend route.
+- The route requires `full` permission, project-scopes the chapter, records reviewer/rationale/source provenance, and persists JSON graph updates.
+- Updating Chapter metadata does not create CandidateFacts, Drafts, Proposal Artifacts, scenes, or unrelated graph nodes.
+- The Web workbench exposes Chinese-first load/save controls for the selected chapter so imported chapter structure can be corrected after apply.
+
+## SG-009 Verification
+
+- Focused API regression for selected Chapter metadata update and no candidate/proposal side effects.
+- Frontend type/build checks for selected-chapter edit UI.
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `npm --prefix apps/web run build`
+- Final verification on 2026-07-04: focused project-structure API tests passed, full `python -m pytest -q` passed with 118 passed / 1 skipped, `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, and `git diff --check` reported no whitespace errors.
+
+## SG-010 Acceptance Criteria
+
+- The Web Chapter metadata form includes volume index, chapter index, summary, purpose, and status for the selected chapter.
+- Saving Chapter metadata sends every supported backend Chapter update field while retaining explicit author provenance.
+- Loading a selected chapter hydrates all editable Chapter fields from the backend project outline.
+- This remains an author-edit path only; it does not create CandidateFacts, Drafts, Proposal Artifacts, scenes, or unrelated graph nodes.
+
+## SG-010 Verification
+
+- Frontend type/build checks for expanded Chapter metadata controls.
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `npm --prefix apps/web run build`
+- Final verification on 2026-07-04: full `python -m pytest -q` passed with 118 passed / 1 skipped, `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, and `git diff --check` reported no whitespace errors.
+
+## SG-011 Acceptance Criteria
+
+- The Web Scene metadata form includes outcome, emotional turn, previous scene id, and status for the selected scene.
+- Saving Scene metadata sends every supported scalar planning field needed by Context Pack writing while retaining explicit author provenance.
+- Loading a selected scene hydrates all editable Scene planning fields from the backend project outline / graph node properties.
+- This remains an author-edit path only; it does not create CandidateFacts, Drafts, Proposal Artifacts, chapters, or unrelated graph nodes.
+
+## SG-011 Verification
+
+- Focused API regression for Scene metadata update fields that affect Context Pack writing.
+- Frontend type/build checks for expanded Scene metadata controls.
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `npm --prefix apps/web run build`
+- Final verification on 2026-07-04: focused project-structure API tests passed, full `python -m pytest -q` passed with 118 passed / 1 skipped, `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, and `git diff --check` reported no whitespace errors.
+
+## SG-012 Acceptance Criteria
+
+- The Web Scene metadata form includes editable style constraints for POV style, tense, tone, sentence rhythm, diction, dialogue style, and banned patterns.
+- Creating or updating a Scene sends `style_constraints` only through the explicit author metadata path with reviewer/rationale/source provenance.
+- Loading a selected scene hydrates style constraints from backend project outline / graph node properties.
+- Context Pack construction reflects the authored style constraints and banned patterns.
+- This remains an author-edit path only; it does not create CandidateFacts, Drafts, Proposal Artifacts, style samples, chapters, or unrelated graph nodes.
+
+## SG-012 Verification
+
+- Focused API regression for Scene style constraints flowing into Context Pack.
+- Frontend type/build checks for expanded style constraint controls.
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `npm --prefix apps/web run build`
+- Final verification on 2026-07-04: focused project-structure API tests passed, full `python -m pytest -q` passed with 118 passed / 1 skipped, `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, and `git diff --check` reported no whitespace errors.
+
+## SG-013 Acceptance Criteria
+
+- `VERSION`, Python package metadata, Web package/display version, desktop package, Cargo package/lock, Tauri config, API metadata, and release docs all agree on `0.1.6`.
+- Verification passes after the version bump and SG-012 implementation.
+- The desktop build produces the Windows NSIS setup executable and Tauri updater `.sig` for 0.1.6.
+- `latest.json` points to the GitHub `v0.1.6` release asset and uses the matching updater signature.
+- GitHub receives the branch, tag `v0.1.6`, release assets, and release metadata only for software distribution.
+- Local novel workspaces, canon, drafts, imported documents, project settings, review state, API keys, and private prose are not published.
+
+## SG-013 Verification
+
+- Version consistency search for `0.1.6` and stale project `0.1.5` references.
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `npm --prefix apps/web run build`
+- `npm --prefix apps/desktop run build:installer`
+- `apps/desktop/scripts/prepare-release-assets.ps1`
+- GitHub tag/release verification for `v0.1.6`.
 
 ## SG-003 Acceptance Criteria
 

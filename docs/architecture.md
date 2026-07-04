@@ -987,7 +987,7 @@ Neo4j / SQLite / Vector Store 本地连接
 - 当前可运行入口是 CLI、FastAPI + React/Vite Web 工作台、面向桌面宿主的持久化后端入口 `python -m apps.api.desktop_server`，以及源码构建的 Tauri 桌面应用。
 - `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。持久化或桌面空 workspace 应先显示项目创建；创建项目后，作者可以导入已有小说/资料，由 Agent 生成非正典 `project_structure_draft`，经作者接受并显式应用后才创建正式 Chapter/Scene 节点。需要默认 demo project 时，仍可调用 `POST /demo/seed`，该路径要求 full 权限并记录 reviewer、rationale 和 source_ref。已初始化的内置 demo 可以通过工作台或 `POST /demo/archive` 归档为非当前 canon 项目，以便回到空项目树。
 - 默认 `apps.api.main:app` 开发入口可用于本地 demo；不传入 settings 时它使用 seeded in-memory stores，不应被描述为完整桌面产品或持久化作者项目入口。
-- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe` 及 Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.5_x64-setup.exe.sig`。这些产物是本地源码构建输出，不是已发布签名 release channel。当前验证产物不包含 `nsis.zip`。
+- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.6_x64-setup.exe` 及 Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.6_x64-setup.exe.sig`。这些产物是本地源码构建输出，不是已发布签名 release channel。当前验证产物不包含 `nsis.zip`。
 - 桌面壳只应复用健康且 `/health.workspace` 与配置工作区一致的本机后端；如果端口被其他工作区的旧后端占用，应在设置页报告冲突，而不是继续加载旧 workspace 的项目树。
 - FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地操作者授权分级，不是身份认证；保存设置页或调用 `/settings/agent` 代表本地操作者显式授权，因此可升降权限并立即生效；CLI 当前不执行同一权限闸门。
 - React/Vite 工作台当前支持本地 `.txt`、`.md`、`.markdown`、`.docx` 文件和文件夹导入到前端资料树/阅读器。默认导入内容只保存在浏览器内存，不写 Proposal Store、Draft Store、StyleSample Store、Candidate Store 或 Graph Store。作者可显式让 Agent 从导入小说生成 `project_structure_draft` 项目结构草稿；该草稿只包含章节/场景结构 JSON，不保存全文，且只有作者接受并应用后才创建 Chapter/Scene 节点。作者也可显式把 ready 文档保存为 Proposal Store 协作草稿、当前场景 Draft Store 草稿、StyleSample Store 风格样本，或让已配置的 OpenAI-compatible LLM 通读资料后生成 `fact_draft` 协作草稿和 CandidateFact 预览；LLM 资料抽取会保存来源 Draft 用作 provenance，但不会直接写 Candidate Store 或 Graph Store。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
@@ -1208,7 +1208,9 @@ GET /projects/{project_id}
 ### 14.2 Canon Graph
 
 ```http
+GET  /projects/{project_id}/characters
 POST /projects/{project_id}/characters
+GET  /projects/{project_id}/locations
 POST /projects/{project_id}/locations
 POST /projects/{project_id}/organizations
 POST /projects/{project_id}/world-rules
@@ -1220,7 +1222,9 @@ GET  /projects/{project_id}/graph/query
 ```http
 POST /projects/{project_id}/outline
 POST /projects/{project_id}/chapters
+PATCH /projects/{project_id}/chapters/{chapter_id}
 POST /projects/{project_id}/chapters/{chapter_id}/scenes
+PATCH /projects/{project_id}/scenes/{scene_id}
 ```
 
 ### 14.4 Writing

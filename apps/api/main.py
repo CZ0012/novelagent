@@ -117,6 +117,15 @@ class ChapterSeedRequest(AuthorSeedRequest):
     properties: dict = Field(default_factory=dict)
 
 
+class ChapterUpdateRequest(AuthorSeedRequest):
+    title: str | None = None
+    volume_index: int | None = Field(default=None, ge=1)
+    chapter_index: int | None = Field(default=None, ge=1)
+    summary: str | None = None
+    purpose: str | None = None
+    status: str | None = None
+
+
 class SceneSeedRequest(AuthorSeedRequest):
     id: str | None = None
     title: str = Field(..., min_length=1)
@@ -135,6 +144,24 @@ class SceneSeedRequest(AuthorSeedRequest):
     previous_scene_id: str | None = None
     status: str = "planned"
     properties: dict = Field(default_factory=dict)
+
+
+class SceneUpdateRequest(AuthorSeedRequest):
+    title: str | None = None
+    scene_index: int | None = Field(default=None, ge=1)
+    pov_character_id: str | None = None
+    location_id: str | None = None
+    timeline_position: str | None = None
+    goal: str | None = None
+    conflict: str | None = None
+    outcome: str | None = None
+    emotional_turn: str | None = None
+    required_characters: list[str] | None = None
+    must_include: list[str] | None = None
+    must_not_violate: list[str] | None = None
+    style_constraints: dict | None = None
+    previous_scene_id: str | None = None
+    status: str | None = None
 
 
 class WorldRuleSeedRequest(AuthorSeedRequest):
@@ -283,7 +310,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.5")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.6")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
@@ -447,6 +474,18 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
+    @app.get("/projects/{project_id}/characters")
+    def list_characters(project_id: str) -> dict:
+        try:
+            return {
+                "characters": graph_query.list_project_nodes(
+                    project_id=project_id,
+                    node_type="Character",
+                )
+            }
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
     @app.post("/projects/{project_id}/characters")
     def add_character(project_id: str, request: CharacterSeedRequest) -> dict:
         require_permission(AgentPermissionLevel.FULL)
@@ -462,6 +501,18 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             )
             persist_graph()
             return node.model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.get("/projects/{project_id}/locations")
+    def list_locations(project_id: str) -> dict:
+        try:
+            return {
+                "locations": graph_query.list_project_nodes(
+                    project_id=project_id,
+                    node_type="Location",
+                )
+            }
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
@@ -499,6 +550,30 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     "status": request.status,
                     **request.properties,
                 },
+                reviewer=request.reviewer,
+                rationale=request.rationale,
+                source_ref=request.source_ref,
+            )
+            persist_graph()
+            return node.model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.patch("/projects/{project_id}/chapters/{chapter_id}")
+    def update_chapter(
+        project_id: str,
+        chapter_id: str,
+        request: ChapterUpdateRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            _ensure_chapter_project(graph, project_id=project_id, chapter_id=chapter_id)
+            properties = _chapter_update_properties(request)
+            if not properties:
+                raise HTTPException(status_code=409, detail="没有可更新的章节字段。")
+            node = graph.update_node(
+                chapter_id,
+                properties,
                 reviewer=request.reviewer,
                 rationale=request.rationale,
                 source_ref=request.source_ref,
@@ -981,31 +1056,41 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             chapters: list[dict] = []
             scenes: list[dict] = []
             previous_scene_id: str | None = None
+            created_graph_nodes = False
             for chapter_index, chapter in enumerate(outline["chapters"], start=1):
                 chapter_title = _structure_text(chapter.get("title")) or f"第 {chapter_index} 章"
                 chapter_id = slug_id(
                     "chapter",
                     f"{project_id}_{chapter_index}_{chapter_title}",
                 )
-                chapter_node = canon_seed.add_chapter(
-                    project_id=project_id,
+                chapter_node = _existing_project_structure_node(
+                    graph,
                     node_id=chapter_id,
-                    title=chapter_title,
-                    properties={
-                        "volume_index": 1,
-                        "chapter_index": _structure_int(
-                            chapter.get("chapter_index"), chapter_index
-                        ),
-                        "summary": _structure_text(chapter.get("summary")) or None,
-                        "purpose": _structure_text(chapter.get("purpose")) or None,
-                        "status": "planned",
-                        "source_structure_proposal_id": proposal.id,
-                        "source_structure_proposal_version": proposal.version,
-                    },
-                    reviewer=request.reviewer,
-                    rationale=request.rationale,
-                    source_ref=source_ref,
+                    project_id=project_id,
+                    proposal=proposal,
+                    expected_type="Chapter",
                 )
+                if chapter_node is None:
+                    chapter_node = canon_seed.add_chapter(
+                        project_id=project_id,
+                        node_id=chapter_id,
+                        title=chapter_title,
+                        properties={
+                            "volume_index": 1,
+                            "chapter_index": _structure_int(
+                                chapter.get("chapter_index"), chapter_index
+                            ),
+                            "summary": _structure_text(chapter.get("summary")) or None,
+                            "purpose": _structure_text(chapter.get("purpose")) or None,
+                            "status": "planned",
+                            "source_structure_proposal_id": proposal.id,
+                            "source_structure_proposal_version": proposal.version,
+                        },
+                        reviewer=request.reviewer,
+                        rationale=request.rationale,
+                        source_ref=source_ref,
+                    )
+                    created_graph_nodes = True
                 chapters.append(chapter_node.model_dump())
                 for scene_index, scene in enumerate(chapter.get("scenes", []), start=1):
                     scene_title = _structure_text(scene.get("title")) or f"场景 {scene_index}"
@@ -1013,37 +1098,56 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                         "scene",
                         f"{project_id}_{chapter_index}_{scene_index}_{scene_title}",
                     )
-                    scene_node = canon_seed.add_scene(
-                        project_id=project_id,
-                        chapter_id=chapter_node.id,
+                    scene_node = _existing_project_structure_node(
+                        graph,
                         node_id=scene_id,
-                        title=scene_title,
-                        properties={
-                            "scene_index": _structure_int(scene.get("scene_index"), scene_index),
-                            "summary": _structure_text(scene.get("summary")) or None,
-                            "goal": _structure_text(scene.get("goal")) or None,
-                            "conflict": _structure_text(scene.get("conflict")) or None,
-                            "timeline_position": _structure_text(
-                                scene.get("timeline_position")
-                            ) or None,
-                            "pov_character_id": None,
-                            "location_id": None,
-                            "pov_label": _structure_text(scene.get("pov_label")) or None,
-                            "location_label": _structure_text(scene.get("location_label")) or None,
-                            "status": "planned",
-                            "source_structure_proposal_id": proposal.id,
-                            "source_structure_proposal_version": proposal.version,
-                        },
-                        previous_scene_id=previous_scene_id,
-                        reviewer=request.reviewer,
-                        rationale=request.rationale,
-                        source_ref=source_ref,
+                        project_id=project_id,
+                        proposal=proposal,
+                        expected_type="Scene",
                     )
+                    if scene_node is None:
+                        scene_node = canon_seed.add_scene(
+                            project_id=project_id,
+                            chapter_id=chapter_node.id,
+                            node_id=scene_id,
+                            title=scene_title,
+                            properties={
+                                "scene_index": _structure_int(
+                                    scene.get("scene_index"), scene_index
+                                ),
+                                "summary": _structure_text(scene.get("summary")) or None,
+                                "goal": _structure_text(scene.get("goal")) or None,
+                                "conflict": _structure_text(scene.get("conflict")) or None,
+                                "timeline_position": _structure_text(
+                                    scene.get("timeline_position")
+                                ) or None,
+                                "pov_character_id": None,
+                                "location_id": None,
+                                "pov_label": _structure_text(scene.get("pov_label")) or None,
+                                "location_label": _structure_text(
+                                    scene.get("location_label")
+                                ) or None,
+                                "status": "planned",
+                                "source_structure_proposal_id": proposal.id,
+                                "source_structure_proposal_version": proposal.version,
+                            },
+                            previous_scene_id=previous_scene_id,
+                            reviewer=request.reviewer,
+                            rationale=request.rationale,
+                            source_ref=source_ref,
+                        )
+                        created_graph_nodes = True
                     previous_scene_id = scene_node.id
                     scenes.append(scene_node.model_dump())
-            persist_graph()
+            if created_graph_nodes:
+                persist_graph()
             updated_proposal = proposal
+            recorded_graph_refs = {
+                ref.ref for ref in proposal.derived_refs if ref.kind == "graph_node"
+            }
             for node in [*chapters, *scenes]:
+                if node["id"] in recorded_graph_refs:
+                    continue
                 updated_proposal = proposal_store.record_derived_ref(
                     proposal_id,
                     derived_ref=ProposalRef(
@@ -1055,10 +1159,12 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     note="Applied project structure proposal to Chapter/Scene graph nodes.",
                     expected_version=updated_proposal.version,
                 )
+                recorded_graph_refs.add(node["id"])
             return {
                 "proposal": updated_proposal.model_dump(),
                 "chapters": chapters,
                 "scenes": scenes,
+                "already_applied": not created_graph_nodes,
             }
         except (ContractError, GraphStoreError, ValueError) as exc:
             if isinstance(exc, ValueError):
@@ -1235,6 +1341,26 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     def get_scene(project_id: str, scene_id: str) -> dict:
         try:
             return graph_query.scene_node(project_id=project_id, scene_id=scene_id)
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.patch("/projects/{project_id}/scenes/{scene_id}")
+    def update_scene(project_id: str, scene_id: str, request: SceneUpdateRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            graph_query.scene_node(project_id=project_id, scene_id=scene_id)
+            properties = _scene_update_properties(request)
+            if not properties:
+                raise HTTPException(status_code=409, detail="没有可更新的场景字段。")
+            node = graph.update_node(
+                scene_id,
+                properties,
+                reviewer=request.reviewer,
+                rationale=request.rationale,
+                source_ref=request.source_ref,
+            )
+            persist_graph()
+            return node.model_dump()
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
@@ -1543,6 +1669,13 @@ def _ensure_project_exists(graph, project_id: str) -> None:
     graph.get_node(project_id)
 
 
+def _ensure_chapter_project(graph, *, project_id: str, chapter_id: str) -> None:
+    graph.get_node(project_id)
+    chapter = graph.get_node(chapter_id)
+    if chapter.type != "Chapter" or chapter.properties.get("project_id") != project_id:
+        raise ContractError("Chapter does not belong to the requested project.")
+
+
 def _ensure_proposal_project(proposal: ProposalArtifact, project_id: str) -> None:
     if proposal.project_id != project_id:
         raise HTTPException(status_code=404, detail="这个项目中没有找到该协作草稿。")
@@ -1603,6 +1736,99 @@ def _project_structure_from_proposal(proposal: ProposalArtifact) -> dict:
     if not normalized_chapters:
         raise HTTPException(status_code=409, detail="项目结构草稿没有可应用的章节。")
     return {**payload, "chapters": normalized_chapters}
+
+
+def _chapter_update_properties(request: ChapterUpdateRequest) -> dict:
+    fields = ["title", "volume_index", "chapter_index", "summary", "purpose", "status"]
+    properties: dict = {}
+    explicitly_set = request.model_fields_set
+    for field_name in fields:
+        if field_name not in explicitly_set:
+            continue
+        value = getattr(request, field_name)
+        if isinstance(value, str):
+            value = value.strip() or None
+        properties[field_name] = value
+    title = properties.get("title")
+    if title is None and "title" in properties:
+        raise HTTPException(status_code=409, detail="章节标题不能为空。")
+    return properties
+
+
+def _scene_update_properties(request: SceneUpdateRequest) -> dict:
+    scalar_fields = [
+        "title",
+        "scene_index",
+        "pov_character_id",
+        "location_id",
+        "timeline_position",
+        "goal",
+        "conflict",
+        "outcome",
+        "emotional_turn",
+        "previous_scene_id",
+        "status",
+    ]
+    list_fields = ["required_characters", "must_include", "must_not_violate"]
+    properties: dict = {}
+    explicitly_set = request.model_fields_set
+    for field_name in scalar_fields:
+        if field_name not in explicitly_set:
+            continue
+        value = getattr(request, field_name)
+        if isinstance(value, str):
+            value = value.strip() or None
+        properties[field_name] = value
+    for field_name in list_fields:
+        if field_name not in explicitly_set:
+            continue
+        value = getattr(request, field_name)
+        properties[field_name] = [
+            item.strip() for item in (value or []) if isinstance(item, str) and item.strip()
+        ]
+    if "style_constraints" in explicitly_set:
+        properties["style_constraints"] = request.style_constraints or {}
+    title = properties.get("title")
+    if title is None and "title" in properties:
+        raise HTTPException(status_code=409, detail="场景标题不能为空。")
+    return properties
+
+
+def _existing_project_structure_node(
+    graph,
+    *,
+    node_id: str,
+    project_id: str,
+    proposal: ProposalArtifact,
+    expected_type: str,
+):
+    try:
+        node = graph.get_node(node_id)
+    except GraphStoreError as exc:
+        if exc.category == "not_found":
+            return None
+        raise
+    if (
+        node.type == expected_type
+        and node.properties.get("project_id") == project_id
+        and node.properties.get("source_structure_proposal_id") == proposal.id
+        and _structure_source_version_matches(
+            node.properties.get("source_structure_proposal_version"),
+            proposal.version,
+        )
+    ):
+        return node
+    raise ContractError(
+        f"{expected_type} id already exists outside this project structure proposal: {node_id}"
+    )
+
+
+def _structure_source_version_matches(source_version, current_version: int) -> bool:
+    try:
+        version = int(source_version)
+    except (TypeError, ValueError):
+        return False
+    return 0 < version <= current_version
 
 
 def _structure_text(value) -> str:

@@ -25,6 +25,23 @@ class GraphQueryService:
         self.graph_store.get_node(project_id)
         return self.graph_store.get_node(node_id, include_non_canon=include_non_canon)
 
+    def list_project_nodes(self, *, project_id: str, node_type: str) -> list[dict]:
+        graph = self._snapshot()
+        graph.get_node(project_id)
+        if node_type not in NODE_LABELS:
+            raise ContractError(f"Unsupported node label: {node_type}")
+        nodes = [
+            node
+            for node in graph.nodes.values()
+            if node.type == node_type
+            and node.status == "CANON"
+            and self._belongs_to_project(node.properties, project_id=project_id)
+        ]
+        return [
+            node.model_dump()
+            for node in sorted(nodes, key=lambda item: (self._display_name(item).lower(), item.id))
+        ]
+
     def query_neighbors(
         self,
         *,
@@ -278,6 +295,10 @@ class GraphQueryService:
             "timeline_position": scene.properties.get("timeline_position"),
             "goal": scene.properties.get("goal"),
             "conflict": scene.properties.get("conflict"),
+            "outcome": scene.properties.get("outcome"),
+            "emotional_turn": scene.properties.get("emotional_turn"),
+            "previous_scene_id": scene.properties.get("previous_scene_id"),
+            "style_constraints": scene.properties.get("style_constraints"),
             "properties": scene.properties,
         }
 

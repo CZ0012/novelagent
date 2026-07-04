@@ -162,6 +162,7 @@ export type ProjectStructureApplyResult = {
   proposal: ProposalArtifact;
   chapters: GraphNodePayload[];
   scenes: GraphNodePayload[];
+  already_applied: boolean;
 };
 
 export type ProposalCandidatePromotionResult = {
@@ -187,6 +188,10 @@ export type SceneOutline = {
   timeline_position?: string | null;
   goal?: string | null;
   conflict?: string | null;
+  outcome?: string | null;
+  emotional_turn?: string | null;
+  previous_scene_id?: string | null;
+  style_constraints?: Record<string, unknown> | null;
   properties: Record<string, unknown>;
 };
 

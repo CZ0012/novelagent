@@ -40,6 +40,14 @@ Use the existing user-requested branch name if the user asks for one.
 | `codex/sg-004-github-release` | SG-004C | Release Creation Agent | `codex/sg-004-release-0.1.2` | Commit, push, tag, and publish GitHub Release assets for v0.1.2. | done | GitHub release `v0.1.2` |
 | `codex/sg-004-release-acceptance` | SG-004D | Review Agent | `codex/sg-004-release-0.1.2` | Verify the published GitHub latest release and updater metadata. | done | `codex/sg-004-release-0.1.2` |
 | `codex/sg-005-import-structure-draft` | SG-005 | Main Agent | `main` | Project-level imported novel analysis, `project_structure_draft` proposals, explicit apply-to-chapters/scenes, and sidebar project view/edit/create cleanup. | done | project default branch when ready |
+| `codex/sg-005-import-structure-draft` | SG-006 | Main Agent | current branch | Repeat-safe `project_structure_draft` apply semantics, API regression coverage, and Web notice handling. | done | project default branch when ready |
+| `codex/sg-005-import-structure-draft` | SG-007 | Main Agent | current branch | Existing Scene metadata edit route and Web controls for resolving imported structure scenes before writing. | done | project default branch when ready |
+| `codex/sg-005-import-structure-draft` | SG-008 | Main Agent | current branch | Project-scoped Character/Location list APIs and Web POV/location option controls. | done | project default branch when ready |
+| `codex/sg-005-import-structure-draft` | SG-009 | Main Agent | current branch | Existing Chapter metadata edit route and Web controls for correcting imported chapter structure. | done | project default branch when ready |
+| `codex/sg-005-import-structure-draft` | SG-010 | Main Agent | current branch | Complete Web Chapter metadata form coverage for volume, purpose, and status. | done | project default branch when ready |
+| `codex/sg-005-import-structure-draft` | SG-011 | Main Agent | current branch | Complete Web Scene metadata form coverage for outcome, emotional turn, previous scene, and status. | done | project default branch when ready |
+| `codex/sg-005-import-structure-draft` | SG-012 | Main Agent | current branch | Web Scene style constraint editor for Context Pack writing. | done | project default branch when ready |
+| `codex/sg-005-import-structure-draft` | SG-013 | Main Agent | current branch | Publish 0.1.6 software release/update assets and push GitHub state. | active | GitHub release `v0.1.6` / project default branch when ready |
 
 ## SG-002 Branch Notes
 
@@ -74,6 +82,61 @@ Use the existing user-requested branch name if the user asks for one.
 - Backend/API Creation Agent scope: project-level imported document analysis may create only a Proposal Artifact; accepted structure proposals can create Chapter/Scene graph nodes through explicit backend apply.
 - Check Agent scope: verify no imported manuscript text, API keys, or generated private prose enter Git or coordination files; generation must not write canon facts or CandidateFacts.
 - Final verification on 2026-06-22: focused project-structure API tests passed, full `python -m pytest -q` passed with 114 passed / 1 skipped, `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, local browser smoke confirmed no prominent demo initialization and import-first empty workspace copy, and `git diff --check` reported no whitespace errors.
+
+## SG-006 Branch Notes
+
+- Current implementation continues on `codex/sg-005-import-structure-draft` because SG-006 is a narrow follow-up to the same import-structure apply path.
+- Repeated apply must not create duplicate Chapter/Scene canon nodes, CandidateFacts, or unrelated story-bible nodes.
+- Existing target ids are reused only when their provenance matches the same structure proposal id and a non-future proposal version; unrelated id collisions remain conflicts.
+- Final verification on 2026-07-04: focused project-structure API tests, full Python tests, Ruff, Web build, and diff whitespace checks passed.
+
+## SG-007 Branch Notes
+
+- Current implementation continues on `codex/sg-005-import-structure-draft` because SG-007 follows the same imported-structure authoring path.
+- Scene metadata edits are explicit author operations; they may update an existing Scene node with provenance but must not create CandidateFacts, story-bible nodes, drafts, or proposal artifacts.
+- Imported `pov_label` and `location_label` remain hints until the author enters stable `pov_character_id` and `location_id` values.
+- Final verification on 2026-07-04: focused project-structure API tests, full Python tests, Ruff, Web build, and diff whitespace checks passed.
+
+## SG-008 Branch Notes
+
+- Current implementation continues on `codex/sg-005-import-structure-draft` because SG-008 supports the imported-structure scene metadata path.
+- Character/Location lists are read-only convenience APIs over existing canon nodes; they must not infer or create story-bible entries from imported labels.
+- Web controls should show stable IDs next to display names and keep manual ID entry possible for advanced author workflows.
+- Final verification on 2026-07-04: focused project-structure API tests, full Python tests, Ruff, Web build, and diff whitespace checks passed.
+
+## SG-009 Branch Notes
+
+- Current implementation continues on `codex/sg-005-import-structure-draft` because SG-009 supports the same imported-structure author correction path.
+- Chapter metadata edits are explicit author operations; they may update an existing Chapter node with provenance but must not create scenes, CandidateFacts, Drafts, Proposal Artifacts, or unrelated graph nodes.
+- Editing a Chapter title does not rename the stable chapter id; IDs remain stable graph refs.
+- Final verification on 2026-07-04: focused project-structure API tests, full Python tests, Ruff, Web build, and diff whitespace checks passed.
+
+## SG-010 Branch Notes
+
+- Current implementation continues on `codex/sg-005-import-structure-draft` because SG-010 completes the Chapter metadata editor introduced in SG-009.
+- The frontend should send only supported Chapter metadata fields and explicit author provenance to the existing Chapter PATCH route.
+- This task should not alter structure proposal application, scene creation, CandidateFact review, or story-bible seed semantics.
+- Final verification on 2026-07-04: full Python tests, Ruff, Web build, and diff whitespace checks passed.
+
+## SG-011 Branch Notes
+
+- Current implementation continues on `codex/sg-005-import-structure-draft` because SG-011 completes the Scene metadata editor introduced in SG-007.
+- Scene outcome, emotional turn, previous scene id, and status are planning metadata used by Context Pack / writing workflows; editing them must remain an explicit author operation with provenance.
+- This task should not alter CandidateFact extraction/review or structure proposal application semantics.
+- Final verification on 2026-07-04: focused project-structure API tests, full Python tests, Ruff, Web build, and diff whitespace checks passed.
+
+## SG-012 Branch Notes
+
+- Current implementation continues on `codex/sg-005-import-structure-draft` because SG-012 extends the Scene metadata editor for Context Pack writing.
+- Style samples remain soft retrieval guidance; `style_constraints` become hard Context Pack guidance only when the author explicitly edits the Scene metadata.
+- This task should not create style samples, CandidateFacts, Drafts, Proposal Artifacts, chapters, or unrelated graph nodes.
+- Final verification on 2026-07-04: focused project-structure API tests, full Python tests, Ruff, Web build, and diff whitespace checks passed.
+
+## SG-013 Branch Notes
+
+- Current implementation continues on `codex/sg-005-import-structure-draft` because the user asked to publish the accumulated MVP progress after SG-012.
+- GitHub work is only for software release/update distribution: commit/tag/push plus GitHub Release installer, `.sig`, and `latest.json`.
+- Do not publish local story workspace data, canon state, drafts, imported manuscript files, API keys, signing private keys, or generated private prose.
 
 ## Branch Entry Template
 

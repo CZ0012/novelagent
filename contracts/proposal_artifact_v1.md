@@ -177,6 +177,10 @@ structure only when:
   action.
 - The proposal is recorded as provenance for created Chapter/Scene nodes and
   derived refs are recorded back on the proposal.
+- Repeating the same apply action for an already-derived proposal MUST be
+  idempotent: implementations should return the previously derived Chapter and
+  Scene nodes, avoid duplicate Graph Store writes, and reject only when a target
+  node id is already owned by unrelated provenance.
 
 ## Canon Safety Invariants
 

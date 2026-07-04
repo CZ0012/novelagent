@@ -1,6 +1,6 @@
 [project]
 name = "storygraph-agent"
-version = "0.1.5"
+version = "0.1.6"
 description = "Canon-safe long-form fiction writing engine backed by structured story graph contracts."
 readme = "README.md"
 license = "MIT"

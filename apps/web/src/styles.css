@@ -297,6 +297,18 @@ details:not([open]) > summary.section-title::after {
   line-height: 1.35;
 }
 
+.scene-hints {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--muted);
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 8px 10px;
+}
+
 .sidebar-button-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));

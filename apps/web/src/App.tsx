@@ -114,8 +114,11 @@ type ProjectForm = {
 
 type ChapterForm = {
   title: string;
+  volume_index: string;
   chapter_index: string;
   summary: string;
+  purpose: string;
+  status: string;
 };
 
 type SceneForm = {
@@ -127,6 +130,18 @@ type SceneForm = {
   timeline_position: string;
   goal: string;
   conflict: string;
+  outcome: string;
+  emotional_turn: string;
+  previous_scene_id: string;
+  status: string;
+  style_pov: string;
+  style_tense: string;
+  style_tone: string;
+  style_sentence_rhythm: string;
+  style_diction: string;
+  style_dialogue_style: string;
+  style_banned_patterns: string;
+  required_characters: string;
   must_include: string;
   must_not_violate: string;
 };
@@ -213,8 +228,11 @@ const defaultProjectForm: ProjectForm = {
 
 const defaultChapterForm: ChapterForm = {
   title: "",
+  volume_index: "1",
   chapter_index: "1",
-  summary: ""
+  summary: "",
+  purpose: "",
+  status: "planned"
 };
 
 const defaultSceneForm: SceneForm = {
@@ -226,9 +244,30 @@ const defaultSceneForm: SceneForm = {
   timeline_position: "",
   goal: "",
   conflict: "",
+  outcome: "",
+  emotional_turn: "",
+  previous_scene_id: "",
+  status: "planned",
+  style_pov: "",
+  style_tense: "",
+  style_tone: "",
+  style_sentence_rhythm: "",
+  style_diction: "",
+  style_dialogue_style: "",
+  style_banned_patterns: "",
+  required_characters: "",
   must_include: "",
   must_not_violate: ""
 };
+
+const sceneStyleFieldMap: Array<[keyof SceneForm, string]> = [
+  ["style_pov", "pov"],
+  ["style_tense", "tense"],
+  ["style_tone", "tone"],
+  ["style_sentence_rhythm", "sentence_rhythm"],
+  ["style_diction", "diction"],
+  ["style_dialogue_style", "dialogue_style"]
+];
 
 const defaultCharacterForm: CharacterForm = {
   name: "",
@@ -271,6 +310,8 @@ export default function App() {
   const [continuityReport, setContinuityReport] = useState<ContinuityReport | null>(null);
   const [facts, setFacts] = useState<CandidateFact[]>([]);
   const [graphPreview, setGraphPreview] = useState<ProjectGraphPreview | null>(null);
+  const [storyCharacters, setStoryCharacters] = useState<GraphNodePayload[]>([]);
+  const [storyLocations, setStoryLocations] = useState<GraphNodePayload[]>([]);
   const [agentSettings, setAgentSettings] = useState<AgentSettings | null>(null);
   const [agentForm, setAgentForm] = useState<AgentSettingsUpdate>(defaultAgentForm);
   const [apiKeyInput, setApiKeyInput] = useState("");
@@ -305,6 +346,17 @@ export default function App() {
   const selectedScene = useMemo(
     () => findScene(projects, projectId, sceneId),
     [projectId, projects, sceneId]
+  );
+  const currentChapterId = useMemo(
+    () =>
+      findSceneChapterId(projects, projectId, sceneId) ??
+      selectedProject?.chapters[0]?.id ??
+      "",
+    [projectId, projects, sceneId, selectedProject]
+  );
+  const selectedChapter = useMemo(
+    () => selectedProject?.chapters.find((chapter) => chapter.id === currentChapterId) ?? null,
+    [currentChapterId, selectedProject]
   );
   const hasWorkspace = projects.length > 0;
   const hasScene = Boolean(projectId && sceneId);
@@ -485,6 +537,29 @@ export default function App() {
         `/projects/${targetProjectId}/graph/preview`
       );
       setGraphPreview(preview);
+    },
+    [apiBase, projectId]
+  );
+
+  const refreshStoryBibleRefs = useCallback(
+    async (targetProjectId = projectId) => {
+      if (!targetProjectId) {
+        setStoryCharacters([]);
+        setStoryLocations([]);
+        return;
+      }
+      const [characters, locations] = await Promise.all([
+        apiGet<{ characters: GraphNodePayload[] }>(
+          apiBase,
+          `/projects/${targetProjectId}/characters`
+        ),
+        apiGet<{ locations: GraphNodePayload[] }>(
+          apiBase,
+          `/projects/${targetProjectId}/locations`
+        )
+      ]);
+      setStoryCharacters(characters.characters);
+      setStoryLocations(locations.locations);
     },
     [apiBase, projectId]
   );
@@ -746,19 +821,52 @@ export default function App() {
     setNotice("项目信息已更新。");
   }, [apiBase, projectForm, projectId, refreshGraphPreview, refreshWorkspace, sceneId]);
 
+  const updateChapter = useCallback(async () => {
+    if (!projectId) throw new Error("请先选择项目。");
+    const targetChapterId = currentChapterId;
+    if (!targetChapterId) throw new Error("请先选择要整理的章节。");
+    if (!chapterForm.title.trim()) throw new Error("请填写章节标题。");
+    await apiPatch<GraphNodePayload>(apiBase, `/projects/${projectId}/chapters/${targetChapterId}`, {
+      title: chapterForm.title.trim(),
+      volume_index: toPositiveInteger(chapterForm.volume_index, 1),
+      chapter_index: toPositiveInteger(chapterForm.chapter_index, 1),
+      summary: chapterForm.summary.trim() || null,
+      purpose: chapterForm.purpose.trim() || null,
+      status: chapterForm.status.trim() || "planned",
+      reviewer: "author",
+      rationale: "作者从工作台整理章节元数据。",
+      source_ref: "author_seed:workbench_chapter_metadata"
+    });
+    await refreshWorkspace(projectId, sceneId);
+    await refreshGraphPreview(projectId);
+    setNotice("章节元数据已更新。");
+  }, [
+    apiBase,
+    chapterForm,
+    currentChapterId,
+    projectId,
+    refreshGraphPreview,
+    refreshWorkspace,
+    sceneId
+  ]);
+
   const createChapter = useCallback(async () => {
     if (!projectId) throw new Error("请先选择或创建项目。");
     if (!chapterForm.title.trim()) throw new Error("请填写章节标题。");
     await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/chapters`, {
       title: chapterForm.title.trim(),
+      volume_index: toPositiveInteger(chapterForm.volume_index, 1),
       chapter_index: toPositiveInteger(chapterForm.chapter_index, 1),
       summary: chapterForm.summary.trim() || null,
+      purpose: chapterForm.purpose.trim() || null,
+      status: chapterForm.status.trim() || "planned",
       reviewer: "author",
       rationale: "作者从工作台创建章节。",
       source_ref: "author_seed:workbench_outline"
     });
     setChapterForm((current) => ({
       ...defaultChapterForm,
+      volume_index: current.volume_index,
       chapter_index: String(toPositiveInteger(current.chapter_index, 1) + 1)
     }));
     await refreshWorkspace(projectId, sceneId);
@@ -782,10 +890,14 @@ export default function App() {
         timeline_position: sceneForm.timeline_position.trim() || null,
         goal: sceneForm.goal.trim() || null,
         conflict: sceneForm.conflict.trim() || null,
-        required_characters: splitLines(sceneForm.pov_character_id),
+        outcome: sceneForm.outcome.trim() || null,
+        emotional_turn: sceneForm.emotional_turn.trim() || null,
+        previous_scene_id: sceneForm.previous_scene_id.trim() || null,
+        style_constraints: sceneStyleConstraints(sceneForm),
+        required_characters: splitLines(sceneForm.required_characters),
         must_include: splitLines(sceneForm.must_include),
         must_not_violate: splitLines(sceneForm.must_not_violate),
-        status: "planned",
+        status: sceneForm.status.trim() || "planned",
         reviewer: "author",
         rationale: "作者从工作台创建场景。",
         source_ref: "author_seed:workbench_outline"
@@ -801,10 +913,47 @@ export default function App() {
     setNotice("场景已创建，可保存草稿或运行 Agent 工作流。");
   }, [apiBase, projectId, refreshGraphPreview, refreshWorkspace, sceneForm, selectedProject]);
 
+  const updateScene = useCallback(async () => {
+    if (!projectId || !sceneId) throw new Error("请先选择要整理的场景。");
+    if (!sceneForm.title.trim()) throw new Error("请填写场景标题。");
+    await apiPatch<GraphNodePayload>(apiBase, `/projects/${projectId}/scenes/${sceneId}`, {
+      title: sceneForm.title.trim(),
+      scene_index: toPositiveInteger(sceneForm.scene_index, selectedScene?.scene_index ?? 1),
+      pov_character_id: sceneForm.pov_character_id.trim() || null,
+      location_id: sceneForm.location_id.trim() || null,
+      timeline_position: sceneForm.timeline_position.trim() || null,
+      goal: sceneForm.goal.trim() || null,
+      conflict: sceneForm.conflict.trim() || null,
+      outcome: sceneForm.outcome.trim() || null,
+      emotional_turn: sceneForm.emotional_turn.trim() || null,
+      previous_scene_id: sceneForm.previous_scene_id.trim() || null,
+      style_constraints: sceneStyleConstraints(sceneForm),
+      required_characters: splitLines(sceneForm.required_characters),
+      must_include: splitLines(sceneForm.must_include),
+      must_not_violate: splitLines(sceneForm.must_not_violate),
+      status: sceneForm.status.trim() || "planned",
+      reviewer: "author",
+      rationale: "作者从工作台整理场景元数据。",
+      source_ref: "author_seed:workbench_scene_metadata"
+    });
+    await refreshWorkspace(projectId, sceneId);
+    await refreshGraphPreview(projectId);
+    setContextPack(null);
+    setNotice("场景元数据已更新；可以重新构建 Context Pack。");
+  }, [
+    apiBase,
+    projectId,
+    refreshGraphPreview,
+    refreshWorkspace,
+    sceneForm,
+    sceneId,
+    selectedScene
+  ]);
+
   const createCharacter = useCallback(async () => {
     if (!projectId) throw new Error("请先选择或创建项目。");
     if (!characterForm.name.trim()) throw new Error("请填写人物名称。");
-    await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/characters`, {
+    const node = await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/characters`, {
       name: characterForm.name.trim(),
       properties: { role: characterForm.role.trim() || undefined },
       reviewer: "author",
@@ -812,14 +961,18 @@ export default function App() {
       source_ref: "author_seed:workbench_story_bible"
     });
     setCharacterForm(defaultCharacterForm);
+    setSceneForm((current) =>
+      current.pov_character_id ? current : { ...current, pov_character_id: node.id }
+    );
+    await refreshStoryBibleRefs(projectId);
     await refreshGraphPreview(projectId);
-    setNotice("人物已写入 canon seed。可把生成的 character_id 填到场景视角中。");
-  }, [apiBase, characterForm, projectId, refreshGraphPreview]);
+    setNotice(`人物已写入 canon seed：${node.id}。`);
+  }, [apiBase, characterForm, projectId, refreshGraphPreview, refreshStoryBibleRefs]);
 
   const createLocation = useCallback(async () => {
     if (!projectId) throw new Error("请先选择或创建项目。");
     if (!locationForm.name.trim()) throw new Error("请填写地点名称。");
-    await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/locations`, {
+    const node = await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/locations`, {
       name: locationForm.name.trim(),
       properties: { type: locationForm.type.trim() || undefined },
       reviewer: "author",
@@ -827,9 +980,13 @@ export default function App() {
       source_ref: "author_seed:workbench_story_bible"
     });
     setLocationForm(defaultLocationForm);
+    setSceneForm((current) =>
+      current.location_id ? current : { ...current, location_id: node.id }
+    );
+    await refreshStoryBibleRefs(projectId);
     await refreshGraphPreview(projectId);
-    setNotice("地点已写入 canon seed。");
-  }, [apiBase, locationForm, projectId, refreshGraphPreview]);
+    setNotice(`地点已写入 canon seed：${node.id}。`);
+  }, [apiBase, locationForm, projectId, refreshGraphPreview, refreshStoryBibleRefs]);
 
   const createWorldRule = useCallback(async () => {
     if (!projectId) throw new Error("请先选择或创建项目。");
@@ -1252,7 +1409,9 @@ export default function App() {
       setWorkspaceTab("write");
     }
     setNotice(
-      `已应用项目结构：创建 ${result.chapters.length} 个章节、${result.scenes.length} 个场景；canon 事实仍未改变。`
+      result.already_applied
+        ? `该项目结构已应用过：复用 ${result.chapters.length} 个章节、${result.scenes.length} 个场景；canon 事实仍未改变。`
+        : `已应用项目结构：创建 ${result.chapters.length} 个章节、${result.scenes.length} 个场景；canon 事实仍未改变。`
     );
   }, [
     apiBase,
@@ -1361,6 +1520,10 @@ export default function App() {
   }, [projectId, refreshGraphPreview]);
 
   useEffect(() => {
+    refreshStoryBibleRefs(projectId).catch(() => undefined);
+  }, [projectId, refreshStoryBibleRefs]);
+
+  useEffect(() => {
     refreshLatestDraft().catch(() => undefined);
   }, [refreshLatestDraft]);
 
@@ -1423,7 +1586,6 @@ export default function App() {
       document.execCommand(command);
     }
   }, []);
-  const currentChapterId = selectedProject?.chapters[0]?.id ?? "";
   const backendStatusLabel = desktopBackend ? formatDesktopBackendLabel(desktopBackend) : "FastAPI";
   const backendStatusTone = desktopBackend ? desktopBackendTone(desktopBackend) : "good";
 
@@ -1542,13 +1704,19 @@ export default function App() {
               setRunEvents([]);
               setContinuityReport(null);
             }}
+            onUpdateChapter={() => runAction("update-chapter", updateChapter)}
+            onUpdateScene={() => runAction("update-scene", updateScene)}
             onWorldRuleFormChange={setWorldRuleForm}
             projectForm={projectForm}
             projectId={projectId}
             projects={projects}
             sceneForm={sceneForm}
             sceneId={sceneId}
+            selectedChapter={selectedChapter}
             selectedProject={selectedProject}
+            selectedScene={selectedScene}
+            storyCharacters={storyCharacters}
+            storyLocations={storyLocations}
             workspaceLoaded={workspaceLoaded}
             worldRuleForm={worldRuleForm}
           />
@@ -2124,13 +2292,19 @@ function ProjectSidebar({
   onSceneFormChange,
   onSelectProject,
   onSelectScene,
+  onUpdateChapter,
+  onUpdateScene,
   onWorldRuleFormChange,
   projectForm,
   projectId,
   projects,
   sceneForm,
   sceneId,
+  selectedChapter,
   selectedProject,
+  selectedScene,
+  storyCharacters,
+  storyLocations,
   workspaceLoaded,
   worldRuleForm
 }: {
@@ -2157,13 +2331,19 @@ function ProjectSidebar({
   onSceneFormChange: React.Dispatch<React.SetStateAction<SceneForm>>;
   onSelectProject: (projectId: string) => void;
   onSelectScene: (sceneId: string) => void;
+  onUpdateChapter: () => void;
+  onUpdateScene: () => void;
   onWorldRuleFormChange: React.Dispatch<React.SetStateAction<WorldRuleForm>>;
   projectForm: ProjectForm;
   projectId: string;
   projects: ProjectOutline[];
   sceneForm: SceneForm;
   sceneId: string;
+  selectedChapter: ChapterOutline | null;
   selectedProject: ProjectOutline | null;
+  selectedScene: SceneOutline | null;
+  storyCharacters: GraphNodePayload[];
+  storyLocations: GraphNodePayload[];
   workspaceLoaded: boolean;
   worldRuleForm: WorldRuleForm;
 }) {
@@ -2171,7 +2351,10 @@ function ProjectSidebar({
   const sceneChapterId = sceneForm.chapter_id || currentChapterId;
   const selectedBuiltinDemo = selectedProject?.id === "project_fantasy_demo";
   const [projectPanelMode, setProjectPanelMode] = useState<"view" | "create" | "edit">("view");
-  const projectSceneCount = selectedProject ? flattenScenes(selectedProject).length : 0;
+  const projectScenes = selectedProject ? flattenScenes(selectedProject) : [];
+  const projectSceneCount = projectScenes.length;
+  const importedPovLabel = stringProperty(selectedScene?.properties, "pov_label");
+  const importedLocationLabel = stringProperty(selectedScene?.properties, "location_label");
 
   useEffect(() => {
     if (workspaceLoaded && !hasWorkspace) {
@@ -2189,6 +2372,16 @@ function ProjectSidebar({
       onProjectFormChange(projectToForm(selectedProject));
     }
     setProjectPanelMode("edit");
+  };
+
+  const loadSelectedScene = () => {
+    if (!selectedScene) return;
+    onSceneFormChange(sceneToForm(selectedScene, currentChapterId));
+  };
+
+  const loadSelectedChapter = () => {
+    if (!selectedChapter) return;
+    onChapterFormChange(chapterToForm(selectedChapter));
   };
 
   return (
@@ -2394,6 +2587,16 @@ function ProjectSidebar({
           />
           <div className="compact-grid">
             <input
+              placeholder="卷序号"
+              value={chapterForm.volume_index}
+              onChange={(event) =>
+                onChapterFormChange((current) => ({
+                  ...current,
+                  volume_index: event.target.value
+                }))
+              }
+            />
+            <input
               placeholder="章节序号"
               value={chapterForm.chapter_index}
               onChange={(event) =>
@@ -2403,6 +2606,22 @@ function ProjectSidebar({
                 }))
               }
             />
+          </div>
+          <div className="compact-grid">
+            <select
+              value={chapterForm.status}
+              onChange={(event) =>
+                onChapterFormChange((current) => ({
+                  ...current,
+                  status: event.target.value
+                }))
+              }
+              aria-label="章节状态"
+            >
+              {chapterStatusOptions.map((status) => (
+                <option key={status} value={status}>{formatStatus(status)}</option>
+              ))}
+            </select>
             <button
               disabled={!canReview || !projectId || busy !== null}
               onClick={onCreateChapter}
@@ -2412,12 +2631,37 @@ function ProjectSidebar({
             </button>
           </div>
           <input
+            placeholder="章节目的"
+            value={chapterForm.purpose}
+            onChange={(event) =>
+              onChapterFormChange((current) => ({ ...current, purpose: event.target.value }))
+            }
+          />
+          <input
             placeholder="章节摘要"
             value={chapterForm.summary}
             onChange={(event) =>
               onChapterFormChange((current) => ({ ...current, summary: event.target.value }))
             }
           />
+          <div className="compact-grid">
+            <button
+              disabled={!selectedChapter || busy !== null}
+              onClick={loadSelectedChapter}
+              type="button"
+              title="把当前选中的章节载入上方表单"
+            >
+              <BookOpen size={15} /> 载入当前章节
+            </button>
+            <button
+              disabled={!canReview || !selectedChapter || busy !== null}
+              onClick={onUpdateChapter}
+              type="button"
+              title={canReview ? "保存当前选中章节的元数据" : "需要完全权限"}
+            >
+              <Save size={15} /> 保存章节元数据
+            </button>
+          </div>
           <select
             value={sceneChapterId}
             onChange={(event) =>
@@ -2465,7 +2709,78 @@ function ProjectSidebar({
               <Save size={15} /> 添加场景
             </button>
           </div>
+          <div className="compact-grid">
+            <button
+              disabled={!selectedScene || busy !== null}
+              onClick={loadSelectedScene}
+              type="button"
+              title="把当前选中的场景载入下方表单"
+            >
+              <FileText size={15} /> 载入当前场景
+            </button>
+            <button
+              disabled={!canReview || !selectedScene || busy !== null}
+              onClick={onUpdateScene}
+              type="button"
+              title={canReview ? "保存当前选中场景的元数据" : "需要完全权限"}
+            >
+              <Save size={15} /> 保存场景元数据
+            </button>
+          </div>
+          {(importedPovLabel || importedLocationLabel) && (
+            <div className="scene-hints">
+              {importedPovLabel && <span>POV: {localizeText(importedPovLabel)}</span>}
+              {importedLocationLabel && <span>地点: {localizeText(importedLocationLabel)}</span>}
+            </div>
+          )}
+          <datalist id="story-character-options">
+            {storyCharacters.map((node) => (
+              <option key={node.id} value={node.id} label={graphNodeOptionLabel(node)} />
+            ))}
+          </datalist>
+          <datalist id="story-location-options">
+            {storyLocations.map((node) => (
+              <option key={node.id} value={node.id} label={graphNodeOptionLabel(node)} />
+            ))}
+          </datalist>
+          <datalist id="project-scene-options">
+            {projectScenes
+              .filter((scene) => scene.id !== selectedScene?.id)
+              .map((scene) => (
+                <option key={scene.id} value={scene.id} label={localizeText(scene.title)} />
+              ))}
+          </datalist>
+          <div className="compact-grid">
+            <select
+              value={sceneForm.status}
+              onChange={(event) =>
+                onSceneFormChange((current) => ({
+                  ...current,
+                  status: event.target.value
+                }))
+              }
+              aria-label="场景状态"
+            >
+              {sceneStatusOptions.map((status) => (
+                <option key={status} value={status}>
+                  {formatStatus(status)}
+                </option>
+              ))}
+            </select>
+            <input
+              list="project-scene-options"
+              placeholder="previous_scene_id"
+              value={sceneForm.previous_scene_id}
+              onChange={(event) =>
+                onSceneFormChange((current) => ({
+                  ...current,
+                  previous_scene_id: event.target.value
+                }))
+              }
+            />
+          </div>
           <input
+            list="story-character-options"
             placeholder="POV character_id"
             value={sceneForm.pov_character_id}
             onChange={(event) =>
@@ -2476,6 +2791,7 @@ function ProjectSidebar({
             }
           />
           <input
+            list="story-location-options"
             placeholder="location_id"
             value={sceneForm.location_id}
             onChange={(event) =>
@@ -2507,6 +2823,101 @@ function ProjectSidebar({
             value={sceneForm.conflict}
             onChange={(event) =>
               onSceneFormChange((current) => ({ ...current, conflict: event.target.value }))
+            }
+          />
+          <div className="compact-grid">
+            <input
+              placeholder="场景结果"
+              value={sceneForm.outcome}
+              onChange={(event) =>
+                onSceneFormChange((current) => ({ ...current, outcome: event.target.value }))
+              }
+            />
+            <input
+              placeholder="情绪转折"
+              value={sceneForm.emotional_turn}
+              onChange={(event) =>
+                onSceneFormChange((current) => ({
+                  ...current,
+                  emotional_turn: event.target.value
+                }))
+              }
+            />
+          </div>
+          <div className="compact-grid">
+            <input
+              placeholder="风格 POV"
+              value={sceneForm.style_pov}
+              onChange={(event) =>
+                onSceneFormChange((current) => ({ ...current, style_pov: event.target.value }))
+              }
+            />
+            <input
+              placeholder="时态"
+              value={sceneForm.style_tense}
+              onChange={(event) =>
+                onSceneFormChange((current) => ({ ...current, style_tense: event.target.value }))
+              }
+            />
+          </div>
+          <div className="compact-grid">
+            <input
+              placeholder="语气"
+              value={sceneForm.style_tone}
+              onChange={(event) =>
+                onSceneFormChange((current) => ({ ...current, style_tone: event.target.value }))
+              }
+            />
+            <input
+              placeholder="句式节奏"
+              value={sceneForm.style_sentence_rhythm}
+              onChange={(event) =>
+                onSceneFormChange((current) => ({
+                  ...current,
+                  style_sentence_rhythm: event.target.value
+                }))
+              }
+            />
+          </div>
+          <div className="compact-grid">
+            <input
+              placeholder="用词"
+              value={sceneForm.style_diction}
+              onChange={(event) =>
+                onSceneFormChange((current) => ({ ...current, style_diction: event.target.value }))
+              }
+            />
+            <input
+              placeholder="对话风格"
+              value={sceneForm.style_dialogue_style}
+              onChange={(event) =>
+                onSceneFormChange((current) => ({
+                  ...current,
+                  style_dialogue_style: event.target.value
+                }))
+              }
+            />
+          </div>
+          <textarea
+            className="mini-textarea"
+            placeholder="禁用表达：每行一条"
+            value={sceneForm.style_banned_patterns}
+            onChange={(event) =>
+              onSceneFormChange((current) => ({
+                ...current,
+                style_banned_patterns: event.target.value
+              }))
+            }
+          />
+          <textarea
+            className="mini-textarea"
+            placeholder="出场人物 IDs：每行一条"
+            value={sceneForm.required_characters}
+            onChange={(event) =>
+              onSceneFormChange((current) => ({
+                ...current,
+                required_characters: event.target.value
+              }))
             }
           />
           <textarea
@@ -3334,6 +3745,9 @@ const proposalStatuses: ProposalStatus[] = [
   "rejected"
 ];
 
+const chapterStatusOptions = ["planned", "drafting", "completed", "archived"];
+const sceneStatusOptions = ["planned", "drafting", "completed", "archived"];
+
 const proposalTypeLabels: Record<ProposalArtifactType, string> = {
   scene_draft: "场景草稿",
   fact_draft: "事实草稿",
@@ -3370,6 +3784,8 @@ const statusLabels: Record<string, string> = {
   idle: "空闲",
   pending: "等待中",
   planned: "已规划",
+  drafting: "起草中",
+  archived: "已归档",
   running: "运行中",
   completed: "已完成",
   pass: "通过",
@@ -3444,6 +3860,111 @@ function findScene(
   const project = projects.find((item) => item.id === projectId);
   if (!project) return null;
   return flattenScenes(project).find((scene) => scene.id === sceneId) ?? null;
+}
+
+function findSceneChapterId(
+  projects: ProjectOutline[],
+  projectId: string,
+  sceneId: string
+): string | null {
+  const project = projects.find((item) => item.id === projectId);
+  if (!project) return null;
+  const chapter = project.chapters.find((item) =>
+    item.scenes.some((scene) => scene.id === sceneId)
+  );
+  return chapter?.id ?? null;
+}
+
+function sceneToForm(scene: SceneOutline, chapterId: string): SceneForm {
+  const styleConstraints = validObject(scene.style_constraints)
+    ? scene.style_constraints
+    : objectProperty(scene.properties, "style_constraints");
+  return {
+    chapter_id: chapterId,
+    title: scene.title ?? "",
+    scene_index: String(scene.scene_index ?? 1),
+    pov_character_id: scene.pov_character_id ?? "",
+    location_id: scene.location_id ?? "",
+    timeline_position: scene.timeline_position ?? "",
+    goal: scene.goal ?? "",
+    conflict: scene.conflict ?? "",
+    outcome: scene.outcome ?? stringProperty(scene.properties, "outcome"),
+    emotional_turn: scene.emotional_turn ?? stringProperty(scene.properties, "emotional_turn"),
+    previous_scene_id: scene.previous_scene_id ?? stringProperty(scene.properties, "previous_scene_id"),
+    status: (scene.status ?? stringProperty(scene.properties, "status")) || "planned",
+    style_pov: stringProperty(styleConstraints, "pov"),
+    style_tense: stringProperty(styleConstraints, "tense"),
+    style_tone: stringProperty(styleConstraints, "tone"),
+    style_sentence_rhythm: stringProperty(styleConstraints, "sentence_rhythm"),
+    style_diction: stringProperty(styleConstraints, "diction"),
+    style_dialogue_style: stringProperty(styleConstraints, "dialogue_style"),
+    style_banned_patterns: stringArrayProperty(styleConstraints, "banned_patterns").join("\n"),
+    required_characters: stringArrayProperty(scene.properties, "required_characters").join("\n"),
+    must_include: stringArrayProperty(scene.properties, "must_include").join("\n"),
+    must_not_violate: stringArrayProperty(scene.properties, "must_not_violate").join("\n")
+  };
+}
+
+function chapterToForm(chapter: ChapterOutline): ChapterForm {
+  return {
+    title: chapter.title ?? "",
+    volume_index: String(chapter.volume_index ?? 1),
+    chapter_index: String(chapter.chapter_index ?? 1),
+    summary: chapter.summary ?? "",
+    purpose: chapter.purpose ?? "",
+    status: chapter.status ?? "planned"
+  };
+}
+
+function sceneStyleConstraints(form: SceneForm): Record<string, unknown> {
+  const constraints: Record<string, unknown> = {};
+  sceneStyleFieldMap.forEach(([formKey, constraintKey]) => {
+    const value = form[formKey].trim();
+    if (value) {
+      constraints[constraintKey] = value;
+    }
+  });
+  const bannedPatterns = splitLines(form.style_banned_patterns);
+  if (bannedPatterns.length) {
+    constraints.banned_patterns = bannedPatterns;
+  }
+  return constraints;
+}
+
+function validObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function objectProperty(
+  properties: Record<string, unknown> | undefined,
+  key: string
+): Record<string, unknown> {
+  const value = properties?.[key];
+  return validObject(value) ? value : {};
+}
+
+function stringProperty(
+  properties: Record<string, unknown> | undefined,
+  key: string
+): string {
+  const value = properties?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+function stringArrayProperty(
+  properties: Record<string, unknown>,
+  key: string
+): string[] {
+  const value = properties[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function graphNodeOptionLabel(node: GraphNodePayload): string {
+  const label = String(
+    node.properties.name ?? node.properties.title ?? node.properties.rule ?? node.id
+  );
+  return label === node.id ? node.id : `${label} / ${node.id}`;
 }
 
 function splitLines(value: string): string[] {
