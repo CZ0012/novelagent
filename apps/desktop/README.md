@@ -8,6 +8,12 @@ The desktop shell is a buildable source-level Tauri project. It includes npm scr
 
 It can produce a local Windows executable, updater artifacts, and NSIS installer. The generated `.exe`, backend sidecar, NSIS setup executable, and `setup.exe.sig` Tauri updater signature are local build outputs, not checked-in or published release artifacts.
 
+## 中文优先与本地化入口
+
+桌面包复用 `apps/web` 构建出的同一个 React 工作台。用户可见 UI 文案的主入口是 `apps/web/src/localization/zh-CN.ts` 和 `apps/web/src/localization/index.ts`；桌面层只保留少量 Tauri 原生可见文案，例如窗口标题、系统托盘菜单和托盘提示。当前窗口标题为 `StoryGraph 写作台`，托盘菜单使用 `显示主界面` / `退出 StoryGraph 写作台`。
+
+本地化文案属于显示层。它不得写入 Graph Store、Draft Store、Context Pack、CandidateFact、Proposal Artifact 或 Event Log；桌面层也不得通过本地化标签绕过 ReviewService。`StoryGraph Agent`、`FastAPI`、`Tauri`、`GitHub Release` 和 contract 名称可作为品牌或协议名保留，但面向作者的说明应中文优先。
+
 Use the project through one of these surfaces:
 
 - CLI workspace for persistent command-line authoring.
@@ -43,6 +49,8 @@ Inside the hosted workbench, the project tree comes from the backend `/projects`
 Local document import remains a browser-memory reader by default. From the reader, an author can explicitly save a ready document as a Proposal Store collaboration draft, save it as the current scene Draft Store draft, save it as a StyleSample Store style sample, or save it as a draft and then extract pending `CandidateFact` records. None of those paths directly writes Graph Store canon.
 
 The hosted workbench includes `协作草稿箱`, backed by the same FastAPI Proposal Store routes used in the browser. Proposal artifacts are non-canon project data: accepting one does not write canon, and promotion to Draft Store or pending CandidateFacts still goes through backend permission and review boundaries.
+
+The hosted workbench also includes the `Agent` discussion tab. It can send the current scene, highlighted draft text, imported local-library snippets, and optional web-search snippets to the configured OpenAI-compatible LLM through the same FastAPI backend. The result is saved only as a Proposal Store `scene_rebuild` or `scene_draft` artifact; it does not overwrite Draft Store, create CandidateFacts, or write Graph Store canon.
 
 ## Build Commands
 
@@ -102,10 +110,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.6_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.6_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.6_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.6_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.7_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.7_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -170,6 +178,7 @@ Agent settings persist with the backend workspace. Saving the permission level i
 - Generated drafts, summaries, proposal artifacts, imported text, frontend placeholders, and model hypotheses must not be promoted to canon by the desktop process.
 - Web workbench graph/timeline previews must come from backend APIs and must not be treated as the desktop workspace, Context Pack input, Draft Store source, CandidateFact evidence, or Graph Store state unless the backend returned them.
 - Imported documents may become Proposal Store artifacts, Draft Store drafts, StyleSample Store samples, or pending CandidateFacts only through explicit backend actions; review is still required before any extracted fact becomes canon.
+- Agent discussion and selected-text rewrite output may become Proposal Store artifacts only; accepting and promoting an accepted proposal is still the explicit backend path before Draft Store changes.
 - The Agent workflow run button follows `build_context`, `write_draft`, `check_continuity`, `extract_state`, and `human_review`; the review pause is not itself a canon commit.
 - The desktop layer may orchestrate processes, settings, health checks, logs, workspace selection, and windows.
 - The desktop layer may orchestrate signed updater checks and installation, but updater metadata must not be treated as story data.

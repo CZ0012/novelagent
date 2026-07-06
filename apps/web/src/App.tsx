@@ -24,20 +24,27 @@ import {
   KeyRound,
   Library,
   Lock,
+  MapPin,
+  MessageSquare,
   Network,
   Play,
   Redo2,
   RefreshCw,
   Save,
+  Search,
   Settings,
   ShieldCheck,
   SplitSquareVertical,
   Undo2,
+  UserRound,
   Wand2,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AgentDiscussionMode,
+  AgentDiscussionRequest,
+  AgentDiscussionResult,
   AgentPermissionLevel,
   AgentSettings,
   AgentSettingsUpdate,
@@ -67,12 +74,31 @@ import {
   apiPost,
   apiPut
 } from "./api";
-import { localizeStatus, localizeText } from "./localization";
+import {
+  APP_LOCALE,
+  appText,
+  defaultPermissionDescriptions,
+  formatDimension,
+  formatIssueType,
+  formatKnownMessage,
+  formatProvenanceMethod,
+  formatRefKind,
+  formatSeverity,
+  formatStatus,
+  localizedTerms,
+  localizeText,
+  permissionLabels,
+  proposalStatusLabels,
+  proposalTypeLabels,
+  reviewActionLabels,
+  stepLabels,
+  uiText
+} from "./localization";
 import { APP_VERSION, GITHUB_LATEST_RELEASE_API } from "./version";
 import "./styles.css";
 
 type InspectorTab = "context" | "continuity" | "facts" | "settings";
-type WorkspaceTab = "write" | "sources" | "proposals" | "workflow";
+type WorkspaceTab = "write" | "sources" | "agent" | "proposals" | "workflow";
 type LibraryDocumentKind = "txt" | "md" | "docx";
 type LibraryDocumentStatus = "ready" | "error";
 
@@ -160,6 +186,17 @@ type WorldRuleForm = {
   domain: string;
   rule: string;
   severity: string;
+};
+
+type AgentDiscussionForm = {
+  mode: AgentDiscussionMode;
+  instruction: string;
+  selectedText: string;
+  includeContextPack: boolean;
+  includeLatestDraft: boolean;
+  includeLibrarySources: boolean;
+  allowWebSearch: boolean;
+  webSearchQuery: string;
 };
 
 type UpdateStatus = {
@@ -285,6 +322,17 @@ const defaultWorldRuleForm: WorldRuleForm = {
   severity: "medium"
 };
 
+const defaultAgentDiscussionForm: AgentDiscussionForm = {
+  mode: "discuss",
+  instruction: "",
+  selectedText: "",
+  includeContextPack: true,
+  includeLatestDraft: true,
+  includeLibrarySources: true,
+  allowWebSearch: false,
+  webSearchQuery: ""
+};
+
 export default function App() {
   const [apiBase, setApiBase] = useState("http://127.0.0.1:8000");
   const [projects, setProjects] = useState<ProjectOutline[]>([]);
@@ -322,6 +370,12 @@ export default function App() {
   const [characterForm, setCharacterForm] = useState<CharacterForm>(defaultCharacterForm);
   const [locationForm, setLocationForm] = useState<LocationForm>(defaultLocationForm);
   const [worldRuleForm, setWorldRuleForm] = useState<WorldRuleForm>(defaultWorldRuleForm);
+  const [agentDiscussionForm, setAgentDiscussionForm] =
+    useState<AgentDiscussionForm>(defaultAgentDiscussionForm);
+  const [agentDiscussionResult, setAgentDiscussionResult] =
+    useState<AgentDiscussionResult | null>(null);
+  const [draftSelection, setDraftSelection] = useState("");
+  const draftTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [desktopUpdate, setDesktopUpdate] = useState<TauriUpdate | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
     state: "idle",
@@ -375,6 +429,10 @@ export default function App() {
   const selectedProposal = useMemo(
     () => proposals.find((proposal) => proposal.id === selectedProposalId) ?? null,
     [proposals, selectedProposalId]
+  );
+  const agentDiscussionSources = useMemo(
+    () => selectAgentDiscussionSources(libraryDocuments, selectedLibraryDocumentId),
+    [libraryDocuments, selectedLibraryDocumentId]
   );
   const visibleProposals = useMemo(
     () =>
@@ -486,7 +544,7 @@ export default function App() {
     setLibraryDocuments([]);
     setSelectedLibraryDocumentId(null);
     setExpandedLibraryPaths(new Set(["library"]));
-    setNotice("本地资料已清空，canon（正典）未改变。");
+    setNotice(uiText.notices.localLibraryCleared);
   }, []);
 
   const refreshWorkspace = useCallback(
@@ -871,7 +929,7 @@ export default function App() {
     }));
     await refreshWorkspace(projectId, sceneId);
     await refreshGraphPreview(projectId);
-    setNotice("章节已写入 canon seed。");
+    setNotice(uiText.notices.chapterCreated);
   }, [apiBase, chapterForm, projectId, refreshGraphPreview, refreshWorkspace, sceneId]);
 
   const createScene = useCallback(async () => {
@@ -910,7 +968,7 @@ export default function App() {
     }));
     await refreshWorkspace(projectId, result.id);
     await refreshGraphPreview(projectId);
-    setNotice("场景已创建，可保存草稿或运行 Agent 工作流。");
+    setNotice(uiText.notices.sceneCreated);
   }, [apiBase, projectId, refreshGraphPreview, refreshWorkspace, sceneForm, selectedProject]);
 
   const updateScene = useCallback(async () => {
@@ -939,7 +997,7 @@ export default function App() {
     await refreshWorkspace(projectId, sceneId);
     await refreshGraphPreview(projectId);
     setContextPack(null);
-    setNotice("场景元数据已更新；可以重新构建 Context Pack。");
+    setNotice(uiText.notices.sceneUpdated);
   }, [
     apiBase,
     projectId,
@@ -953,6 +1011,7 @@ export default function App() {
   const createCharacter = useCallback(async () => {
     if (!projectId) throw new Error("请先选择或创建项目。");
     if (!characterForm.name.trim()) throw new Error("请填写人物名称。");
+    const shouldFillCurrentScene = !sceneForm.pov_character_id.trim();
     const node = await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/characters`, {
       name: characterForm.name.trim(),
       properties: { role: characterForm.role.trim() || undefined },
@@ -962,16 +1021,27 @@ export default function App() {
     });
     setCharacterForm(defaultCharacterForm);
     setSceneForm((current) =>
-      current.pov_character_id ? current : { ...current, pov_character_id: node.id }
+      current.pov_character_id
+        ? current
+        : {
+            ...current,
+            pov_character_id: node.id,
+            required_characters: appendLineIfMissing(current.required_characters, node.id)
+          }
     );
     await refreshStoryBibleRefs(projectId);
     await refreshGraphPreview(projectId);
-    setNotice(`人物已写入 canon seed：${node.id}。`);
-  }, [apiBase, characterForm, projectId, refreshGraphPreview, refreshStoryBibleRefs]);
+    setNotice(
+      shouldFillCurrentScene
+        ? `人物已写入${localizedTerms.canonSeed}：${node.id}；已填入场景视角和出场人物表单，保存场景元数据后生效。`
+        : `人物已写入${localizedTerms.canonSeed}：${node.id}。`
+    );
+  }, [apiBase, characterForm, projectId, refreshGraphPreview, refreshStoryBibleRefs, sceneForm]);
 
   const createLocation = useCallback(async () => {
     if (!projectId) throw new Error("请先选择或创建项目。");
     if (!locationForm.name.trim()) throw new Error("请填写地点名称。");
+    const shouldFillCurrentScene = !sceneForm.location_id.trim();
     const node = await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/locations`, {
       name: locationForm.name.trim(),
       properties: { type: locationForm.type.trim() || undefined },
@@ -985,8 +1055,12 @@ export default function App() {
     );
     await refreshStoryBibleRefs(projectId);
     await refreshGraphPreview(projectId);
-    setNotice(`地点已写入 canon seed：${node.id}。`);
-  }, [apiBase, locationForm, projectId, refreshGraphPreview, refreshStoryBibleRefs]);
+    setNotice(
+      shouldFillCurrentScene
+        ? `地点已写入${localizedTerms.canonSeed}：${node.id}；已填入场景地点表单，保存场景元数据后生效。`
+        : `地点已写入${localizedTerms.canonSeed}：${node.id}。`
+    );
+  }, [apiBase, locationForm, projectId, refreshGraphPreview, refreshStoryBibleRefs, sceneForm]);
 
   const createWorldRule = useCallback(async () => {
     if (!projectId) throw new Error("请先选择或创建项目。");
@@ -1003,7 +1077,7 @@ export default function App() {
     });
     setWorldRuleForm(defaultWorldRuleForm);
     await refreshGraphPreview(projectId);
-    setNotice("世界规则已写入 canon seed。");
+    setNotice(uiText.notices.worldRuleCreated);
   }, [apiBase, projectId, refreshGraphPreview, worldRuleForm]);
 
   const saveDocumentAsDraft = useCallback(
@@ -1018,7 +1092,7 @@ export default function App() {
       setDraftText(saved.text);
       setDraftSummary(saved.summary ?? "");
       setWorkspaceTab("write");
-      setNotice(`已把“${document.name}”保存为草稿 v${saved.version}；canon 未改变。`);
+      setNotice(`已把“${document.name}”保存为草稿 v${saved.version}；正典未改变。`);
       return saved;
     },
     [apiBase, endpoint]
@@ -1093,7 +1167,7 @@ export default function App() {
       await refreshProposals(projectId);
       setSelectedProposalId(proposal.id);
       setWorkspaceTab("proposals");
-      setNotice(`“${document.name}”已保存到协作草稿箱；当前场景草稿和 canon 未改变。`);
+      setNotice(`“${document.name}”已保存到协作草稿箱；当前场景草稿和正典未改变。`);
     },
     [apiBase, projectId, refreshProposals, sceneId]
   );
@@ -1123,8 +1197,8 @@ export default function App() {
       const suffix = result.truncated ? " 源文档较长，本次只读取前部片段。" : "";
       setNotice(
         result.candidate_previews.length
-          ? `已生成 fact_draft 设定草稿，包含 ${result.candidate_previews.length} 条候选预览；canon 未改变。${suffix}`
-          : `已生成 fact_draft 设定草稿，但未发现可抽取事实；canon 未改变。${suffix}`
+          ? `已生成事实草稿，包含 ${result.candidate_previews.length} 条候选预览；正典未改变。${suffix}`
+          : `已生成事实草稿，但未发现可抽取事实；正典未改变。${suffix}`
       );
     },
     [apiBase, endpoint, projectId, refreshProposals]
@@ -1141,8 +1215,8 @@ export default function App() {
       setActiveTab("facts");
       setNotice(
         payload.candidates.length
-          ? `已生成 ${payload.candidates.length} 条待审候选事实；canon 尚未改变。`
-          : "草稿已保存，未抽取到候选事实；canon 未改变。"
+          ? `已生成 ${payload.candidates.length} 条待审候选事实；正典尚未改变。`
+          : "草稿已保存，未抽取到候选事实；正典未改变。"
       );
     },
     [apiBase, endpoint, refreshFacts, saveDocumentAsDraft]
@@ -1184,6 +1258,94 @@ export default function App() {
     setWorkspaceTab("write");
   }, [apiBase, draftSummary, draftText, endpoint]);
 
+  const readDraftSelection = useCallback((target: HTMLTextAreaElement | null) => {
+    if (!target) {
+      return "";
+    }
+    const selection = target.value.slice(target.selectionStart, target.selectionEnd).trim();
+    return selection;
+  }, []);
+
+  const captureDraftSelection = useCallback((event: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    setDraftSelection(readDraftSelection(event.currentTarget));
+  }, [readDraftSelection]);
+
+  const refreshDraftSelection = useCallback(() => {
+    const selection = readDraftSelection(draftTextareaRef.current);
+    setDraftSelection(selection);
+    return selection;
+  }, [readDraftSelection]);
+
+  const handleDraftTextChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setDraftText(event.target.value);
+    setDraftSelection(readDraftSelection(event.target));
+  }, [readDraftSelection]);
+
+  const handleDraftSummaryChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    setDraftSummary(event.target.value);
+  }, []);
+
+  const useDraftSelectionForAgent = useCallback(() => {
+    const selection = draftSelection || refreshDraftSelection();
+    if (!selection) {
+      setNotice(uiText.notices.draftSelectionRequired);
+      return;
+    }
+    setAgentDiscussionForm((current) => ({
+      ...current,
+      mode: "revise_selection",
+      selectedText: selection
+    }));
+    setWorkspaceTab("agent");
+  }, [draftSelection, refreshDraftSelection]);
+
+  const requestAgentDiscussion = useCallback(async () => {
+    if (!endpoint || !projectId) throw new Error(uiText.errors.selectScene);
+    const instruction = agentDiscussionForm.instruction.trim();
+    if (!instruction) throw new Error(uiText.errors.agentInstructionRequired);
+    const selectedText = agentDiscussionForm.selectedText.trim();
+    if (agentDiscussionForm.mode === "revise_selection" && !selectedText) {
+      throw new Error(uiText.errors.agentSelectionRequired);
+    }
+    const payload: AgentDiscussionRequest = {
+      mode: agentDiscussionForm.mode,
+      instruction,
+      selected_text: selectedText || null,
+      base_text: draftText,
+      include_context_pack: agentDiscussionForm.includeContextPack,
+      include_latest_draft: agentDiscussionForm.includeLatestDraft,
+      local_sources: agentDiscussionForm.includeLibrarySources ? agentDiscussionSources : [],
+      allow_web_search: agentDiscussionForm.allowWebSearch,
+      web_search_query: agentDiscussionForm.webSearchQuery.trim() || null
+    };
+    const result = await apiPost<AgentDiscussionResult>(
+      apiBase,
+      `${endpoint}/agent-discussion`,
+      payload
+    );
+    setAgentDiscussionResult(result);
+    const refreshed = await refreshProposals(projectId);
+    const created = refreshed.find((proposal) => proposal.id === result.proposal.id);
+    setSelectedProposalId(created?.id ?? result.proposal.id);
+    setProposalTitle(result.proposal.title);
+    setProposalText(result.proposal.body);
+    setProposalArtifactType(result.proposal.artifact_type);
+    setWorkspaceTab("agent");
+    setNotice(
+      result.replacement_applied
+        ? uiText.notices.agentSceneDraftCreated
+        : uiText.notices.agentDiscussionCreated
+    );
+  }, [
+    agentDiscussionForm,
+    agentDiscussionSources,
+    apiBase,
+    draftText,
+    endpoint,
+    projectId,
+    refreshProposals
+  ]);
+
   const generateDraft = useCallback(async () => {
     if (!endpoint) throw new Error("请先选择场景。");
     const saved = await apiPost<Draft>(apiBase, `${endpoint}/draft`);
@@ -1203,7 +1365,7 @@ export default function App() {
       `${endpoint}/runs/scene-generation`
     );
     if (!result.draft || !result.continuity_report) {
-      throw new Error("工作流未返回 Draft Store 草稿。");
+      throw new Error(uiText.errors.workflowMissingDraft);
     }
     setContextPack(result.context_pack);
     setDraft(result.draft);
@@ -1246,7 +1408,7 @@ export default function App() {
       );
       await refreshProposals(projectId);
       setSelectedProposalId(saved.id);
-      setNotice(`协作草稿已保存为 v${saved.version}；Draft/Candidate/Canon 未改变。`);
+      setNotice(`协作草稿已保存为 v${saved.version}；草稿库、候选事实和正典均未改变。`);
       return;
     }
     const targetRefs =
@@ -1271,7 +1433,7 @@ export default function App() {
     );
     await refreshProposals(projectId);
     setSelectedProposalId(saved.id);
-    setNotice(`协作草稿已创建为 v${saved.version}；尚未进入 Draft/Candidate/Canon。`);
+    setNotice(`协作草稿已创建为 v${saved.version}；尚未进入草稿库、候选事实或正典。`);
   }, [
     apiBase,
     projectId,
@@ -1298,13 +1460,13 @@ export default function App() {
           actor: "agent",
           created_via: "workflow",
           expected_version: selectedProposal.version,
-          note: "Agent 从当前 Context Pack 生成新的协作草稿版本。"
+          note: "智能体从当前上下文包生成新的协作草稿版本。"
         }
       );
       await refreshProposals(projectId);
       setSelectedProposalId(revised.id);
       setWorkspaceTab("proposals");
-      setNotice(`Agent 已修订协作草稿为 v${revised.version}；当前场景草稿未被覆盖。`);
+      setNotice(`智能体已修订协作草稿为 v${revised.version}；当前场景草稿未被覆盖。`);
       return;
     }
     const result = await apiPost<SceneRunResult>(
@@ -1327,7 +1489,7 @@ export default function App() {
       setSelectedProposalId(refreshed[0].id);
     }
     setWorkspaceTab("proposals");
-    setNotice("Agent 已生成 scene_draft 协作草稿；当前场景草稿未被覆盖。");
+    setNotice(uiText.notices.agentSceneDraftCreated);
   }, [apiBase, endpoint, projectId, refreshProposals, selectedProposal]);
 
   const extractStateToProposal = useCallback(async () => {
@@ -1342,8 +1504,8 @@ export default function App() {
     setWorkspaceTab("proposals");
     setNotice(
       result.candidate_previews.length
-        ? `已生成 fact_draft 协作草稿，包含 ${result.candidate_previews.length} 条候选预览。`
-        : "已生成 fact_draft 协作草稿，当前草稿未发现候选事实。"
+        ? `已生成事实草稿协作提案，包含 ${result.candidate_previews.length} 条候选预览。`
+        : "已生成事实草稿协作提案，当前草稿未发现候选事实。"
     );
   }, [apiBase, endpoint, projectId, refreshProposals]);
 
@@ -1369,7 +1531,7 @@ export default function App() {
       );
       await refreshProposals(projectId);
       setSelectedProposalId(saved.id);
-      setNotice(`协作草稿已${decision === "accept" ? "接受" : "拒绝"}；canon 未改变。`);
+      setNotice(`协作草稿已${decision === "accept" ? "接受" : "拒绝"}；正典未改变。`);
     },
     [apiBase, projectId, refreshProposals, selectedProposal]
   );
@@ -1386,7 +1548,7 @@ export default function App() {
     setDraftSummary(result.draft.summary ?? "");
     await refreshProposals(projectId);
     setSelectedProposalId(result.proposal.id);
-    setNotice(`已转为当前场景草稿 v${result.draft.version}；canon 未改变。`);
+    setNotice(`已转为当前场景草稿 v${result.draft.version}；正典未改变。`);
   }, [apiBase, projectId, refreshProposals, sceneId, selectedProposal]);
 
   const applyProjectStructureProposal = useCallback(async () => {
@@ -1410,8 +1572,8 @@ export default function App() {
     }
     setNotice(
       result.already_applied
-        ? `该项目结构已应用过：复用 ${result.chapters.length} 个章节、${result.scenes.length} 个场景；canon 事实仍未改变。`
-        : `已应用项目结构：创建 ${result.chapters.length} 个章节、${result.scenes.length} 个场景；canon 事实仍未改变。`
+        ? `该项目结构已应用过：复用 ${result.chapters.length} 个章节、${result.scenes.length} 个场景；正典事实仍未改变。`
+        : `已应用项目结构：创建 ${result.chapters.length} 个章节、${result.scenes.length} 个场景；正典事实仍未改变。`
     );
   }, [
     apiBase,
@@ -1442,7 +1604,7 @@ export default function App() {
     setActiveTab("facts");
     setNotice(
       result.candidates.length
-        ? `已提交 ${result.candidates.length} 条候选事实；canon 尚未改变。`
+        ? `已提交 ${result.candidates.length} 条候选事实；正典尚未改变。`
         : "来源草稿中没有可抽取的候选事实。"
     );
   }, [
@@ -1577,6 +1739,7 @@ export default function App() {
   );
   const canRunScene = hasScene && canGenerate && !writerNeedsKey;
   const canExtractDocumentFacts = hasScene && canGenerate && llmConfigured;
+  const canDiscussWithAgent = hasScene && canGenerate && llmConfigured;
   const runEditCommand = useCallback((command: "undo" | "redo") => {
     const active = document.activeElement;
     if (
@@ -1586,7 +1749,7 @@ export default function App() {
       document.execCommand(command);
     }
   }, []);
-  const backendStatusLabel = desktopBackend ? formatDesktopBackendLabel(desktopBackend) : "FastAPI";
+  const backendStatusLabel = desktopBackend ? formatDesktopBackendLabel(desktopBackend) : localizedTerms.fastApi;
   const backendStatusTone = desktopBackend ? desktopBackendTone(desktopBackend) : "good";
 
   return (
@@ -1595,23 +1758,23 @@ export default function App() {
         <div className="brand">
           <div className="mark"><GitBranch size={18} /></div>
           <div>
-            <strong>StoryGraph Agent</strong>
-            <span>长篇小说安全写作台</span>
+            <strong>{appText.brandName}</strong>
+            <span>{appText.tagline}</span>
           </div>
         </div>
-        <div className="command-bar" aria-label="全局命令">
+        <div className="command-bar" aria-label={uiText.commandBar.ariaLabel}>
           <button
             type="button"
             onClick={() => runAction("save", saveDraft)}
             disabled={!canGenerate || !hasScene || busy !== null}
-            title="保存当前场景草稿"
+            title={uiText.commandBar.saveDraftTitle}
           >
-            <Save size={15} /> 保存
+            <Save size={15} /> {uiText.common.save}
           </button>
-          <button type="button" onClick={() => runEditCommand("undo")} title="撤销当前输入框编辑">
+          <button type="button" onClick={() => runEditCommand("undo")} title={uiText.commandBar.undoTitle}>
             <Undo2 size={15} /> 撤销
           </button>
-          <button type="button" onClick={() => runEditCommand("redo")} title="重做当前输入框编辑">
+          <button type="button" onClick={() => runEditCommand("redo")} title={uiText.commandBar.redoTitle}>
             <Redo2 size={15} /> 重做
           </button>
           <button
@@ -1622,21 +1785,24 @@ export default function App() {
               })
             }
             disabled={busy !== null}
-            title="刷新后端项目树"
+            title={uiText.commandBar.refreshTitle}
           >
-            <RefreshCw size={15} /> 刷新
+            <RefreshCw size={15} /> {uiText.common.refresh}
           </button>
-          <button type="button" onClick={() => setWorkspaceTab("sources")} title="打开本地资料与 LLM 抽设定">
-            <Library size={15} /> 资料
+          <button type="button" onClick={() => setWorkspaceTab("sources")} title={uiText.commandBar.sourcesTitle}>
+            <Library size={15} /> {uiText.tabs.sources}
           </button>
-          <button type="button" onClick={() => setWorkspaceTab("proposals")} title="打开协作草稿箱">
-            <SplitSquareVertical size={15} /> 草稿箱
+          <button type="button" onClick={() => setWorkspaceTab("proposals")} title={uiText.commandBar.proposalsTitle}>
+            <SplitSquareVertical size={15} /> {uiText.proposals.title}
+          </button>
+          <button type="button" onClick={() => setWorkspaceTab("agent")} title={uiText.commandBar.agentTitle}>
+            <MessageSquare size={15} /> {uiText.tabs.agent}
           </button>
           <button
             type="button"
             onClick={() => runAction("run", runScene)}
             disabled={!canRunScene || busy !== null}
-            title="根据当前 canon/context 运行场景写作工作流"
+            title={uiText.commandBar.runTitle}
           >
             <Play size={15} /> 写作
           </button>
@@ -1653,7 +1819,7 @@ export default function App() {
           <StatusDot label={backendStatusLabel} tone={backendStatusTone} />
           <StatusDot label={permissionLabels[agentSettings?.permission_level ?? "full"]} tone={permissionTone(agentSettings?.permission_level)} />
           <StatusDot label={`v${APP_VERSION}`} tone="neutral" />
-          <button className="icon-button" title="设置" type="button" onClick={() => setActiveTab("settings")}>
+          <button className="icon-button" title={uiText.tabs.settings} type="button" onClick={() => setActiveTab("settings")}>
             <Settings size={17} />
           </button>
         </div>
@@ -1727,14 +1893,14 @@ export default function App() {
             <div>
               <h1>
                 {localizeText(selectedScene?.title) ||
-                  (hasWorkspace ? "导入小说生成项目结构" : "空工作区")}
+                  (hasWorkspace ? uiText.workspace.importedStructureTitle : uiText.workspace.emptyWorkspaceTitle)}
               </h1>
               <p>
                 {hasScene
                   ? `${sceneId} / 视角 ${localizeText(contextPack?.pov_character_id || selectedScene?.pov_character_id) || "未设置"}`
                   : hasWorkspace
-                    ? "先在“资料”中导入已有小说，由 Agent 生成章节/场景结构草稿；作者确认后再写入正式项目树。"
-                    : "先创建项目，再导入已有小说生成章节/场景结构草稿。"}
+                    ? uiText.workspace.noSceneWithWorkspace
+                    : uiText.workspace.noSceneEmptyWorkspace}
               </p>
             </div>
             <div className="toolbar-actions">
@@ -1743,55 +1909,56 @@ export default function App() {
                 type="button"
                 disabled={!hasScene}
               >
-                <RefreshCw size={16} /> 上下文
+                <RefreshCw size={16} /> {uiText.editor.contextButton}
               </button>
               <button
                 onClick={() => runAction("save", saveDraft)}
                 type="button"
                 disabled={!canGenerate || !hasScene}
               >
-                <Save size={16} /> 保存
+                <Save size={16} /> {uiText.editor.saveButton}
               </button>
               <button
                 onClick={() => runAction("draft", generateDraft)}
                 type="button"
                 disabled={missingCritical || !canRunScene}
-                title="仅执行 build_context + write_draft，并保存到 Draft Store。"
+                title={uiText.editor.generateDraftTitle}
               >
-                <FileText size={16} /> 仅生成草稿
+                <FileText size={16} /> {uiText.editor.generateDraftButton}
               </button>
               <button
                 className="primary"
                 onClick={() => runAction("run", runScene)}
                 type="button"
                 disabled={!canRunScene}
-                title="根据当前场景 canon/context 写场景草稿，再做质检和候选事实抽取。不会读取本地资料区。"
+                title={uiText.editor.runWorkflowTitle}
               >
-                <Play size={16} /> 运行场景写作工作流
+                <Play size={16} /> {uiText.editor.runWorkflowButton}
               </button>
             </div>
           </section>
 
-          <section className="state-strip" aria-label="当前工作流状态">
+          <section className="state-strip" aria-label={uiText.workspace.workflowStatusAria}>
             <StatusDot
-              label={`项目：${localizeText(selectedProject?.title) || "未创建"}`}
+              label={`${uiText.stateStrip.projectPrefix}：${localizeText(selectedProject?.title) || "未创建"}`}
               tone={hasWorkspace ? "good" : "warning"}
             />
             <StatusDot
-              label={`写作器：${formatWriter(agentSettings)}`}
+              label={`${uiText.stateStrip.writerPrefix}：${formatWriter(agentSettings)}`}
               tone={writerNeedsKey ? "danger" : canGenerate ? "good" : "neutral"}
             />
             <StatusDot
-              label={writerNeedsKey ? "LLM 设置未完整" : "Draft/Candidate/Canon 分离"}
+              label={writerNeedsKey ? uiText.stateStrip.llmIncomplete : uiText.stateStrip.safetyBoundary}
               tone={writerNeedsKey ? "danger" : "neutral"}
             />
           </section>
 
-          <section className="workspace-tabs" aria-label="主工作区">
-            <TabButton active={workspaceTab === "write"} onClick={() => setWorkspaceTab("write")} icon={<FileText size={15} />} label="写作" />
-            <TabButton active={workspaceTab === "sources"} onClick={() => setWorkspaceTab("sources")} icon={<Library size={15} />} label="资料" />
-            <TabButton active={workspaceTab === "proposals"} onClick={() => setWorkspaceTab("proposals")} icon={<SplitSquareVertical size={15} />} label="协作草稿" />
-            <TabButton active={workspaceTab === "workflow"} onClick={() => setWorkspaceTab("workflow")} icon={<Activity size={15} />} label="工作流" />
+          <section className="workspace-tabs" aria-label={uiText.workspace.mainWorkspaceAria}>
+            <TabButton active={workspaceTab === "write"} onClick={() => setWorkspaceTab("write")} icon={<FileText size={15} />} label={uiText.tabs.write} />
+            <TabButton active={workspaceTab === "sources"} onClick={() => setWorkspaceTab("sources")} icon={<Library size={15} />} label={uiText.tabs.sources} />
+            <TabButton active={workspaceTab === "agent"} onClick={() => setWorkspaceTab("agent")} icon={<MessageSquare size={15} />} label={uiText.tabs.agent} />
+            <TabButton active={workspaceTab === "proposals"} onClick={() => setWorkspaceTab("proposals")} icon={<SplitSquareVertical size={15} />} label={uiText.tabs.proposals} />
+            <TabButton active={workspaceTab === "workflow"} onClick={() => setWorkspaceTab("workflow")} icon={<Activity size={15} />} label={uiText.tabs.workflow} />
           </section>
 
           {(error || notice) && (
@@ -1805,21 +1972,21 @@ export default function App() {
             <section className="empty-workspace">
               <EmptyState
                 icon={<Database />}
-                title="当前后端没有真实项目"
-                text="请先创建自己的小说项目；创建后可导入已有小说，让 Agent 生成章节和场景结构草稿。"
+                title={uiText.workspace.emptyTitle}
+                text={uiText.workspace.emptyText}
               />
             </section>
           )}
 
           {workspaceTab === "write" && (
-            <section className="meta-grid" aria-label="场景元数据">
-              <Meta label="目标" value={contextPack?.scene_goal || selectedScene?.goal || ""} />
-              <Meta label="冲突" value={contextPack?.conflict || selectedScene?.conflict || ""} />
+            <section className="meta-grid" aria-label={uiText.workspace.sceneMetadataAria}>
+              <Meta label={uiText.editor.goal} value={contextPack?.scene_goal || selectedScene?.goal || ""} />
+              <Meta label={uiText.editor.conflict} value={contextPack?.conflict || selectedScene?.conflict || ""} />
               <Meta
-                label="时间线"
+                label={uiText.editor.timeline}
                 value={contextPack?.timeline_position || selectedScene?.timeline_position || ""}
               />
-              <Meta label="地点" value={contextPack?.location_id || selectedScene?.location_id || ""} />
+              <Meta label={uiText.editor.location} value={contextPack?.location_id || selectedScene?.location_id || ""} />
             </section>
           )}
 
@@ -1827,13 +1994,13 @@ export default function App() {
           <section className="library-panel" aria-label="本地资料库">
             <div className="library-header">
               <div>
-                <span><Library size={15} /> 本地资料 / 导入</span>
-                <small>{libraryDocuments.length} 个本地文档 / 默认只在浏览器内存 / 非 canon（正典）</small>
+                <span><Library size={15} /> {uiText.library.title}</span>
+                <small>{libraryDocuments.length} {uiText.library.summary}</small>
               </div>
               <div className="library-actions">
                 <label className="import-button">
                   <FileUp size={15} />
-                  文件
+                  {uiText.library.fileButton}
                   <input
                     accept=".txt,.md,.markdown,.docx"
                     multiple
@@ -1843,7 +2010,7 @@ export default function App() {
                 </label>
                 <label className="import-button">
                   <FolderOpen size={15} />
-                  文件夹
+                  {uiText.library.folderButton}
                   <DirectoryInput
                     accept=".txt,.md,.markdown,.docx"
                     directory=""
@@ -1858,7 +2025,7 @@ export default function App() {
                   type="button"
                   disabled={!libraryDocuments.length || busy === "import"}
                 >
-                  <X size={15} /> 清空
+                  <X size={15} /> {uiText.library.clearButton}
                 </button>
               </div>
             </div>
@@ -1875,8 +2042,8 @@ export default function App() {
                 ) : (
                   <EmptyState
                     icon={<FolderOpen />}
-                    title="还没有导入文档"
-                    text="使用“文件”或“文件夹”把 txt、md、docx 加载到本地阅读器。"
+                    title={uiText.library.emptyTitle}
+                    text={uiText.library.emptyText}
                   />
                 )}
               </div>
@@ -1911,6 +2078,24 @@ export default function App() {
               />
             </div>
           </section>
+          )}
+
+          {workspaceTab === "agent" && (
+          <AgentDiscussionPanel
+            busy={busy}
+            canDiscuss={canDiscussWithAgent}
+            draftSelection={draftSelection}
+            form={agentDiscussionForm}
+            hasScene={hasScene}
+            librarySourceCount={agentDiscussionSources.length}
+            llmConfigured={llmConfigured}
+            onFormChange={setAgentDiscussionForm}
+            onOpenProposal={() => setWorkspaceTab("proposals")}
+            onSubmit={() => runAction("agent-discussion", requestAgentDiscussion)}
+            onUseDraftSelection={useDraftSelectionForAgent}
+            result={agentDiscussionResult}
+            selectedProposal={selectedProposal}
+          />
           )}
 
           {workspaceTab === "proposals" && (
@@ -1959,20 +2144,34 @@ export default function App() {
           {workspaceTab === "write" && (
           <details className="draft-surface collapsible-panel" open>
             <summary className="draft-header">
-              <span>场景草稿</span>
-              <small>{draft ? `v${draft.version} / ${draft.id}` : "本地未保存草稿"}</small>
+              <span>{uiText.editor.draftTitle}</span>
+              <div className="draft-header-actions">
+                <small>{draft ? `v${draft.version} / ${draft.id}` : uiText.editor.unsavedDraft}</small>
+                <button
+                  disabled={!draftText.trim() || busy !== null}
+                  onClick={useDraftSelectionForAgent}
+                  title={uiText.editor.markSelectionForAgentTitle}
+                  type="button"
+                >
+                  <MessageSquare size={13} /> {uiText.editor.markSelectionForAgent}
+                </button>
+              </div>
             </summary>
             <textarea
+              ref={draftTextareaRef}
               value={draftText}
-              onChange={(event) => setDraftText(event.target.value)}
+              onChange={handleDraftTextChange}
+              onKeyUp={captureDraftSelection}
+              onMouseUp={captureDraftSelection}
+              onSelect={captureDraftSelection}
               spellCheck={false}
-              aria-label="场景草稿正文"
+              aria-label={uiText.editor.draftBodyAria}
             />
             <input
               className="summary-input"
               value={draftSummary}
-              onChange={(event) => setDraftSummary(event.target.value)}
-              aria-label="草稿摘要"
+              onChange={handleDraftSummaryChange}
+              aria-label={uiText.editor.draftSummaryAria}
             />
           </details>
           )}
@@ -1981,15 +2180,15 @@ export default function App() {
           <details className="run-panel collapsible-panel" open>
             <summary className="run-head">
               <div>
-                <span>智能体运行</span>
-                <small>{run?.id ?? "尚未运行"}</small>
+                <span>{uiText.editor.runTitle}</span>
+                <small>{run?.id ?? uiText.editor.runNotStarted}</small>
               </div>
               <StatusDot label={formatStatus(run?.status ?? "idle")} tone={statusTone(run?.status)} />
             </summary>
             <div className="step-track">
               {(runEvents.length ? runEvents : fallbackSteps).map((step) => (
                 <div key={step.name} className={`step ${step.status}`}>
-                  <span>{stepLabels[step.name] ?? step.name}</span>
+                  <span>{formatWorkflowStep(step.name)}</span>
                   <small>{formatStatus(step.status)}</small>
                 </div>
               ))}
@@ -2000,10 +2199,10 @@ export default function App() {
 
         <aside className="inspector">
           <div className="tabs" role="tablist">
-            <TabButton active={activeTab === "context"} onClick={() => setActiveTab("context")} icon={<Boxes size={15} />} label="上下文" />
-            <TabButton active={activeTab === "continuity"} onClick={() => setActiveTab("continuity")} icon={<Activity size={15} />} label="质检" />
-            <TabButton active={activeTab === "facts"} onClick={() => setActiveTab("facts")} icon={<ShieldCheck size={15} />} label="事实" />
-            <TabButton active={activeTab === "settings"} onClick={() => setActiveTab("settings")} icon={<Settings size={15} />} label="设置" />
+            <TabButton active={activeTab === "context"} onClick={() => setActiveTab("context")} icon={<Boxes size={15} />} label={uiText.tabs.context} />
+            <TabButton active={activeTab === "continuity"} onClick={() => setActiveTab("continuity")} icon={<Activity size={15} />} label={uiText.tabs.continuity} />
+            <TabButton active={activeTab === "facts"} onClick={() => setActiveTab("facts")} icon={<ShieldCheck size={15} />} label={uiText.tabs.facts} />
+            <TabButton active={activeTab === "settings"} onClick={() => setActiveTab("settings")} icon={<Settings size={15} />} label={uiText.tabs.settings} />
           </div>
           {activeTab === "context" && <ContextInspector pack={contextPack} />}
           {activeTab === "continuity" && <ContinuityInspector run={run} report={continuityReport} />}
@@ -2041,6 +2240,198 @@ export default function App() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function AgentDiscussionPanel({
+  busy,
+  canDiscuss,
+  draftSelection,
+  form,
+  hasScene,
+  librarySourceCount,
+  llmConfigured,
+  onFormChange,
+  onOpenProposal,
+  onSubmit,
+  onUseDraftSelection,
+  result,
+  selectedProposal
+}: {
+  busy: string | null;
+  canDiscuss: boolean;
+  draftSelection: string;
+  form: AgentDiscussionForm;
+  hasScene: boolean;
+  librarySourceCount: number;
+  llmConfigured: boolean;
+  onFormChange: React.Dispatch<React.SetStateAction<AgentDiscussionForm>>;
+  onOpenProposal: () => void;
+  onSubmit: () => void;
+  onUseDraftSelection: () => void;
+  result: AgentDiscussionResult | null;
+  selectedProposal: ProposalArtifact | null;
+}) {
+  const selectedRequired = form.mode === "revise_selection";
+  const canSubmit =
+    canDiscuss &&
+    busy === null &&
+    form.instruction.trim().length > 0 &&
+    (!selectedRequired || form.selectedText.trim().length > 0);
+  return (
+    <section className="agent-panel" aria-label={uiText.agentDiscussion.ariaLabel}>
+      <div className="agent-compose">
+        <div className="agent-head">
+          <div>
+            <span><MessageSquare size={15} /> {uiText.agentDiscussion.title}</span>
+            <small>{uiText.agentDiscussion.description}</small>
+          </div>
+          <StatusDot
+            label={llmConfigured ? uiText.agentDiscussion.llmConfigured : uiText.agentDiscussion.llmNotConfigured}
+            tone={llmConfigured ? "good" : "danger"}
+          />
+        </div>
+        <div className="agent-mode-row">
+          <label>
+            <span>{uiText.agentDiscussion.mode}</span>
+            <select
+              value={form.mode}
+              onChange={(event) =>
+                onFormChange((current) => ({
+                  ...current,
+                  mode: event.target.value as AgentDiscussionMode
+                }))
+              }
+            >
+              <option value="discuss">{uiText.agentDiscussion.modes.discuss}</option>
+              <option value="revise_selection">{uiText.agentDiscussion.modes.revise_selection}</option>
+              <option value="revise_scene">{uiText.agentDiscussion.modes.revise_scene}</option>
+            </select>
+          </label>
+          <button type="button" onClick={onUseDraftSelection} disabled={!draftSelection || busy !== null}>
+            <MessageSquare size={14} /> {uiText.agentDiscussion.useDraftSelection}
+          </button>
+        </div>
+        <label className="agent-field">
+          <span>{uiText.agentDiscussion.instructionLabel}</span>
+          <textarea
+            value={form.instruction}
+            onChange={(event) =>
+              onFormChange((current) => ({ ...current, instruction: event.target.value }))
+            }
+            placeholder={uiText.agentDiscussion.instructionPlaceholder}
+          />
+        </label>
+        <label className="agent-field selection">
+          <span>{uiText.agentDiscussion.selectionLabel}</span>
+          <textarea
+            value={form.selectedText}
+            onChange={(event) =>
+              onFormChange((current) => ({ ...current, selectedText: event.target.value }))
+            }
+            placeholder={uiText.agentDiscussion.selectionPlaceholder}
+          />
+        </label>
+        <div className="agent-actions">
+          <button type="button" className="primary" onClick={onSubmit} disabled={!canSubmit}>
+            <Wand2 size={15} /> {uiText.agentDiscussion.submit}
+          </button>
+          <button type="button" onClick={onOpenProposal} disabled={!selectedProposal}>
+            <SplitSquareVertical size={14} /> {uiText.agentDiscussion.openProposal}
+          </button>
+        </div>
+      </div>
+      <div className="agent-context">
+        <div className="agent-options">
+          <label>
+            <input
+              type="checkbox"
+              checked={form.includeContextPack}
+              onChange={(event) =>
+                onFormChange((current) => ({
+                  ...current,
+                  includeContextPack: event.target.checked
+                }))
+              }
+            />
+            {uiText.agentDiscussion.includeContextPack}
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={form.includeLatestDraft}
+              onChange={(event) =>
+                onFormChange((current) => ({
+                  ...current,
+                  includeLatestDraft: event.target.checked
+                }))
+              }
+            />
+            {uiText.agentDiscussion.includeLatestDraft}
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={form.includeLibrarySources}
+              onChange={(event) =>
+                onFormChange((current) => ({
+                  ...current,
+                  includeLibrarySources: event.target.checked
+                }))
+              }
+            />
+            {uiText.agentDiscussion.includeLibrarySources}（{librarySourceCount}）
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={form.allowWebSearch}
+              onChange={(event) =>
+                onFormChange((current) => ({
+                  ...current,
+                  allowWebSearch: event.target.checked
+                }))
+              }
+            />
+            <Search size={13} /> {uiText.agentDiscussion.allowWebSearch}
+          </label>
+          <input
+            value={form.webSearchQuery}
+            onChange={(event) =>
+              onFormChange((current) => ({ ...current, webSearchQuery: event.target.value }))
+            }
+            placeholder={uiText.agentDiscussion.webSearchPlaceholder}
+            disabled={!form.allowWebSearch}
+          />
+        </div>
+        {!hasScene && (
+          <EmptyState
+            icon={<MessageSquare />}
+            title={uiText.agentDiscussion.noSceneTitle}
+            text={uiText.agentDiscussion.noSceneText}
+          />
+        )}
+        {result && (
+          <div className="agent-result">
+            <MetricRow label={uiText.agentDiscussion.proposalMetric} value={`${result.proposal.title} / v${result.proposal.version}`} />
+            <MetricRow
+              label={uiText.agentDiscussion.replacementMetric}
+              value={result.replacement_applied ? uiText.agentDiscussion.fullSceneDraft : uiText.agentDiscussion.discussionOnly}
+            />
+            <p>{result.reply}</p>
+            {result.truncated_sources.length > 0 && (
+              <ListBlock title={uiText.agentDiscussion.truncatedSources} items={result.truncated_sources} tone="warning" />
+            )}
+            {result.web_results.length > 0 && (
+              <ListBlock
+                title={uiText.agentDiscussion.webResults}
+                items={result.web_results.map((item) => `${item.title}: ${item.snippet}`)}
+              />
+            )}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -2129,25 +2520,25 @@ function ProposalInbox({
     selectedProposal.artifact_type === "project_structure_draft";
 
   return (
-    <section className="proposal-panel" aria-label="协作草稿箱">
+    <section className="proposal-panel" aria-label={uiText.proposals.ariaLabel}>
       <div className="proposal-header">
         <div>
-          <span><SplitSquareVertical size={15} /> 协作草稿箱</span>
-          <small>{proposals.length} 条 / Proposal Store</small>
+          <span><SplitSquareVertical size={15} /> {uiText.proposals.title}</span>
+          <small>{proposals.length} {uiText.proposals.countSuffix}</small>
         </div>
         <div className="proposal-header-actions">
           <select
             value={filter}
             onChange={(event) => onFilterChange(event.target.value as ProposalStatus | "all")}
-            aria-label="协作草稿状态筛选"
+            aria-label={uiText.proposals.filterAria}
           >
-            <option value="all">全部</option>
+            <option value="all">{uiText.common.all}</option>
             {proposalStatuses.map((status) => (
               <option key={status} value={status}>{proposalStatusLabels[status]}</option>
             ))}
           </select>
           <button type="button" onClick={onCreateNew} disabled={busy !== null}>
-            <FileText size={14} /> 新建
+            <FileText size={14} /> {uiText.common.newItem}
           </button>
         </div>
       </div>
@@ -2169,8 +2560,8 @@ function ProposalInbox({
           ) : (
             <EmptyState
               icon={<SplitSquareVertical />}
-              title="暂无协作草稿"
-              text="可从本地资料、Agent 工作流或手动编辑创建。"
+              title={uiText.proposals.emptyTitle}
+              text={uiText.proposals.emptyText}
             />
           )}
         </div>
@@ -2180,7 +2571,7 @@ function ProposalInbox({
               value={proposalType}
               disabled={Boolean(selectedProposal)}
               onChange={(event) => onTypeChange(event.target.value as ProposalArtifactType)}
-              aria-label="协作草稿类型"
+              aria-label={uiText.proposals.typeAria}
             >
               {proposalTypes.map((type) => (
                 <option key={type} value={type}>{proposalTypeLabels[type]}</option>
@@ -2189,8 +2580,8 @@ function ProposalInbox({
             <input
               value={proposalTitle}
               onChange={(event) => onTitleChange(event.target.value)}
-              placeholder="标题"
-              aria-label="协作草稿标题"
+              placeholder={uiText.proposals.titlePlaceholder}
+              aria-label={uiText.proposals.titleAria}
               disabled={locked}
             />
           </div>
@@ -2199,67 +2590,67 @@ function ProposalInbox({
             value={proposalText}
             onChange={(event) => onTextChange(event.target.value)}
             spellCheck={false}
-            aria-label="协作草稿正文"
+            aria-label={uiText.proposals.bodyAria}
             disabled={locked}
           />
           <div className="proposal-actions">
             <button type="button" onClick={onSave} disabled={!canSave}>
-              <Save size={14} /> 保存草稿
+              <Save size={14} /> {uiText.proposals.save}
             </button>
             <button type="button" onClick={onRequestAgent} disabled={!canGenerate || busy !== null || !hasScene}>
-              <Wand2 size={14} /> 请求 Agent 修改
+              <Wand2 size={14} /> {uiText.proposals.requestAgent}
             </button>
             <button type="button" onClick={onExtractFactDraft} disabled={!canGenerate || busy !== null || !hasScene}>
-              <ShieldCheck size={14} /> 生成事实草稿
+              <ShieldCheck size={14} /> {uiText.proposals.extractFactDraft}
             </button>
             <button type="button" onClick={onSubmitReview} disabled={!canSubmit}>
-              <Clock3 size={14} /> 提交审阅
+              <Clock3 size={14} /> {uiText.proposals.submitReview}
             </button>
             <button type="button" onClick={onAccept} disabled={!canDecide}>
-              <Check size={14} /> 接受
+              <Check size={14} /> {uiText.proposals.accept}
             </button>
             <button type="button" onClick={onReject} disabled={!canDecide}>
-              <X size={14} /> 拒绝
+              <X size={14} /> {uiText.proposals.reject}
             </button>
             <button type="button" onClick={onPromoteDraft} disabled={!canPromoteDraft}>
-              <FileText size={14} /> 转为当前场景草稿
+              <FileText size={14} /> {uiText.proposals.promoteDraft}
             </button>
             <button type="button" onClick={onApplyProjectStructure} disabled={!canApplyProjectStructure}>
-              <BookOpen size={14} /> 应用为章节/场景
+              <BookOpen size={14} /> {uiText.proposals.applyStructure}
             </button>
           </div>
         </div>
         <div className="proposal-meta">
-          <MetricRow label="状态" value={selectedProposal ? proposalStatusLabels[selectedProposal.status] : "未选择"} />
-          <MetricRow label="类型" value={proposalTypeLabels[proposalType]} />
-          <MetricRow label="版本" value={selectedProposal ? `v${selectedProposal.version}` : "新建"} />
-          <MetricRow label="创建方式" value={selectedProposal?.provenance.created_via ?? "manual"} />
+          <MetricRow label={uiText.proposals.metadataStatus} value={selectedProposal ? proposalStatusLabels[selectedProposal.status] : uiText.proposals.unselected} />
+          <MetricRow label={uiText.proposals.metadataType} value={proposalTypeLabels[proposalType]} />
+          <MetricRow label={uiText.proposals.metadataVersion} value={selectedProposal ? `v${selectedProposal.version}` : uiText.proposals.newVersion} />
+          <MetricRow label={uiText.proposals.metadataCreatedVia} value={formatProvenanceMethod(selectedProposal?.provenance.created_via)} />
           <label>
-            <span>来源草稿</span>
+            <span>{uiText.proposals.sourceDraft}</span>
             <input
               value={effectiveSourceDraftId}
               onChange={(event) => onSourceDraftChange(event.target.value)}
-              placeholder="Draft ID"
+              placeholder={uiText.proposals.sourceDraftPlaceholder}
             />
           </label>
           <div className="proposal-side-actions">
             <button type="button" onClick={onExtractCandidates} disabled={!canPromoteCandidates}>
-              <ShieldCheck size={14} /> 抽取为 CandidateFact
+              <ShieldCheck size={14} /> {uiText.proposals.extractCandidates}
             </button>
             <button type="button" onClick={onOpenCanonReview} disabled={busy !== null}>
-              <ShieldCheck size={14} /> 提交 canon review
+              <ShieldCheck size={14} /> {uiText.proposals.openCanonReview}
             </button>
           </div>
           <ListBlock
-            title="来源"
+            title={uiText.proposals.refsSource}
             items={formatProposalRefs(selectedProposal?.source_refs ?? [])}
           />
           <ListBlock
-            title="影响范围"
+            title={uiText.proposals.refsTarget}
             items={formatProposalRefs(selectedProposal?.target_refs ?? [])}
           />
           <ListBlock
-            title="派生"
+            title={uiText.proposals.refsDerived}
             items={formatProposalRefs(selectedProposal?.derived_refs ?? [])}
           />
         </div>
@@ -2355,6 +2746,8 @@ function ProjectSidebar({
   const projectSceneCount = projectScenes.length;
   const importedPovLabel = stringProperty(selectedScene?.properties, "pov_label");
   const importedLocationLabel = stringProperty(selectedScene?.properties, "location_label");
+  const matchedImportedPovCharacter = findGraphNodeByLabel(storyCharacters, importedPovLabel);
+  const matchedImportedLocation = findGraphNodeByLabel(storyLocations, importedLocationLabel);
 
   useEffect(() => {
     if (workspaceLoaded && !hasWorkspace) {
@@ -2384,11 +2777,47 @@ function ProjectSidebar({
     onChapterFormChange(chapterToForm(selectedChapter));
   };
 
+  const fillCharacterFromImportedHint = () => {
+    if (!importedPovLabel) return;
+    onCharacterFormChange((current) => ({
+      ...current,
+      name: localizeText(importedPovLabel)
+    }));
+  };
+
+  const fillLocationFromImportedHint = () => {
+    if (!importedLocationLabel) return;
+    onLocationFormChange((current) => ({
+      ...current,
+      name: localizeText(importedLocationLabel)
+    }));
+  };
+
+  const useExistingPovCharacter = () => {
+    if (!matchedImportedPovCharacter) return;
+    onSceneFormChange((current) => ({
+      ...current,
+      pov_character_id: matchedImportedPovCharacter.id,
+      required_characters: appendLineIfMissing(
+        current.required_characters,
+        matchedImportedPovCharacter.id
+      )
+    }));
+  };
+
+  const useExistingLocation = () => {
+    if (!matchedImportedLocation) return;
+    onSceneFormChange((current) => ({
+      ...current,
+      location_id: matchedImportedLocation.id
+    }));
+  };
+
   return (
     <>
       <div className="sidebar-scroll">
         <details className="sidebar-section workspace-section" open>
-          <summary className="section-title">真实工作区</summary>
+          <summary className="section-title">{uiText.sidebar.workspaceTitle}</summary>
           {workspaceLoaded && hasWorkspace ? (
             <>
               <select
@@ -2407,58 +2836,58 @@ function ProjectSidebar({
                 <div className="project-card">
                   <strong>{localizeText(selectedProject.title)}</strong>
                   <span>
-                    {selectedProject.genre ?? "未分类"} / {selectedProject.language ?? "未设置语言"}
+                    {selectedProject.genre ?? uiText.sidebar.uncategorized} / {selectedProject.language ?? uiText.sidebar.languageUnset}
                   </span>
                   <span>
-                    {chapters.length} 章 / {projectSceneCount} 场景
+                    {chapters.length} {uiText.sidebar.chapterCount} / {projectSceneCount} {uiText.sidebar.sceneCount}
                   </span>
-                  <span>{String(selectedProject.properties.narrative_pov ?? "未设置视角")}</span>
+                  <span>{String(selectedProject.properties.narrative_pov ?? uiText.sidebar.povUnset)}</span>
                 </div>
               )}
             </>
           ) : (
             <div className="project-empty">
-              {workspaceLoaded ? "后端还没有项目。" : "正在读取后端项目..."}
+              {workspaceLoaded ? uiText.sidebar.projectEmpty : uiText.sidebar.projectLoading}
             </div>
           )}
           <div className="sidebar-button-row">
             <button
               disabled={busy !== null}
               onClick={onRefresh}
-              title="从后端刷新项目树"
+              title={uiText.sidebar.refreshTitle}
               type="button"
             >
-              <RefreshCw size={15} /> 刷新
+              <RefreshCw size={15} /> {uiText.common.refresh}
             </button>
             <button
               disabled={!canReview || busy !== null}
               onClick={startProjectCreate}
-              title={canReview ? "创建新的小说项目" : "需要完全权限"}
+              title={canReview ? uiText.sidebar.createProjectTitle : uiText.sidebar.requireFullPermission}
               type="button"
             >
-              <Database size={15} /> 新建项目
+              <Database size={15} /> {uiText.sidebar.createProject}
             </button>
             <button
               disabled={!canReview || !selectedProject || busy !== null}
               onClick={startProjectEdit}
-              title={canReview ? "编辑当前项目信息" : "需要完全权限"}
+              title={canReview ? uiText.sidebar.editProjectTitle : uiText.sidebar.requireFullPermission}
               type="button"
             >
-              <Settings size={15} /> 编辑项目
+              <Settings size={15} /> {uiText.sidebar.editProject}
             </button>
             {selectedBuiltinDemo && (
               <button
                 disabled={!canReview || busy !== null}
                 onClick={onArchiveDemo}
-                title={canReview ? "仅移除内置演示项目，真实项目不受影响" : "需要完全权限"}
+                title={canReview ? uiText.sidebar.archiveDemoTitle : uiText.sidebar.requireFullPermission}
                 type="button"
               >
-                <X size={15} /> 移除演示
+                <X size={15} /> {uiText.sidebar.archiveDemo}
               </button>
             )}
           </div>
 
-        <nav className="scene-tree" aria-label="后端项目树">
+        <nav className="scene-tree" aria-label={uiText.sidebar.projectTreeAria}>
           {selectedProject ? (
             selectedProject.chapters.map((chapter) => (
               <div key={chapter.id} className="chapter">
@@ -2481,15 +2910,15 @@ function ProjectSidebar({
                     </button>
                   ))
                 ) : (
-                  <p className="tree-empty">本章节还没有场景。</p>
+                  <p className="tree-empty">{uiText.sidebar.noChapterScenes}</p>
                 )}
               </div>
             ))
           ) : (
             <EmptyState
               icon={<BookOpen />}
-              title="没有后端项目树"
-              text="创建项目后，章节和场景会从 Graph Store 读取。"
+              title={uiText.sidebar.noProjectTreeTitle}
+              text={uiText.sidebar.noProjectTreeText}
             />
           )}
         </nav>
@@ -2498,10 +2927,10 @@ function ProjectSidebar({
         {projectPanelMode !== "view" && (
           <details className="sidebar-section seed-panel" open>
             <summary className="section-title">
-              {projectPanelMode === "edit" ? "编辑项目信息" : "创建新的小说项目"}
+              {projectPanelMode === "edit" ? uiText.sidebar.editProjectTitleText : uiText.sidebar.createProjectTitleText}
             </summary>
             <input
-              placeholder="项目名称"
+              placeholder={uiText.sidebar.projectNamePlaceholder}
               value={projectForm.title}
               onChange={(event) =>
                 onProjectFormChange((current) => ({ ...current, title: event.target.value }))
@@ -2509,14 +2938,14 @@ function ProjectSidebar({
             />
             <div className="compact-grid">
               <input
-                placeholder="类型"
+                placeholder={uiText.sidebar.genrePlaceholder}
                 value={projectForm.genre}
                 onChange={(event) =>
                   onProjectFormChange((current) => ({ ...current, genre: event.target.value }))
                 }
               />
               <input
-                placeholder="语言"
+                placeholder={uiText.sidebar.languagePlaceholder}
                 value={projectForm.language}
                 onChange={(event) =>
                   onProjectFormChange((current) => ({ ...current, language: event.target.value }))
@@ -2524,7 +2953,7 @@ function ProjectSidebar({
               />
             </div>
             <input
-              placeholder="目标篇幅"
+              placeholder={uiText.sidebar.targetLengthPlaceholder}
               value={projectForm.target_length}
               onChange={(event) =>
                 onProjectFormChange((current) => ({
@@ -2534,7 +2963,7 @@ function ProjectSidebar({
               }
             />
             <input
-              placeholder="叙述视角"
+              placeholder={uiText.sidebar.narrativePovPlaceholder}
               value={projectForm.narrative_pov}
               onChange={(event) =>
                 onProjectFormChange((current) => ({
@@ -2560,7 +2989,7 @@ function ProjectSidebar({
                 }}
                 type="button"
               >
-                <Save size={15} /> {projectPanelMode === "edit" ? "保存信息" : "创建项目"}
+                <Save size={15} /> {projectPanelMode === "edit" ? uiText.sidebar.saveProjectInfo : uiText.sidebar.createProjectButton}
               </button>
               {hasWorkspace && (
                 <button
@@ -2569,7 +2998,7 @@ function ProjectSidebar({
                   onClick={() => setProjectPanelMode("view")}
                   type="button"
                 >
-                  <X size={15} /> 取消
+                  <X size={15} /> {uiText.common.cancel}
                 </button>
               )}
             </div>
@@ -2577,9 +3006,9 @@ function ProjectSidebar({
         )}
 
         <details className="sidebar-section seed-panel" open>
-          <summary className="section-title">章节 / 场景</summary>
+          <summary className="section-title">{uiText.sidebar.outlineTitle}</summary>
           <input
-            placeholder="章节标题"
+            placeholder={uiText.sidebar.chapterTitlePlaceholder}
             value={chapterForm.title}
             onChange={(event) =>
               onChapterFormChange((current) => ({ ...current, title: event.target.value }))
@@ -2587,7 +3016,7 @@ function ProjectSidebar({
           />
           <div className="compact-grid">
             <input
-              placeholder="卷序号"
+              placeholder={uiText.sidebar.volumeIndexPlaceholder}
               value={chapterForm.volume_index}
               onChange={(event) =>
                 onChapterFormChange((current) => ({
@@ -2597,7 +3026,7 @@ function ProjectSidebar({
               }
             />
             <input
-              placeholder="章节序号"
+              placeholder={uiText.sidebar.chapterIndexPlaceholder}
               value={chapterForm.chapter_index}
               onChange={(event) =>
                 onChapterFormChange((current) => ({
@@ -2616,7 +3045,7 @@ function ProjectSidebar({
                   status: event.target.value
                 }))
               }
-              aria-label="章节状态"
+              aria-label={uiText.sidebar.chapterStatusAria}
             >
               {chapterStatusOptions.map((status) => (
                 <option key={status} value={status}>{formatStatus(status)}</option>
@@ -2627,18 +3056,18 @@ function ProjectSidebar({
               onClick={onCreateChapter}
               type="button"
             >
-              <Save size={15} /> 添加章节
+              <Save size={15} /> {uiText.sidebar.addChapter}
             </button>
           </div>
           <input
-            placeholder="章节目的"
+            placeholder={uiText.sidebar.chapterPurposePlaceholder}
             value={chapterForm.purpose}
             onChange={(event) =>
               onChapterFormChange((current) => ({ ...current, purpose: event.target.value }))
             }
           />
           <input
-            placeholder="章节摘要"
+            placeholder={uiText.sidebar.chapterSummaryPlaceholder}
             value={chapterForm.summary}
             onChange={(event) =>
               onChapterFormChange((current) => ({ ...current, summary: event.target.value }))
@@ -2649,17 +3078,17 @@ function ProjectSidebar({
               disabled={!selectedChapter || busy !== null}
               onClick={loadSelectedChapter}
               type="button"
-              title="把当前选中的章节载入上方表单"
+              title={uiText.sidebar.loadChapterTitle}
             >
-              <BookOpen size={15} /> 载入当前章节
+              <BookOpen size={15} /> {uiText.sidebar.loadChapter}
             </button>
             <button
               disabled={!canReview || !selectedChapter || busy !== null}
               onClick={onUpdateChapter}
               type="button"
-              title={canReview ? "保存当前选中章节的元数据" : "需要完全权限"}
+              title={canReview ? uiText.sidebar.saveChapterMetadataTitle : uiText.sidebar.requireFullPermission}
             >
-              <Save size={15} /> 保存章节元数据
+              <Save size={15} /> {uiText.sidebar.saveChapterMetadata}
             </button>
           </div>
           <select
@@ -2668,7 +3097,7 @@ function ProjectSidebar({
               onSceneFormChange((current) => ({ ...current, chapter_id: event.target.value }))
             }
           >
-            <option value="">选择章节</option>
+            <option value="">{uiText.sidebar.chooseChapter}</option>
             {chapters.map((chapter) => (
               <option key={chapter.id} value={chapter.id}>
                 {localizeText(chapter.title)}
@@ -2676,7 +3105,7 @@ function ProjectSidebar({
             ))}
           </select>
           <input
-            placeholder="场景标题"
+            placeholder={uiText.sidebar.sceneTitlePlaceholder}
             value={sceneForm.title}
             onChange={(event) =>
               onSceneFormChange((current) => ({ ...current, title: event.target.value }))
@@ -2684,7 +3113,7 @@ function ProjectSidebar({
           />
           <div className="compact-grid">
             <input
-              placeholder="场景序号"
+              placeholder={uiText.sidebar.sceneIndexPlaceholder}
               value={sceneForm.scene_index}
               onChange={(event) =>
                 onSceneFormChange((current) => ({
@@ -2706,7 +3135,7 @@ function ProjectSidebar({
               }}
               type="button"
             >
-              <Save size={15} /> 添加场景
+              <Save size={15} /> {uiText.sidebar.addScene}
             </button>
           </div>
           <div className="compact-grid">
@@ -2714,23 +3143,79 @@ function ProjectSidebar({
               disabled={!selectedScene || busy !== null}
               onClick={loadSelectedScene}
               type="button"
-              title="把当前选中的场景载入下方表单"
+              title={uiText.sidebar.loadSceneTitle}
             >
-              <FileText size={15} /> 载入当前场景
+              <FileText size={15} /> {uiText.sidebar.loadScene}
             </button>
             <button
               disabled={!canReview || !selectedScene || busy !== null}
               onClick={onUpdateScene}
               type="button"
-              title={canReview ? "保存当前选中场景的元数据" : "需要完全权限"}
+              title={canReview ? uiText.sidebar.saveSceneMetadataTitle : uiText.sidebar.requireFullPermission}
             >
-              <Save size={15} /> 保存场景元数据
+              <Save size={15} /> {uiText.sidebar.saveSceneMetadata}
             </button>
           </div>
           {(importedPovLabel || importedLocationLabel) && (
             <div className="scene-hints">
-              {importedPovLabel && <span>POV: {localizeText(importedPovLabel)}</span>}
-              {importedLocationLabel && <span>地点: {localizeText(importedLocationLabel)}</span>}
+              {importedPovLabel && (
+                <div className="scene-hint-row">
+                  <span className="scene-hint-label">
+                    {uiText.sidebar.importedPovLabel}: {localizeText(importedPovLabel)}
+                    {matchedImportedPovCharacter && (
+                      <small>{uiText.sidebar.matchedPrefix} {matchedImportedPovCharacter.id}</small>
+                    )}
+                  </span>
+                  <div className="scene-hint-actions">
+                    {matchedImportedPovCharacter && (
+                      <button
+                        disabled={busy !== null}
+                        onClick={useExistingPovCharacter}
+                        title={uiText.sidebar.useExistingTitle}
+                        type="button"
+                      >
+                        <Check size={13} /> {uiText.sidebar.useExisting}
+                      </button>
+                    )}
+                    <button
+                      disabled={busy !== null}
+                      onClick={fillCharacterFromImportedHint}
+                      title={uiText.sidebar.fillCharacterTitle}
+                      type="button"
+                    >
+                      <UserRound size={13} /> {uiText.sidebar.fillCharacter}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {importedLocationLabel && (
+                <div className="scene-hint-row">
+                  <span className="scene-hint-label">
+                    {uiText.sidebar.importedLocationLabel}: {localizeText(importedLocationLabel)}
+                    {matchedImportedLocation && <small>{uiText.sidebar.matchedPrefix} {matchedImportedLocation.id}</small>}
+                  </span>
+                  <div className="scene-hint-actions">
+                    {matchedImportedLocation && (
+                      <button
+                        disabled={busy !== null}
+                        onClick={useExistingLocation}
+                        title={uiText.sidebar.useExistingTitle}
+                        type="button"
+                      >
+                        <Check size={13} /> {uiText.sidebar.useExisting}
+                      </button>
+                    )}
+                    <button
+                      disabled={busy !== null}
+                      onClick={fillLocationFromImportedHint}
+                      title={uiText.sidebar.fillLocationTitle}
+                      type="button"
+                    >
+                      <MapPin size={13} /> {uiText.sidebar.fillLocation}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           <datalist id="story-character-options">
@@ -2759,7 +3244,7 @@ function ProjectSidebar({
                   status: event.target.value
                 }))
               }
-              aria-label="场景状态"
+              aria-label={uiText.sidebar.sceneStatusAria}
             >
               {sceneStatusOptions.map((status) => (
                 <option key={status} value={status}>
@@ -2769,7 +3254,7 @@ function ProjectSidebar({
             </select>
             <input
               list="project-scene-options"
-              placeholder="previous_scene_id"
+              placeholder={uiText.sidebar.previousScenePlaceholder}
               value={sceneForm.previous_scene_id}
               onChange={(event) =>
                 onSceneFormChange((current) => ({
@@ -2781,7 +3266,7 @@ function ProjectSidebar({
           </div>
           <input
             list="story-character-options"
-            placeholder="POV character_id"
+            placeholder={uiText.sidebar.povCharacterPlaceholder}
             value={sceneForm.pov_character_id}
             onChange={(event) =>
               onSceneFormChange((current) => ({
@@ -2792,7 +3277,7 @@ function ProjectSidebar({
           />
           <input
             list="story-location-options"
-            placeholder="location_id"
+            placeholder={uiText.sidebar.locationPlaceholder}
             value={sceneForm.location_id}
             onChange={(event) =>
               onSceneFormChange((current) => ({
@@ -2802,7 +3287,7 @@ function ProjectSidebar({
             }
           />
           <input
-            placeholder="时间线"
+            placeholder={uiText.sidebar.timelinePlaceholder}
             value={sceneForm.timeline_position}
             onChange={(event) =>
               onSceneFormChange((current) => ({
@@ -2812,14 +3297,14 @@ function ProjectSidebar({
             }
           />
           <input
-            placeholder="场景目标"
+            placeholder={uiText.sidebar.sceneGoalPlaceholder}
             value={sceneForm.goal}
             onChange={(event) =>
               onSceneFormChange((current) => ({ ...current, goal: event.target.value }))
             }
           />
           <input
-            placeholder="场景冲突"
+            placeholder={uiText.sidebar.sceneConflictPlaceholder}
             value={sceneForm.conflict}
             onChange={(event) =>
               onSceneFormChange((current) => ({ ...current, conflict: event.target.value }))
@@ -2827,14 +3312,14 @@ function ProjectSidebar({
           />
           <div className="compact-grid">
             <input
-              placeholder="场景结果"
+              placeholder={uiText.sidebar.sceneOutcomePlaceholder}
               value={sceneForm.outcome}
               onChange={(event) =>
                 onSceneFormChange((current) => ({ ...current, outcome: event.target.value }))
               }
             />
             <input
-              placeholder="情绪转折"
+              placeholder={uiText.sidebar.emotionalTurnPlaceholder}
               value={sceneForm.emotional_turn}
               onChange={(event) =>
                 onSceneFormChange((current) => ({
@@ -2846,14 +3331,14 @@ function ProjectSidebar({
           </div>
           <div className="compact-grid">
             <input
-              placeholder="风格 POV"
+              placeholder={uiText.sidebar.stylePovPlaceholder}
               value={sceneForm.style_pov}
               onChange={(event) =>
                 onSceneFormChange((current) => ({ ...current, style_pov: event.target.value }))
               }
             />
             <input
-              placeholder="时态"
+              placeholder={uiText.sidebar.tensePlaceholder}
               value={sceneForm.style_tense}
               onChange={(event) =>
                 onSceneFormChange((current) => ({ ...current, style_tense: event.target.value }))
@@ -2862,14 +3347,14 @@ function ProjectSidebar({
           </div>
           <div className="compact-grid">
             <input
-              placeholder="语气"
+              placeholder={uiText.sidebar.tonePlaceholder}
               value={sceneForm.style_tone}
               onChange={(event) =>
                 onSceneFormChange((current) => ({ ...current, style_tone: event.target.value }))
               }
             />
             <input
-              placeholder="句式节奏"
+              placeholder={uiText.sidebar.rhythmPlaceholder}
               value={sceneForm.style_sentence_rhythm}
               onChange={(event) =>
                 onSceneFormChange((current) => ({
@@ -2881,14 +3366,14 @@ function ProjectSidebar({
           </div>
           <div className="compact-grid">
             <input
-              placeholder="用词"
+              placeholder={uiText.sidebar.dictionPlaceholder}
               value={sceneForm.style_diction}
               onChange={(event) =>
                 onSceneFormChange((current) => ({ ...current, style_diction: event.target.value }))
               }
             />
             <input
-              placeholder="对话风格"
+              placeholder={uiText.sidebar.dialogueStylePlaceholder}
               value={sceneForm.style_dialogue_style}
               onChange={(event) =>
                 onSceneFormChange((current) => ({
@@ -2900,7 +3385,7 @@ function ProjectSidebar({
           </div>
           <textarea
             className="mini-textarea"
-            placeholder="禁用表达：每行一条"
+            placeholder={uiText.sidebar.bannedPatternsPlaceholder}
             value={sceneForm.style_banned_patterns}
             onChange={(event) =>
               onSceneFormChange((current) => ({
@@ -2911,7 +3396,7 @@ function ProjectSidebar({
           />
           <textarea
             className="mini-textarea"
-            placeholder="出场人物 IDs：每行一条"
+            placeholder={uiText.sidebar.requiredCharactersPlaceholder}
             value={sceneForm.required_characters}
             onChange={(event) =>
               onSceneFormChange((current) => ({
@@ -2922,7 +3407,7 @@ function ProjectSidebar({
           />
           <textarea
             className="mini-textarea"
-            placeholder="必须包含：每行一条"
+            placeholder={uiText.sidebar.mustIncludePlaceholder}
             value={sceneForm.must_include}
             onChange={(event) =>
               onSceneFormChange((current) => ({
@@ -2933,7 +3418,7 @@ function ProjectSidebar({
           />
           <textarea
             className="mini-textarea"
-            placeholder="禁止违反：每行一条"
+            placeholder={uiText.sidebar.mustNotViolatePlaceholder}
             value={sceneForm.must_not_violate}
             onChange={(event) =>
               onSceneFormChange((current) => ({
@@ -2945,9 +3430,9 @@ function ProjectSidebar({
         </details>
 
         <details className="sidebar-section seed-panel">
-          <summary className="section-title">人物 / 地点 / 规则</summary>
+          <summary className="section-title">{uiText.sidebar.storyBibleTitle}</summary>
           <input
-            placeholder="人物名称"
+            placeholder={uiText.sidebar.characterNamePlaceholder}
             value={characterForm.name}
             onChange={(event) =>
               onCharacterFormChange((current) => ({ ...current, name: event.target.value }))
@@ -2955,7 +3440,7 @@ function ProjectSidebar({
           />
           <div className="compact-grid">
             <input
-              placeholder="人物作用"
+              placeholder={uiText.sidebar.characterRolePlaceholder}
               value={characterForm.role}
               onChange={(event) =>
                 onCharacterFormChange((current) => ({ ...current, role: event.target.value }))
@@ -2966,11 +3451,11 @@ function ProjectSidebar({
               onClick={onCreateCharacter}
               type="button"
             >
-              <Save size={15} /> 人物
+              <Save size={15} /> {uiText.sidebar.createCharacter}
             </button>
           </div>
           <input
-            placeholder="地点名称"
+            placeholder={uiText.sidebar.locationNamePlaceholder}
             value={locationForm.name}
             onChange={(event) =>
               onLocationFormChange((current) => ({ ...current, name: event.target.value }))
@@ -2978,7 +3463,7 @@ function ProjectSidebar({
           />
           <div className="compact-grid">
             <input
-              placeholder="地点类型"
+              placeholder={uiText.sidebar.locationTypePlaceholder}
               value={locationForm.type}
               onChange={(event) =>
                 onLocationFormChange((current) => ({ ...current, type: event.target.value }))
@@ -2989,18 +3474,18 @@ function ProjectSidebar({
               onClick={onCreateLocation}
               type="button"
             >
-              <Save size={15} /> 地点
+              <Save size={15} /> {uiText.sidebar.createLocation}
             </button>
           </div>
           <input
-            placeholder="规则领域"
+            placeholder={uiText.sidebar.ruleDomainPlaceholder}
             value={worldRuleForm.domain}
             onChange={(event) =>
               onWorldRuleFormChange((current) => ({ ...current, domain: event.target.value }))
             }
           />
           <input
-            placeholder="世界规则"
+            placeholder={uiText.sidebar.worldRulePlaceholder}
             value={worldRuleForm.rule}
             onChange={(event) =>
               onWorldRuleFormChange((current) => ({ ...current, rule: event.target.value }))
@@ -3026,14 +3511,14 @@ function ProjectSidebar({
               onClick={onCreateWorldRule}
               type="button"
             >
-              <Save size={15} /> 规则
+              <Save size={15} /> {uiText.sidebar.createRule}
             </button>
           </div>
         </details>
       </div>
       <div className="sidebar-footer">
         <ShieldCheck size={16} />
-        导入、草稿、候选事实都不会直接改写 canon（正典）。
+        {uiText.sidebar.footer}
       </div>
     </>
   );
@@ -3178,8 +3663,8 @@ function DocumentReader({
       <div className="document-reader empty">
         <EmptyState
           icon={<Library />}
-          title="选择一个文档"
-          text="导入内容默认只保存在浏览器内存中，不会自动进入草稿、候选事实或 canon。"
+          title={uiText.library.readerEmptyTitle}
+          text={uiText.library.readerEmptyText}
         />
       </div>
     );
@@ -3203,63 +3688,63 @@ function DocumentReader({
         </div>
       </div>
       <div className="reader-bridge">
-        <span>当前是本地阅读器资料；只有点击下面按钮才会写入后端 Proposal/Draft/StyleSample/CandidateFact。</span>
+        <span>{uiText.library.bridgeText}</span>
         <div>
           <button
             className="primary"
             disabled={!canBuildStructure}
             onClick={() => onAnalyzeStructure(doc)}
-            title={noProjectTitle ?? "从导入小说生成可编辑的项目结构草稿；作者确认后才会创建章节/场景。"}
+            title={noProjectTitle ?? uiText.library.buildStructureTitle}
             type="button"
           >
-            <BookOpen size={14} /> 生成项目结构草稿
+            <BookOpen size={14} /> {uiText.library.buildStructure}
           </button>
           <button
             disabled={!canBridge}
             onClick={() => onSaveDraft(doc)}
-            title="保存为当前场景 Draft Store 草稿，不写 canon。"
+            title={uiText.library.saveDraftTitle}
             type="button"
           >
-            <FileText size={14} /> 设为当前草稿
+            <FileText size={14} /> {uiText.library.saveDraft}
           </button>
           <button
             disabled={!canBridge}
             onClick={() => onSaveProposal(doc)}
-            title="保存为 Proposal Store 协作草稿，不写当前场景草稿。"
+            title={uiText.library.saveProposalTitle}
             type="button"
           >
-            <SplitSquareVertical size={14} /> 存入草稿箱
+            <SplitSquareVertical size={14} /> {uiText.library.saveProposal}
           </button>
           <button
             disabled={doc.status !== "ready" || !canGenerate || busy !== null}
             onClick={() => onSaveStyle(doc)}
-            title="保存为 StyleSample Store 风格样本，只作为 P6 软参考。"
+            title={uiText.library.saveStyleTitle}
             type="button"
           >
-            <Wand2 size={14} /> 存为风格样本
+            <Wand2 size={14} /> {uiText.library.saveStyle}
           </button>
           <button
             disabled={!canUseLlmExtraction}
             onClick={() => onExtractDocumentFacts(doc)}
-            title="把导入资料发送给已配置的 LLM，生成可编辑 fact_draft；不会自动进入 canon。"
+            title={uiText.library.llmFactDraftTitle}
             type="button"
           >
-            <ShieldCheck size={14} /> LLM 抽设定草稿
+            <ShieldCheck size={14} /> {uiText.library.llmFactDraft}
           </button>
           <button
             disabled={!canBridge}
             onClick={() => onExtract(doc)}
-            title="保存为草稿后，仅解析文中已有的 [[fact:...]] 显式标记。"
+            title={uiText.library.parseMarkersTitle}
             type="button"
           >
-            <ShieldCheck size={14} /> 解析显式标记
+            <ShieldCheck size={14} /> {uiText.library.parseMarkers}
           </button>
         </div>
       </div>
       {doc.status === "error" ? (
         <div className="reader-error">
           <AlertTriangle size={17} />
-          <strong>无法读取这个文档。</strong>
+          <strong>{uiText.library.readErrorTitle}</strong>
           <span>{doc.error}</span>
         </div>
       ) : (
@@ -3318,30 +3803,30 @@ function AgentSettingsInspector({
 }) {
   const descriptions = settings?.permission_descriptions ?? defaultPermissionDescriptions;
   const apiKeyStatus = settings?.api_key_configured
-    ? `已配置（${settings.api_key_preview ?? "隐藏"}）`
-    : "未配置";
+    ? `${uiText.settings.configuredKey}（${settings.api_key_preview ?? uiText.settings.hiddenKey}）`
+    : uiText.common.notConfigured;
   const updateTarget = updateStatus.installerUrl ?? updateStatus.releaseUrl;
 
   return (
     <div className="settings-panel">
       {isDesktopRuntime() && (
         <section className="settings-block">
-          <div className="settings-title"><Database size={15} /> 桌面后端</div>
-          <MetricRow label="API 地址" value={desktopSettings?.backendUrl ?? "读取中"} />
-          <MetricRow label="配置工作区" value={desktopSettings?.workspacePath ?? "读取中"} />
-          <MetricRow label="运行状态" value={formatDesktopBackendDetail(desktopBackend)} />
+          <div className="settings-title"><Database size={15} /> {uiText.settings.desktopBackend}</div>
+          <MetricRow label={uiText.settings.apiAddress} value={desktopSettings?.backendUrl ?? uiText.common.loading} />
+          <MetricRow label={uiText.settings.configuredWorkspace} value={desktopSettings?.workspacePath ?? uiText.common.loading} />
+          <MetricRow label={uiText.settings.backendStatus} value={formatDesktopBackendDetail(desktopBackend)} />
           <MetricRow
-            label="健康检查工作区"
-            value={desktopBackend?.healthWorkspacePath ?? (desktopBackend?.reachable ? "未返回" : "未连接")}
+            label={uiText.settings.healthWorkspace}
+            value={desktopBackend?.healthWorkspacePath ?? (desktopBackend?.reachable ? uiText.settings.notReturned : uiText.settings.notConnected)}
           />
           <MetricRow
-            label="进程"
+            label={uiText.settings.process}
             value={
               desktopBackend?.pid
-                ? `${desktopBackend.managed ? "受管" : "外部"} PID ${desktopBackend.pid}`
+                ? `${desktopBackend.managed ? uiText.settings.managedProcess : uiText.settings.externalProcess} PID ${desktopBackend.pid}`
                 : desktopBackend?.reachable
-                  ? "外部或未知进程"
-                  : "未运行"
+                  ? uiText.settings.externalOrUnknownProcess
+                  : uiText.settings.notRunning
             }
           />
           {desktopBackend?.error && (
@@ -3353,27 +3838,27 @@ function AgentSettingsInspector({
           {desktopBackend?.reachable && !desktopBackend.managed && desktopBackend.workspaceCompatible && (
             <div className="desktop-backend-card warning">
               <AlertTriangle size={15} />
-              <span>当前连接的是外部后端；退出桌面壳不会停止这个进程。</span>
+              <span>{uiText.settings.externalBackendWarning}</span>
             </div>
           )}
           <div className="settings-actions compact">
             <button onClick={onBackendRefresh} type="button" disabled={busy === "desktop-backend"}>
-              <RefreshCw size={15} /> 刷新后端
+              <RefreshCw size={15} /> {uiText.settings.refreshBackend}
             </button>
             <button onClick={onBackendStart} type="button" disabled={busy === "desktop-backend"}>
-              <Play size={15} /> 启动/连接
+              <Play size={15} /> {uiText.settings.startOrConnect}
             </button>
             <button onClick={onBackendStop} type="button" disabled={busy === "desktop-backend" || !desktopBackend?.managed}>
-              <X size={15} /> 停止受管后端
+              <X size={15} /> {uiText.settings.stopManagedBackend}
             </button>
           </div>
         </section>
       )}
 
       <section className="settings-block">
-        <div className="settings-title"><Wand2 size={15} /> 核心模型</div>
+        <div className="settings-title"><Wand2 size={15} /> {uiText.settings.modelSection}</div>
         <label>
-          <span>写作模式</span>
+          <span>{uiText.settings.writerMode}</span>
           <select
             value={form.scene_writer}
             onChange={(event) =>
@@ -3383,12 +3868,12 @@ function AgentSettingsInspector({
               }))
             }
           >
-            <option value="rule_based">本地规则模式</option>
-            <option value="llm">OpenAI 兼容 LLM</option>
+            <option value="rule_based">{uiText.settings.ruleBasedMode}</option>
+            <option value="llm">{uiText.settings.llmMode}</option>
           </select>
         </label>
         <label>
-          <span>供应商名称</span>
+          <span>{uiText.settings.providerName}</span>
           <input
             value={form.provider_label}
             onChange={(event) =>
@@ -3397,7 +3882,7 @@ function AgentSettingsInspector({
           />
         </label>
         <label>
-          <span>基础 URL</span>
+          <span>{uiText.settings.baseUrl}</span>
           <input
             placeholder="https://provider.example/v1"
             value={form.llm_base_url}
@@ -3407,7 +3892,7 @@ function AgentSettingsInspector({
           />
         </label>
         <label>
-          <span>模型</span>
+          <span>{uiText.settings.model}</span>
           <input
             value={form.llm_model}
             onChange={(event) =>
@@ -3423,18 +3908,18 @@ function AgentSettingsInspector({
             }
             type="checkbox"
           />
-          <span>请求 JSON 模式</span>
+          <span>{uiText.settings.requestJsonMode}</span>
         </label>
       </section>
 
       <section className="settings-block">
-        <div className="settings-title"><KeyRound size={15} /> API 密钥</div>
-        <MetricRow label="当前密钥" value={apiKeyStatus} />
+        <div className="settings-title"><KeyRound size={15} /> {uiText.settings.apiKeySection}</div>
+        <MetricRow label={uiText.settings.currentKey} value={apiKeyStatus} />
         <label>
-          <span>替换密钥</span>
+          <span>{uiText.settings.replaceKey}</span>
           <input
             autoComplete="off"
-            placeholder="留空表示保留现有密钥"
+            placeholder={uiText.settings.keyPlaceholder}
             type="password"
             value={apiKeyInput}
             onChange={(event) => onApiKeyChange(event.target.value)}
@@ -3446,12 +3931,12 @@ function AgentSettingsInspector({
             onChange={(event) => onClearApiKeyChange(event.target.checked)}
             type="checkbox"
           />
-          <span>清除已保存密钥</span>
+          <span>{uiText.settings.clearKey}</span>
         </label>
       </section>
 
       <section className="settings-block">
-        <div className="settings-title"><Lock size={15} /> 权限级别</div>
+        <div className="settings-title"><Lock size={15} /> {uiText.settings.permissionSection}</div>
         <div className="permission-stack">
           {permissionLevels.map((level) => (
             <label className={`permission-option ${form.permission_level === level ? "selected" : ""}`} key={level}>
@@ -3473,20 +3958,20 @@ function AgentSettingsInspector({
         </div>
         <div className="reader-warning">
           <ShieldCheck size={15} />
-          <span>保存后权限立即生效；具体 canon 写入仍需要后端 full 权限和人工 provenance。</span>
+          <span>{uiText.settings.permissionWarning}</span>
         </div>
       </section>
 
       <section className="settings-block">
-        <div className="settings-title"><Download size={15} /> 版本与更新</div>
-        <MetricRow label="当前版本" value={`v${APP_VERSION}`} />
+        <div className="settings-title"><Download size={15} /> {uiText.settings.versionSection}</div>
+        <MetricRow label={uiText.settings.currentVersion} value={`v${APP_VERSION}`} />
         <div className={`update-card ${updateStatus.state}`}>
           <span>{updateStatus.message}</span>
           {updateStatus.publishedAt && (
-            <small>发布时间：{formatDateTime(updateStatus.publishedAt)}</small>
+            <small>{uiText.settings.publishedAt}：{formatDateTime(updateStatus.publishedAt)}</small>
           )}
           {updateStatus.channel === "desktop" && (
-            <small>桌面版使用 Tauri 签名更新；网页版只提供 GitHub Release（发布版本）下载提示。</small>
+            <small>{uiText.settings.desktopUpdateNote}</small>
           )}
           {updateStatus.state === "available" && updateStatus.canInstall && (
             <button
@@ -3495,12 +3980,12 @@ function AgentSettingsInspector({
               type="button"
               disabled={busy === "update-install"}
             >
-              <Download size={14} /> 安装更新并重启
+              <Download size={14} /> {uiText.settings.installUpdate}
             </button>
           )}
           {updateStatus.state === "available" && !updateStatus.canInstall && updateTarget && (
             <a href={updateTarget} target="_blank" rel="noreferrer">
-              <Download size={14} /> 下载新版安装器
+              <Download size={14} /> {uiText.settings.downloadInstaller}
             </a>
           )}
         </div>
@@ -3508,13 +3993,13 @@ function AgentSettingsInspector({
 
       <div className="settings-actions">
         <button onClick={onRefresh} type="button" disabled={busy === "settings"}>
-          <RefreshCw size={15} /> 刷新
+          <RefreshCw size={15} /> {uiText.settings.refreshSettings}
         </button>
         <button onClick={onUpdateCheck} type="button" disabled={busy === "update-check"}>
-          <RefreshCw size={15} /> 检查更新
+          <RefreshCw size={15} /> {uiText.settings.checkUpdates}
         </button>
         <button className="primary" onClick={onSave} type="button" disabled={busy === "settings"}>
-          <Save size={15} /> 保存设置
+          <Save size={15} /> {uiText.settings.saveSettings}
         </button>
       </div>
     </div>
@@ -3523,18 +4008,18 @@ function AgentSettingsInspector({
 
 function ContextInspector({ pack }: { pack: ContextPack | null }) {
   if (!pack) {
-    return <EmptyState icon={<SplitSquareVertical />} title="暂无上下文包" text="构建上下文后可检查 canon（正典）、预算和缺口。" />;
+    return <EmptyState icon={<SplitSquareVertical />} title={uiText.inspector.noContextTitle} text={uiText.inspector.noContextText} />;
   }
   return (
     <div className="inspector-body">
-      <MetricRow label="预算" value={`${pack.budget.estimated_tokens}/${pack.budget.target_tokens}`} />
-      <MetricRow label="图查询" value={String(pack.provenance.graph_query_ids.length)} />
-      <ListBlock title="必须包含" items={pack.must_include.map(localizeText)} />
-      <ListBlock title="禁止违反" items={pack.must_not_violate.map(localizeText)} tone="danger" />
-      <ListBlock title="关系" items={pack.active_relationships.map(localizeText)} />
-      <ListBlock title="伏笔" items={pack.unresolved_foreshadowing.map(localizeText)} />
-      <ListBlock title="缺失上下文" items={pack.missing_context.map((gap) => `${formatSeverity(gap.severity)}: ${localizeText(gap.ref)} - ${formatKnownMessage(gap.message)}`)} tone="warning" />
-      <ListBlock title="已丢弃项目" items={pack.budget.dropped_items.map(localizeText)} />
+      <MetricRow label={uiText.inspector.budget} value={`${pack.budget.estimated_tokens}/${pack.budget.target_tokens}`} />
+      <MetricRow label={uiText.inspector.graphQueries} value={String(pack.provenance.graph_query_ids.length)} />
+      <ListBlock title={uiText.inspector.mustInclude} items={pack.must_include.map(localizeText)} />
+      <ListBlock title={uiText.inspector.mustNotViolate} items={pack.must_not_violate.map(localizeText)} tone="danger" />
+      <ListBlock title={uiText.inspector.relationships} items={pack.active_relationships.map(localizeText)} />
+      <ListBlock title={uiText.inspector.foreshadowing} items={pack.unresolved_foreshadowing.map(localizeText)} />
+      <ListBlock title={uiText.inspector.missingContext} items={pack.missing_context.map((gap) => `${formatSeverity(gap.severity)}: ${localizeText(gap.ref)} - ${formatKnownMessage(gap.message)}`)} tone="warning" />
+      <ListBlock title={uiText.inspector.droppedItems} items={pack.budget.dropped_items.map(localizeText)} />
     </div>
   );
 }
@@ -3543,26 +4028,26 @@ function ContinuityInspector({ run, report }: { run: WorkflowRun | null; report:
   const blockingCount = report?.issues.filter((issue) => issue.blocking).length ?? 0;
   return (
     <div className="inspector-body">
-      <MetricRow label="当前步骤" value={stepLabels[run?.current_step ?? ""] ?? "无"} />
-      <MetricRow label="审阅载荷" value={formatStatus(run?.review_payload.status ?? "none")} />
-      <MetricRow label="连续性" value={formatStatus(report?.status ?? "not checked")} />
-      <MetricRow label="阻塞问题" value={String(blockingCount)} />
+      <MetricRow label={uiText.inspector.currentStep} value={stepLabels[run?.current_step as keyof typeof stepLabels] ?? uiText.common.none} />
+      <MetricRow label={uiText.inspector.reviewPayload} value={formatStatus(run?.review_payload.status ?? "none")} />
+      <MetricRow label={uiText.inspector.continuity} value={formatStatus(report?.status ?? "not checked")} />
+      <MetricRow label={uiText.inspector.blockingIssues} value={String(blockingCount)} />
       {report ? (
         <>
-          <ListBlock title="摘要" items={[report.summary]} />
-          <ListBlock title="检查维度" items={report.checked_dimensions.map(formatDimension)} />
+          <ListBlock title={uiText.inspector.summary} items={[report.summary]} />
+          <ListBlock title={uiText.inspector.checkedDimensions} items={report.checked_dimensions.map(formatDimension)} />
           <ListBlock
-            title="问题"
-            items={report.issues.map((issue) => `${formatSeverity(issue.severity)}: ${formatIssueType(issue.issue_type)} - ${formatKnownMessage(issue.description)} 建议：${formatKnownMessage(issue.suggestion)}`)}
+            title={uiText.inspector.issues}
+            items={report.issues.map((issue) => `${formatSeverity(issue.severity)}: ${formatIssueType(issue.issue_type)} - ${formatKnownMessage(issue.description)} ${uiText.inspector.suggestion}：${formatKnownMessage(issue.suggestion)}`)}
             tone={blockingCount > 0 ? "danger" : "warning"}
           />
         </>
       ) : (
-        <EmptyState icon={<Activity />} title="暂无质检报告" text="运行场景工作流后可查看连续性检查结果。" />
+        <EmptyState icon={<Activity />} title={uiText.inspector.noReportTitle} text={uiText.inspector.noReportText} />
       )}
       <ListBlock
-        title="运行步骤"
-        items={(run?.steps ?? fallbackSteps).map((step) => `${stepLabels[step.name] ?? step.name}: ${formatStatus(step.status)}${step.message ? ` - ${formatKnownMessage(step.message)}` : ""}`)}
+        title={uiText.inspector.runSteps}
+        items={(run?.steps ?? fallbackSteps).map((step) => `${stepLabels[step.name as keyof typeof stepLabels] ?? step.name}: ${formatStatus(step.status)}${step.message ? ` - ${formatKnownMessage(step.message)}` : ""}`)}
       />
     </div>
   );
@@ -3580,7 +4065,7 @@ function FactsInspector({
   onReview: (factId: string, action: "accept" | "reject" | "defer") => void;
 }) {
   if (!facts.length) {
-    return <EmptyState icon={<ShieldCheck />} title="暂无待审事实" text="抽取出的状态变化会在这里等待人工审阅。" />;
+    return <EmptyState icon={<ShieldCheck />} title={uiText.inspector.noFactsTitle} text={uiText.inspector.noFactsText} />;
   }
   return (
     <div className="fact-list">
@@ -3592,9 +4077,9 @@ function FactsInspector({
           </div>
           <p>{localizeText(fact.rationale)}</p>
           <div className="fact-actions">
-            <button onClick={() => onReview(fact.id, "accept")} disabled={busy !== null || !canReview} type="button"><Check size={14} />接受</button>
-            <button onClick={() => onReview(fact.id, "defer")} disabled={busy !== null || !canReview} type="button"><Clock3 size={14} />稍后</button>
-            <button onClick={() => onReview(fact.id, "reject")} disabled={busy !== null || !canReview} type="button"><X size={14} />拒绝</button>
+            <button onClick={() => onReview(fact.id, "accept")} disabled={busy !== null || !canReview} type="button"><Check size={14} />{reviewActionLabels.accept}</button>
+            <button onClick={() => onReview(fact.id, "defer")} disabled={busy !== null || !canReview} type="button"><Clock3 size={14} />{reviewActionLabels.defer}</button>
+            <button onClick={() => onReview(fact.id, "reject")} disabled={busy !== null || !canReview} type="button"><X size={14} />{reviewActionLabels.reject}</button>
           </div>
         </div>
       ))}
@@ -3612,11 +4097,11 @@ function GraphPreview({
   if (!preview) {
     return (
       <div className="graph-preview">
-        <div className="preview-title"><Network size={15} /> 图谱 / 时间线</div>
+        <div className="preview-title"><Network size={15} /> {uiText.graph.title}</div>
         <EmptyState
           icon={<Network />}
-          title="暂无后端图谱预览"
-          text="选择真实项目后，这里会显示 Graph Store 中的 CANON 节点关系和场景时间线。"
+          title={uiText.graph.emptyTitle}
+          text={uiText.graph.emptyText}
         />
       </div>
     );
@@ -3624,7 +4109,7 @@ function GraphPreview({
 
   return (
     <div className="graph-preview">
-      <div className="preview-title"><Network size={15} /> 图谱 / 时间线</div>
+      <div className="preview-title"><Network size={15} /> {uiText.graph.title}</div>
       <div className="graph-lines">
         {preview.relationships.length ? (
           preview.relationships.map((edge) => (
@@ -3635,10 +4120,10 @@ function GraphPreview({
             </div>
           ))
         ) : (
-          <p className="muted">暂无可预览关系。</p>
+          <p className="muted">{uiText.graph.noRelationships}</p>
         )}
       </div>
-      {preview.truncated && <p className="muted">预览已截断，只显示前几条关系。</p>}
+      {preview.truncated && <p className="muted">{uiText.graph.truncated}</p>}
       <div className="timeline">
         {preview.timeline.length ? (
           preview.timeline.map((item) => (
@@ -3650,7 +4135,7 @@ function GraphPreview({
             </div>
           ))
         ) : (
-          <div>暂无场景</div>
+          <div>{uiText.graph.noScenes}</div>
         )}
       </div>
     </div>
@@ -3658,7 +4143,7 @@ function GraphPreview({
 }
 
 function Meta({ label, value }: { label: string; value: string }) {
-  return <div className="meta"><span>{label}</span><strong>{localizeText(value) || "缺失"}</strong></div>;
+  return <div className="meta"><span>{label}</span><strong>{localizeText(value) || uiText.common.missing}</strong></div>;
 }
 
 function MetricRow({ label, value }: { label: string; value: string }) {
@@ -3669,7 +4154,7 @@ function ListBlock({ title, items, tone }: { title: string; items: string[]; ton
   return (
     <section className={`list-block ${tone ?? ""}`}>
       <div className="list-title">{title}</div>
-      {items.length ? items.map((item) => <p key={item}>{item}</p>) : <p className="muted">无</p>}
+      {items.length ? items.map((item) => <p key={item}>{item}</p>) : <p className="muted">{uiText.common.none}</p>}
     </section>
   );
 }
@@ -3696,7 +4181,9 @@ function findProposalRef(proposal: ProposalArtifact, kind: string): string | nul
 }
 
 function formatProposalRefs(refs: ProposalArtifact["source_refs"]): string[] {
-  return refs.map((ref) => `${ref.kind}: ${ref.ref}${ref.note ? ` / ${ref.note}` : ""}`);
+  return refs.map(
+    (ref) => `${formatRefKind(ref.kind)}: ${ref.ref}${ref.note ? ` / ${localizeText(ref.note)}` : ""}`
+  );
 }
 
 function statusTone(status?: string | null): "good" | "warning" | "danger" | "neutral" {
@@ -3721,12 +4208,6 @@ function permissionIcon(level: AgentPermissionLevel) {
 
 const permissionLevels: AgentPermissionLevel[] = ["read_only", "read_generate", "full"];
 
-const permissionLabels: Record<AgentPermissionLevel, string> = {
-  read_only: "仅读取",
-  read_generate: "可读取生成",
-  full: "完全权限"
-};
-
 const proposalTypes: ProposalArtifactType[] = [
   "scene_draft",
   "fact_draft",
@@ -3747,96 +4228,6 @@ const proposalStatuses: ProposalStatus[] = [
 
 const chapterStatusOptions = ["planned", "drafting", "completed", "archived"];
 const sceneStatusOptions = ["planned", "drafting", "completed", "archived"];
-
-const proposalTypeLabels: Record<ProposalArtifactType, string> = {
-  scene_draft: "场景草稿",
-  fact_draft: "事实草稿",
-  scene_rebuild: "场景重建",
-  canon_patch: "Canon 补丁",
-  outline_draft: "大纲草稿",
-  project_structure_draft: "项目结构草稿"
-};
-
-const proposalStatusLabels: Record<ProposalStatus, string> = {
-  drafting: "起草中",
-  agent_revised: "Agent 已修订",
-  author_revised: "作者已修订",
-  ready_for_review: "待审",
-  accepted: "已接受",
-  rejected: "已拒绝"
-};
-
-const defaultPermissionDescriptions: Record<AgentPermissionLevel, string> = {
-  read_only: "只能读取 canon（正典）、草稿、协作草稿、上下文包、运行记录和待审事实。",
-  read_generate: "可读取并生成草稿、协作草稿、检查结果、候选事实和风格样本。",
-  full: "允许完整本地作者操作，包括人工初始化（seed）、协作草稿决策和 CandidateFact（候选事实）审阅决策。"
-};
-
-const stepLabels: Record<string, string> = {
-  build_context: "构建上下文",
-  write_draft: "写作草稿",
-  check_continuity: "连续性检查",
-  extract_state: "抽取状态",
-  human_review: "人工审阅"
-};
-
-const statusLabels: Record<string, string> = {
-  idle: "空闲",
-  pending: "等待中",
-  planned: "已规划",
-  drafting: "起草中",
-  archived: "已归档",
-  running: "运行中",
-  completed: "已完成",
-  pass: "通过",
-  awaiting_review: "等待审阅",
-  needs_revision: "需要修订",
-  blocked: "已阻塞",
-  failed: "失败",
-  skipped: "已跳过",
-  inconclusive: "未定",
-  none: "无",
-  "not checked": "未检查"
-};
-
-const severityLabels: Record<string, string> = {
-  critical: "严重",
-  high: "高",
-  medium: "中",
-  low: "低"
-};
-
-const dimensionLabels: Record<string, string> = {
-  knowledge_boundary: "人物知识边界",
-  timeline: "时间线",
-  location_state: "地点状态",
-  relationship_state: "关系状态",
-  world_rule: "世界规则"
-};
-
-const issueTypeLabels: Record<string, string> = {
-  knowledge_boundary_violation: "人物知识边界违规",
-  timeline_conflict: "时间线冲突",
-  location_conflict: "地点冲突",
-  relationship_conflict: "关系冲突",
-  world_rule_conflict: "世界规则冲突",
-  missing_required_element: "缺少必要元素",
-  unsupported_new_fact: "未支持的新事实",
-  style_drift: "文风漂移",
-  foreshadowing_mismatch: "伏笔不匹配",
-  causal_gap: "因果缺口",
-  pov_leak: "视角泄露"
-};
-
-const knownMessageLabels: Record<string, string> = {
-  "Human review completed.": "人工审阅已完成。"
-};
-
-const reviewActionLabels = {
-  accept: "接受",
-  reject: "拒绝",
-  defer: "延后"
-} as const;
 
 function flattenScenes(project: ProjectOutline): SceneOutline[] {
   return project.chapters.flatMap((chapter) => chapter.scenes);
@@ -3961,10 +4352,28 @@ function stringArrayProperty(
 }
 
 function graphNodeOptionLabel(node: GraphNodePayload): string {
-  const label = String(
-    node.properties.name ?? node.properties.title ?? node.properties.rule ?? node.id
-  );
+  const label = graphNodeDisplayName(node);
   return label === node.id ? node.id : `${label} / ${node.id}`;
+}
+
+function graphNodeDisplayName(node: GraphNodePayload): string {
+  return String(node.properties.name ?? node.properties.title ?? node.properties.rule ?? node.id);
+}
+
+function findGraphNodeByLabel(nodes: GraphNodePayload[], label: string): GraphNodePayload | null {
+  const normalizedLabel = normalizeMatchLabel(label);
+  if (!normalizedLabel) return null;
+  return (
+    nodes.find((node) => {
+      const nodeName = normalizeMatchLabel(graphNodeDisplayName(node));
+      const nodeId = normalizeMatchLabel(node.id);
+      return nodeName === normalizedLabel || nodeId === normalizedLabel;
+    }) ?? null
+  );
+}
+
+function normalizeMatchLabel(value: string): string {
+  return localizeText(value).trim().toLocaleLowerCase();
 }
 
 function splitLines(value: string): string[] {
@@ -3974,27 +4383,38 @@ function splitLines(value: string): string[] {
     .filter(Boolean);
 }
 
+function appendLineIfMissing(value: string, item: string): string {
+  const lines = splitLines(value);
+  return lines.includes(item) ? lines.join("\n") : [...lines, item].join("\n");
+}
+
 function toPositiveInteger(value: string, fallback: number): number {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function formatWriter(settings: AgentSettings | null): string {
-  if (!settings) return "读取中";
+  if (!settings) return uiText.common.loading;
   if (settings.scene_writer === "llm") {
-    return settings.api_key_configured ? `LLM ${settings.llm_model}` : "LLM 未配置密钥";
+    return settings.api_key_configured
+      ? `${localizedTerms.llm} ${settings.llm_model}`
+      : `${localizedTerms.llm} 未配置密钥`;
   }
   return "本地规则";
+}
+
+function formatWorkflowStep(stepName: string): string {
+  return stepLabels[stepName as keyof typeof stepLabels] ?? stepName;
 }
 
 function formatDesktopBackendLabel(status: DesktopBackendStatus): string {
   if (!status.reachable) return "后端未连接";
   if (!status.workspaceCompatible) return "后端工作区冲突";
-  return status.managed ? "受管 FastAPI" : "外部 FastAPI";
+  return status.managed ? `受管 ${localizedTerms.fastApi}` : `外部 ${localizedTerms.fastApi}`;
 }
 
 function formatDesktopBackendDetail(status: DesktopBackendStatus | null): string {
-  if (!status) return "读取中";
+  if (!status) return uiText.common.loading;
   if (!status.reachable) return "未连接";
   if (!status.workspaceCompatible) return "工作区冲突";
   return status.managed ? "已连接，桌面受管" : "已连接，外部进程";
@@ -4094,7 +4514,7 @@ async function readDocxText(file: File): Promise<{ text: string; warnings: strin
 function buildLibraryTree(documents: LibraryDocument[]): LibraryTreeNode {
   const root: LibraryTreeNode = {
     id: "library",
-    name: "本地资料",
+    name: uiText.library.localRoot,
     path: "library",
     type: "folder",
     children: []
@@ -4153,6 +4573,27 @@ function mergeLibraryDocuments(
   return Array.from(documents.values());
 }
 
+function selectAgentDiscussionSources(
+  documents: LibraryDocument[],
+  selectedDocumentId: string | null
+): AgentDiscussionRequest["local_sources"] {
+  const ready = documents.filter((document) => document.status === "ready");
+  const selected = selectedDocumentId
+    ? ready.filter((document) => document.id === selectedDocumentId)
+    : [];
+  const ordered = [
+    ...selected,
+    ...ready.filter((document) => document.id !== selectedDocumentId)
+  ].slice(0, 6);
+  return ordered.map((document) => ({
+    kind: "imported_document",
+    ref: `local:${document.id}`,
+    title: document.name,
+    text: document.content,
+    note: document.path
+  }));
+}
+
 function getAncestorFolderPaths(path: string): string[] {
   const parts = path.split("/").filter(Boolean);
   const ancestors = ["library"];
@@ -4185,7 +4626,7 @@ function getDocumentKind(fileName: string): LibraryDocumentKind | null {
 
 function normalizeImportedText(text: string): string {
   const normalized = text.replace(/\r\n?/g, "\n").trim();
-  return normalized || "这个文档中没有可读取文本。";
+  return normalized || uiText.library.emptyDocumentText;
 }
 
 function countDocuments(node: LibraryTreeNode): number {
@@ -4227,34 +4668,13 @@ function compareVersions(a: string, b: string): number {
 
 function formatDateTime(value: string): string {
   try {
-    return new Intl.DateTimeFormat("zh-CN", {
+    return new Intl.DateTimeFormat(APP_LOCALE, {
       dateStyle: "medium",
       timeStyle: "short"
     }).format(new Date(value));
   } catch {
     return value;
   }
-}
-
-function formatStatus(status: string | null | undefined): string {
-  if (!status) return "无";
-  return statusLabels[status] ?? localizeStatus(status) ?? status;
-}
-
-function formatSeverity(severity: string): string {
-  return severityLabels[severity] ?? severity;
-}
-
-function formatDimension(dimension: string): string {
-  return dimensionLabels[dimension] ?? dimension;
-}
-
-function formatIssueType(issueType: string): string {
-  return issueTypeLabels[issueType] ?? issueType;
-}
-
-function formatKnownMessage(message: string): string {
-  return knownMessageLabels[message] ?? message;
 }
 
 const fallbackSteps: WorkflowStep[] = [

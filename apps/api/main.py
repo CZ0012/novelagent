@@ -37,8 +37,10 @@ from storygraph.models.proposal import (
 from storygraph.models.common import EvidenceItem
 from storygraph.models.style import StyleSample
 from storygraph.services import (
+    AgentDiscussionService,
     AuthorCanonSeedService,
     ContextPackBuilder,
+    DiscussionSource,
     GraphQueryService,
     LLMDocumentFactExtractor,
     LLMProjectStructureAnalyzer,
@@ -229,6 +231,26 @@ class SceneGenerationRunRequest(BaseModel):
     output_target: Literal["draft_store", "proposal_workspace"] = "draft_store"
 
 
+class AgentDiscussionSourceRequest(BaseModel):
+    kind: str = "imported_document"
+    ref: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1)
+    note: str | None = None
+
+
+class AgentDiscussionRequest(BaseModel):
+    mode: Literal["discuss", "revise_selection", "revise_scene"] = "discuss"
+    instruction: str = Field(..., min_length=1)
+    selected_text: str | None = None
+    base_text: str | None = None
+    include_context_pack: bool = True
+    include_latest_draft: bool = True
+    local_sources: list[AgentDiscussionSourceRequest] = Field(default_factory=list)
+    allow_web_search: bool = False
+    web_search_query: str | None = None
+
+
 class ProposalCreateRequest(BaseModel):
     id: str | None = None
     artifact_type: ProposalArtifactType
@@ -310,7 +332,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.6")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.7")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
@@ -1386,6 +1408,93 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         context_pack = context_builder.build(project_id=project_id, scene_id=scene_id)
         return create_scene_writer(settings, draft_store).write_and_save(context_pack).model_dump()
 
+    @app.post("/projects/{project_id}/scenes/{scene_id}/agent-discussion")
+    def discuss_scene_with_agent(
+        project_id: str,
+        scene_id: str,
+        request: AgentDiscussionRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        _require_llm_configured(settings)
+        try:
+            graph_query.scene_node(project_id=project_id, scene_id=scene_id)
+            latest = (
+                draft_store.latest_for_scene(project_id, scene_id)
+                if request.include_latest_draft
+                else None
+            )
+            context_pack = (
+                context_builder.build(project_id=project_id, scene_id=scene_id)
+                if request.include_context_pack
+                else None
+            )
+            service = AgentDiscussionService(
+                provider=create_llm_provider(settings),
+                model=settings.llm_model,
+            )
+            result = service.discuss(
+                project_id=project_id,
+                scene_id=scene_id,
+                instruction=request.instruction,
+                mode=request.mode,
+                selected_text=request.selected_text,
+                base_text=request.base_text,
+                context_pack=context_pack,
+                latest_draft=latest,
+                local_sources=[
+                    DiscussionSource(
+                        kind=source.kind,
+                        ref=source.ref,
+                        title=source.title,
+                        text=source.text,
+                        note=source.note,
+                    )
+                    for source in request.local_sources
+                ],
+                allow_web_search=request.allow_web_search,
+                web_search_query=request.web_search_query,
+            )
+            now = utc_now()
+            proposal = ProposalArtifact(
+                id=new_id("proposal"),
+                project_id=project_id,
+                artifact_type=result.artifact_type,
+                status="agent_revised",
+                title=result.proposal_title,
+                body=result.proposal_body,
+                body_format=result.body_format,
+                target_refs=result.target_refs,
+                source_refs=result.source_refs,
+                provenance=ProposalProvenance(
+                    created_by="agent",
+                    created_via="llm",
+                    model_ref=settings.llm_model,
+                    note="Agent discussion produced a non-canon proposal from author-selected context.",
+                ),
+                version=1,
+                created_at=now,
+                updated_at=now,
+            )
+            stored = proposal_store.create(proposal)
+            return {
+                "proposal": stored.model_dump(),
+                "reply": result.reply,
+                "web_results": [
+                    {
+                        "title": item.title,
+                        "url": item.url,
+                        "snippet": item.snippet,
+                    }
+                    for item in result.web_results
+                ],
+                "truncated_sources": result.truncated_sources,
+                "replacement_applied": result.replacement_applied,
+            }
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
     @app.post("/projects/{project_id}/scenes/{scene_id}/check-continuity")
     def check_continuity(project_id: str, scene_id: str) -> dict:
         context_pack = context_builder.build(project_id=project_id, scene_id=scene_id)
@@ -1862,7 +1971,7 @@ def _require_llm_configured(settings: StoryGraphSettings) -> None:
             status_code=409,
             detail={
                 "category": "llm_not_configured",
-                "message": "LLM 资料抽取需要先配置：" + "、".join(missing),
+                "message": "LLM 功能需要先配置：" + "、".join(missing),
             },
         )
 

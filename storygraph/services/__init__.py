@@ -1,6 +1,11 @@
 """Domain services."""
 
 from storygraph.services.canon_seed import AuthorCanonSeedService
+from storygraph.services.agent_discussion import (
+    AgentDiscussionService,
+    DiscussionSource,
+    SimpleWebSearchClient,
+)
 from storygraph.services.context_pack_builder import ContextPackBuilder
 from storygraph.services.continuity_checker import RuleBasedContinuityChecker
 from storygraph.services.document_fact_extractor import LLMDocumentFactExtractor
@@ -17,7 +22,9 @@ from storygraph.services.state_extraction import RuleBasedStateExtractor
 
 __all__ = [
     "AuthorCanonSeedService",
+    "AgentDiscussionService",
     "ContextPackBuilder",
+    "DiscussionSource",
     "GraphQueryService",
     "LLMDocumentFactExtractor",
     "LLMProjectStructureAnalyzer",
@@ -29,6 +36,7 @@ __all__ = [
     "RuleBasedProjectStructureAnalyzer",
     "RuleBasedSceneWriter",
     "RuleBasedStateExtractor",
+    "SimpleWebSearchClient",
     "create_llm_provider",
     "create_scene_writer",
 ]

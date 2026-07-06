@@ -322,12 +322,12 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app)
         .text(TRAY_MENU_SHOW, "显示主界面")
         .separator()
-        .text(TRAY_MENU_QUIT, "退出 StoryGraph Agent")
+        .text(TRAY_MENU_QUIT, "退出 StoryGraph 写作台")
         .build()?;
     let mut tray = TrayIconBuilder::with_id("storygraph-main-tray")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("StoryGraph Agent 正在运行");
+        .tooltip("StoryGraph 写作台正在运行");
 
     if let Some(icon) = app.default_window_icon().cloned() {
         tray = tray.icon(icon);

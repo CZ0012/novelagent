@@ -73,20 +73,26 @@ button.primary {
 .workbench {
   height: 100vh;
   display: grid;
-  grid-template-rows: 58px 1fr;
+  grid-template-rows: auto 1fr;
 }
 
 .topbar {
   background: rgba(255, 255, 255, 0.92);
   border-bottom: 1px solid var(--line);
   display: grid;
-  grid-template-columns: 240px minmax(420px, 1fr) minmax(260px, 0.55fr) auto;
+  grid-template-areas:
+    "brand commands status"
+    "brand commands api";
+  grid-template-columns: minmax(210px, 240px) minmax(340px, 1fr) minmax(220px, 300px);
   align-items: center;
   gap: 12px;
-  padding: 0 18px;
+  min-height: 58px;
+  padding: 10px 18px;
 }
 
 .brand {
+  grid-area: brand;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -124,6 +130,8 @@ button.primary {
 }
 
 .api-control {
+  grid-area: api;
+  min-width: 0;
   height: 36px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -136,6 +144,7 @@ button.primary {
 }
 
 .api-control input {
+  min-width: 0;
   width: 100%;
   border: 0;
   outline: 0;
@@ -145,17 +154,23 @@ button.primary {
 }
 
 .top-actions {
+  grid-area: status;
+  min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .command-bar {
+  grid-area: commands;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  overflow: hidden;
+  flex-wrap: wrap;
+  overflow: visible;
 }
 
 .command-bar button {
@@ -307,6 +322,42 @@ details:not([open]) > summary.section-title::after {
   font-size: 12px;
   line-height: 1.35;
   padding: 8px 10px;
+}
+
+.scene-hint-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.scene-hint-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.scene-hint-label {
+  display: grid;
+  gap: 2px;
+}
+
+.scene-hint-label small {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.scene-hint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.scene-hint-row button {
+  min-height: 28px;
+  padding: 0 8px;
+  white-space: nowrap;
 }
 
 .sidebar-button-row {
@@ -521,6 +572,7 @@ h1 {
 
 .meta,
 .library-panel,
+.agent-panel,
 .proposal-panel,
 .draft-surface,
 .run-panel,
@@ -797,6 +849,145 @@ h1 {
   color: #17201d;
 }
 
+.agent-panel {
+  flex: 0 0 auto;
+  border-radius: 8px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(260px, 0.72fr);
+  min-height: 520px;
+}
+
+.agent-compose,
+.agent-context {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.agent-compose {
+  border-right: 1px solid var(--line);
+  grid-template-rows: auto auto minmax(150px, 0.75fr) minmax(120px, 0.5fr) auto;
+}
+
+.agent-context {
+  align-content: start;
+  background: #fbfcfc;
+}
+
+.agent-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-head span,
+.agent-field span,
+.agent-mode-row span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.agent-head span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.agent-head small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.agent-mode-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.agent-mode-row label,
+.agent-field {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.agent-mode-row select,
+.agent-options input[type="text"],
+.agent-options > input {
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--ink);
+  outline: 0;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.agent-field textarea {
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 15px;
+  line-height: 1.55;
+  padding: 12px;
+}
+
+.agent-field.selection textarea {
+  font-size: 14px;
+}
+
+.agent-actions,
+.agent-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-options {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  padding: 10px;
+}
+
+.agent-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #33413d;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.agent-options > input {
+  flex: 1 1 100%;
+}
+
+.agent-result {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  padding: 10px 12px;
+}
+
+.agent-result p {
+  margin: 10px 0 0;
+  color: #2f3d39;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .proposal-panel {
   flex: 0 0 auto;
   border-radius: 8px;
@@ -993,6 +1184,18 @@ h1 {
   padding: 0 12px;
   font-weight: 800;
   font-size: 13px;
+}
+
+.draft-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.draft-header-actions button {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 textarea {
@@ -1555,6 +1758,11 @@ textarea {
 
   .topbar {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "brand"
+      "commands"
+      "api"
+      "status";
     height: auto;
     padding: 12px;
   }

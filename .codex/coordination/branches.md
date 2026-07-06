@@ -48,6 +48,10 @@ Use the existing user-requested branch name if the user asks for one.
 | `codex/sg-005-import-structure-draft` | SG-011 | Main Agent | current branch | Complete Web Scene metadata form coverage for outcome, emotional turn, previous scene, and status. | done | project default branch when ready |
 | `codex/sg-005-import-structure-draft` | SG-012 | Main Agent | current branch | Web Scene style constraint editor for Context Pack writing. | done | project default branch when ready |
 | `codex/sg-005-import-structure-draft` | SG-013 | Main Agent | current branch | Publish 0.1.6 software release/update assets and push GitHub state. | done | GitHub release `v0.1.6` / project default branch when ready |
+| `codex/sg-014-import-hint-prefill` | SG-014 | Main Agent | `codex/sg-005-import-structure-draft` | Web-only imported Scene POV/location hint prefill into explicit Character/Location seed forms. | done | project default branch when ready |
+| `codex/sg-014-import-hint-prefill` | SG-015 | Main Agent | current branch | Web-only link-back from newly seeded Character/Location nodes into the current Scene metadata form. | done | project default branch when ready |
+| `codex/sg-014-import-hint-prefill` | SG-016 | Main Agent | current branch | Web-only exact match from imported Scene POV/location hints to existing Character/Location canon nodes. | done | project default branch when ready |
+| `codex/sg-017-agent-discussion-localization` | SG-017 | Main Agent | `codex/sg-014-import-hint-prefill` | Chinese-first localization coverage plus Agent discussion/selected-text revision into non-canon Proposal Store artifacts. | done | `main` / release tag `v0.1.7` |
 
 ## SG-002 Branch Notes
 
@@ -138,6 +142,34 @@ Use the existing user-requested branch name if the user asks for one.
 - GitHub work is only for software release/update distribution: commit/tag/push plus GitHub Release installer, `.sig`, and `latest.json`.
 - Do not publish local story workspace data, canon state, drafts, imported manuscript files, API keys, signing private keys, or generated private prose.
 - Final verification on 2026-07-04: branch and tag were pushed, GitHub Release `v0.1.6` is latest, assets are uploaded, and the latest updater endpoint returns version 0.1.6.
+
+## SG-014 Branch Notes
+
+- Current implementation is on `codex/sg-014-import-hint-prefill` so post-release MVP work is separated from the v0.1.6 release branch.
+- Imported `pov_label` and `location_label` remain non-canon hints. Prefill actions may only update local Web form state; canon Character/Location creation still requires the existing explicit seed buttons and full permission.
+- This task should not change `project_structure_draft` apply semantics, CandidateFact review, backend seed contracts, or imported document storage.
+- Final verification on 2026-07-04: Web build, Python tests, Ruff, diff whitespace check, and API/Web local smoke passed.
+
+## SG-015 Branch Notes
+
+- Current implementation continues on `codex/sg-014-import-hint-prefill` because SG-015 is a narrow Web follow-up to the imported Scene hint resolution path.
+- Character/Location seed buttons remain the only canon write in this flow. Filling Scene `pov_character_id`, `required_characters`, or `location_id` is local form state until the author explicitly saves Scene metadata.
+- This task should not change backend seed contracts, structure proposal apply semantics, CandidateFact review, or imported document storage.
+- Final verification on 2026-07-04: Web build, Python tests, Ruff, and diff whitespace checks passed.
+
+## SG-016 Branch Notes
+
+- Current implementation continues on `codex/sg-014-import-hint-prefill` because SG-016 completes the same imported hint resolution UI.
+- Existing Character/Location matching is exact and uses already-loaded project-scoped canon list APIs. It may only fill local Scene form state; saving the Scene remains an explicit author action.
+- This task should not create new backend routes, change seed contracts, alter CandidateFact review, or infer canon facts from imported prose.
+- Final verification on 2026-07-04: Web build, Python tests, Ruff, and diff whitespace checks passed.
+
+## SG-017 Branch Notes
+
+- Current implementation is on `codex/sg-017-agent-discussion-localization`, created from `codex/sg-014-import-hint-prefill`, so merging it to `main` carries the previous SG-014 through SG-016 branch state plus the new Agent discussion/localization work.
+- Agent discussion may read the current Context Pack, current draft editor text, already-imported local-library snippets, and author-enabled web search snippets. These are inputs to a non-canon Proposal Store artifact only.
+- Selected-text revision can generate a full `scene_draft` proposal, but it must not overwrite the current Draft Store draft until the author explicitly accepts and promotes the proposal.
+- GitHub synchronization for this branch remains only the software release/update channel: tag, release assets, updater signature, and `latest.json`.
 
 ## Branch Entry Template
 

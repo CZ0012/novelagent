@@ -165,6 +165,40 @@ export type ProjectStructureApplyResult = {
   already_applied: boolean;
 };
 
+export type AgentDiscussionMode = "discuss" | "revise_selection" | "revise_scene";
+
+export type AgentDiscussionSource = {
+  kind: string;
+  ref: string;
+  title: string;
+  text: string;
+  note?: string | null;
+};
+
+export type AgentDiscussionRequest = {
+  mode: AgentDiscussionMode;
+  instruction: string;
+  selected_text?: string | null;
+  base_text?: string | null;
+  include_context_pack: boolean;
+  include_latest_draft: boolean;
+  local_sources: AgentDiscussionSource[];
+  allow_web_search: boolean;
+  web_search_query?: string | null;
+};
+
+export type AgentDiscussionResult = {
+  proposal: ProposalArtifact;
+  reply: string;
+  web_results: Array<{
+    title: string;
+    url: string;
+    snippet: string;
+  }>;
+  truncated_sources: string[];
+  replacement_applied: boolean;
+};
+
 export type ProposalCandidatePromotionResult = {
   proposal: ProposalArtifact;
   source_draft: Draft;

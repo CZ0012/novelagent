@@ -29,7 +29,7 @@ The implementation follows:
 - Local CLI workspace commands for context building, scene drafting, continuity checks, state extraction, workflow runs, and pending fact review.
 - Workflow run checkpoints and projections with API run listing, run event inspection, review-pause resume, proposal-output runs, persisted stores, and optional LangGraph runtime/checkpointer support.
 - FastAPI routes for the authoring workflow plus persisted agent settings for model provider, API key reference, JSON mode, scene writer mode, and API permission level.
-- Chinese-localized React/Vite author workbench for real API-backed project trees, empty-workspace onboarding, chapter/scene metadata editing, scene drafting, Proposal Workspace collaboration, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, pending fact review, local txt/md/docx file or folder import, agent settings, and update checks through the API or desktop shell.
+- Chinese-localized React/Vite author workbench for real API-backed project trees, empty-workspace onboarding, chapter/scene metadata editing, scene drafting, selected-text Agent discussion/revision proposals, Proposal Workspace collaboration, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, pending fact review, local txt/md/docx file or folder import, agent settings, and update checks through the API or desktop shell.
 - Desktop-target FastAPI entrypoint (`apps.api.desktop_server`) that uses a persistent local workspace and the JSON graph backend.
 - Buildable Tauri desktop package under `apps/desktop`, including npm scripts, a Rust entrypoint, hidden PyInstaller backend sidecar packaging, backend start/stop/status commands, system-tray lifecycle handling, Tauri capabilities, signed-updater configuration, a sci-fi app icon, and NSIS installer configuration.
 - Fantasy demo fixture and regression tests for the canon safety loop.
@@ -128,7 +128,7 @@ npm --prefix apps/desktop run build:installer
 The generated installer is:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.6_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe
 ```
 
 Other useful desktop commands:
@@ -148,8 +148,8 @@ Verified local build output from `npm --prefix apps/desktop run build:installer`
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.6_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.6_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe.sig
 ```
 
 The full installer build regenerates the PyInstaller backend sidecar with `--noconsole`, rebuilds the React/Vite workbench, and runs `tauri build`. The Tauri shell also starts the sidecar with Windows `CREATE_NO_WINDOW`, so the packaged app should not show a stray backend terminal window. Closing the main desktop window hides it to the system tray; use the tray menu item `退出 StoryGraph Agent` to stop the managed backend process tree and exit the app. If port 8000 already has a healthy backend with a different workspace, the desktop settings panel reports the conflict instead of treating that process as the current desktop workspace. The generated installer, `setup.exe.sig` updater signature, backend sidecar, and release executables are local outputs, not checked-in release artifacts.
@@ -158,7 +158,7 @@ The in-app settings panel includes a `Version & Updates` section. In the Tauri d
 
 Version updates must keep `VERSION`, `pyproject.toml`, `apps/web/package.json`, `apps/web/src/version.ts`, `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, canon, drafts, imported documents, project settings, and review state are not synchronized to GitHub.
 
-For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.6_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.7_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 
@@ -220,6 +220,12 @@ From the reader, the author may explicitly send a ready imported document throug
 - Save as the current scene draft and then run state extraction, which can create pending `CandidateFact` records.
 
 Proposal artifacts are non-canon workspace records. Accepted `scene_draft` proposals can be explicitly promoted to Draft Store; accepted `fact_draft` proposals can submit pending CandidateFacts only from a real Draft Store `source_draft_id`. When promoting a `fact_draft`, the backend reads the explicit fact markers from the author-editable proposal body rather than bypassing it. These paths require the normal backend project/scene and permission checks. They still do not write Graph Store canon directly; extracted candidates remain pending until human review accepts or edit-accepts them with provenance.
+
+## Agent Discussion And Selected-Text Revision
+
+The Web and desktop-hosted workbench include an `Agent` tab for discussing the current scene with the configured OpenAI-compatible LLM. The author can highlight a draft span, paste a marked passage, ask for a focused discussion, request a selected-span rewrite, or request a full-scene rewrite. The request can include the current Context Pack, the current draft editor text, snippets from files already imported into the local library tree, and optional web search snippets.
+
+`POST /projects/{project_id}/scenes/{scene_id}/agent-discussion` requires `read_generate` permission and LLM credentials. It creates a non-canon `scene_rebuild` or `scene_draft` proposal in Proposal Store and returns the Agent reply, search snippets, and whether a selected-span replacement was applied to produce a full proposal body. It does not overwrite Draft Store, create CandidateFacts, or write Graph Store canon. Authors still review the proposal in `协作草稿箱`; only an explicit accept/promotion action can turn an accepted `scene_draft` proposal into a Draft Store draft.
 
 CLI file inputs are still intentionally narrow:
 

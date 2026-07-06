@@ -36,6 +36,10 @@ Status values: `planned`, `active`, `blocked`, `ready-for-check`, `ready-for-rev
 | SG-011 | done | Main Agent | `codex/sg-005-import-structure-draft` | Complete the Web Scene metadata editor so outcome, emotional turn, previous scene, and status can be edited before Context Pack writing. | Front Agent, Backend/API Creation Agent, Check Agent | Closed after implementation: Web Scene form covers Context Pack planning fields and full verification passes. |
 | SG-012 | done | Main Agent | `codex/sg-005-import-structure-draft` | Let authors edit Scene style constraints used by Context Pack writing, including POV style, tense, tone, rhythm, diction, dialogue style, and banned patterns. | Front Agent, Backend/API Creation Agent, Check Agent | Closed after implementation: Web Scene style constraints flow into Context Pack and full verification passes. |
 | SG-013 | done | Main Agent | `codex/sg-005-import-structure-draft` | Publish the current MVP as software version 0.1.6 with synchronized source versions, GitHub tag/release assets, updater metadata, and pushed branch state. | Release Creation Agent, Check Agent | Closed after release: branch/tag pushed, GitHub Release `v0.1.6` is latest, and updater metadata/assets are verified. |
+| SG-014 | done | Main Agent | `codex/sg-014-import-hint-prefill` | Help authors resolve imported Scene POV/location labels by pre-filling explicit Character/Location canon seed forms without automatic graph writes. | Front Agent, Check Agent | Closed after implementation: Web hint actions are form-only, existing seed buttons remain the explicit canon write path, and verification passes. |
+| SG-015 | done | Main Agent | `codex/sg-014-import-hint-prefill` | Carry newly seeded Character/Location stable IDs back into the current Scene metadata form without auto-saving Scene graph updates. | Front Agent, Check Agent | Closed after implementation: seed-created IDs are copied only into local Scene form state and verification passes. |
+| SG-016 | done | Main Agent | `codex/sg-014-import-hint-prefill` | Let imported Scene POV/location hints reuse exact-matching existing canon Character/Location IDs from the Web sidebar. | Front Agent, Check Agent | Closed after implementation: exact matches can fill local Scene form IDs without saving graph updates, and verification passes. |
+| SG-017 | done | Main Agent | `codex/sg-017-agent-discussion-localization` | Add Chinese-first localization coverage and an Agent discussion/selected-text revision path that creates non-canon proposals only. | Front Agent, Localization Worker, Backend/API Creation Agent, Check Agent | Closed for v0.1.7 release: implementation, localization pass, browser validation, tests, build, installer, and release asset generation passed. |
 
 ## SG-005 Acceptance Criteria
 
@@ -192,6 +196,70 @@ Status values: `planned`, `active`, `blocked`, `ready-for-check`, `ready-for-rev
 - `apps/desktop/scripts/prepare-release-assets.ps1`
 - GitHub tag/release verification for `v0.1.6`.
 - Final verification on 2026-07-04: version consistency passed, full `python -m pytest -q` passed with 118 passed / 1 skipped, `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, `npm --prefix apps/desktop run build:installer` passed, `latest.json` signature/URL verification passed, branch and tag were pushed to GitHub, and GitHub Release `v0.1.6` is marked Latest with installer, `.sig`, and `latest.json` assets.
+
+## SG-014 Acceptance Criteria
+
+- When a selected imported Scene has `pov_label` or `location_label`, the Web sidebar offers Chinese-first actions to copy those labels into the existing Character/Location seed forms.
+- The hint actions only update local form state; they do not call backend seed APIs, create CandidateFacts, create Proposal Artifacts, or write Graph Store canon.
+- Authors still explicitly create canon Character/Location nodes through the existing seed buttons with `full` permission and provenance.
+- Existing manual Character/Location seed entry remains available for non-import workflows.
+
+## SG-014 Verification
+
+- `npm --prefix apps/web run build`
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `git diff --check`
+- Final verification on 2026-07-04: `npm --prefix apps/web run build` passed, full `python -m pytest -q` passed with 118 passed / 1 skipped, `python -m ruff check .` passed, `git diff --check` passed, and local API/Web smoke returned HTTP 200.
+
+## SG-015 Acceptance Criteria
+
+- After an explicit Character seed succeeds and the current Scene metadata form has no POV character ID, the Web UI fills the new stable Character ID into `pov_character_id` and adds it to `required_characters`.
+- After an explicit Location seed succeeds and the current Scene metadata form has no location ID, the Web UI fills the new stable Location ID into `location_id`.
+- These link-back actions only mutate local React form state; they do not call the Scene metadata PATCH route, create CandidateFacts, create Proposal Artifacts, or write additional Graph Store canon.
+- The success notices make the remaining explicit `保存场景元数据` step clear before the Scene node receives the new IDs.
+
+## SG-015 Verification
+
+- `npm --prefix apps/web run build`
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `git diff --check`
+- Final verification on 2026-07-04: Web build passed, full `python -m pytest -q` passed with 118 passed / 1 skipped, `python -m ruff check .` passed, and `git diff --check` reported no whitespace errors.
+
+## SG-016 Acceptance Criteria
+
+- When an imported Scene `pov_label` exactly matches an existing project Character display name or ID, the Web sidebar offers a Chinese-first action to fill that stable ID into the current Scene metadata form.
+- When an imported Scene `location_label` exactly matches an existing project Location display name or ID, the Web sidebar offers a Chinese-first action to fill that stable ID into the current Scene metadata form.
+- Filling an existing Character also adds the stable ID to `required_characters` if missing.
+- These match actions only mutate local React form state; they do not call backend seed APIs, save Scene metadata, create CandidateFacts, create Proposal Artifacts, or write Graph Store canon.
+
+## SG-016 Verification
+
+- `npm --prefix apps/web run build`
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `git diff --check`
+- Final verification on 2026-07-04: Web build passed, full `python -m pytest -q` passed with 118 passed / 1 skipped, `python -m ruff check .` passed, and `git diff --check` reported no whitespace errors.
+
+## SG-017 Acceptance Criteria
+
+- User-facing Web/Tauri workbench text is Chinese-first through shared localization resources rather than scattered one-off English labels.
+- The Web workbench exposes an `Agent` tab where authors can discuss the current scene, mark a selected draft span, include current Context Pack/draft text, include already-imported local-library snippets, optionally request web search, and ask for discussion, selected-span revision, or full-scene revision.
+- `POST /projects/{project_id}/scenes/{scene_id}/agent-discussion` requires `read_generate` permission and configured LLM credentials.
+- Agent discussion output creates only Proposal Store `scene_rebuild` or `scene_draft` artifacts; it must not overwrite Draft Store, create CandidateFacts, write Graph Store canon, or bypass proposal review/promotion.
+- Selected-span revision produces a full `scene_draft` proposal only when the selected text is uniquely found in the supplied base draft; otherwise it falls back to a `scene_rebuild` note.
+- Documentation keeps GitHub release/update synchronization distinct from local novel workspace/canon/draft/review data.
+
+## SG-017 Verification
+
+- Focused API tests for Agent discussion proposal creation, selected-span replacement, web-search context, and no draft/fact/graph mutation.
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `npm --prefix apps/web run build`
+- `npm --prefix apps/desktop run build:installer`
+- Version consistency and GitHub release verification for the new release tag.
+- Final local verification on 2026-07-06: focused Agent discussion API coverage is included in full `python -m pytest -q` (120 passed / 1 skipped), `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, browser validation passed on desktop and 390px mobile viewports with no console errors, `git diff --check` reported no whitespace errors, and `npm --prefix apps/desktop run build:installer` regenerated the v0.1.7 NSIS installer, `.sig`, and `latest.json`.
 
 ## SG-003 Acceptance Criteria
 
