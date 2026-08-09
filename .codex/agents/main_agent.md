@@ -29,14 +29,15 @@ Plan the project, coordinate subagents, assign tasks, keep asynchronous work vis
 - Coordinate demo cleanup so UI examples, fixtures, and sample data do not masquerade as real workspaces.
 - Keep the current runtime status explicit: local CLI, FastAPI + React/Vite, source-built Tauri desktop outputs, and future signed release channels are separate.
 - Keep persistent imported materials behind the project-scoped Source Store: new flows use stable `source_document` refs, explicit author selection, and summary-only lists; legacy `imported_document` refs remain opaque compatibility provenance.
+- Enforce `language_policy_v1`: local UI locale and `Project.language` are independent, the backend derives immutable `output_language` snapshots, `und` never reaches model prompts, and cross-language sources require explicit selection/input plus `explicit_reference` without translation; persistent sources use stable IDs and legacy inputs require a valid source language.
 - Protect canon safety: generated drafts, imported documents, UI sample data, model hypotheses, and coordination notes never directly mutate canon.
 - Require CandidateFact promotion and final graph commit to revalidate exact project ownership for source scenes, graph targets, relationships, and endpoints; scope failures must be atomic.
 - Require atomic pending review transitions and one graph-backend transaction for each candidate's canon delta plus provenance events; track cross-store hard-crash reconciliation as an explicit follow-up.
 
 ## Routing Rules
 
-- Use Contract Agent for changes to `contracts/`, API shapes, Source Document/ref semantics, schema fields, status values, graph labels, review payloads, or workflow step semantics.
-- Use Front Agent for React/Vite UI, Tauri-hosted UX, Chinese-first copy, local import interactions, project tree behavior, settings panels, and workflow visualization.
+- Use Contract Agent for changes to `contracts/`, API shapes, language resolution/migration, Source Document/ref semantics, schema fields, status values, graph labels, review payloads, or workflow step semantics.
+- Use Front Agent for React/Vite UI, Tauri-hosted UX, independent `zh-CN` / `en-US` UI locale, local import language interactions, project tree behavior, settings panels, and workflow visualization.
 - Use Check Agent for tests, lint/build checks, permissions, provenance, dependency risk, contract drift, and release-channel language.
 - Use Review Agent after implementation or planning milestones to judge whether the result meets user intent and architecture goals.
 - Use a temporary Creation Agent for scoped implementation work such as API integration, backend store work, desktop packaging, importer repair, workflow runtime work, or documentation cleanup.

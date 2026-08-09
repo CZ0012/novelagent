@@ -48,10 +48,12 @@ import {
   AgentPermissionLevel,
   AgentSettings,
   AgentSettingsUpdate,
+  ApiRequestError,
   CandidateFact,
   ChapterOutline,
   ContextPack,
   ContinuityReport,
+  CrossLanguagePolicy,
   DemoArchiveResult,
   Draft,
   GraphNodePayload,
@@ -70,6 +72,8 @@ import {
   SourceDocumentImportRequest,
   SourceDocumentImportResult,
   SourceDocumentSummary,
+  SourceDocumentUpdateRequest,
+  SourceLanguage,
   SourceMediaType,
   WorkflowRun,
   WorkflowStep,
@@ -80,6 +84,8 @@ import {
 } from "./api";
 import {
   APP_LOCALE,
+  UI_LOCALE_STORAGE_KEY,
+  activateLocale,
   appText,
   defaultPermissionDescriptions,
   formatDimension,
@@ -89,14 +95,17 @@ import {
   formatRefKind,
   formatSeverity,
   formatStatus,
+  getLocaleCatalog,
   localizedTerms,
-  localizeText,
+  localizeSystemValue,
   permissionLabels,
   proposalStatusLabels,
   proposalTypeLabels,
   reviewActionLabels,
   stepLabels,
-  uiText
+  uiText,
+  type AppLocale,
+  normalizeAppLocale
 } from "./localization";
 import { APP_VERSION, GITHUB_LATEST_RELEASE_API } from "./version";
 import "./styles.css";
@@ -123,7 +132,7 @@ type SourceImportProgress = {
   unchanged: number;
   skipped: number;
   failed: number;
-  issues: Array<{ name: string; message: string }>;
+  issues: Array<{ name: string; message: string; technicalDetails?: string }>;
 };
 
 type ProjectForm = {
@@ -196,7 +205,8 @@ type AgentDiscussionForm = {
 
 type UpdateStatus = {
   state: "idle" | "checking" | "current" | "available" | "installing" | "error";
-  message: string;
+  message: () => string;
+  technicalDetails?: string;
   channel?: "desktop" | "github";
   latestVersion?: string;
   releaseUrl?: string;
@@ -243,7 +253,7 @@ type DirectoryInputProps = React.InputHTMLAttributes<HTMLInputElement> & {
 
 const defaultAgentForm: AgentSettingsUpdate = {
   scene_writer: "rule_based",
-  provider_label: "OpenAI 兼容",
+  provider_label: "OpenAI-compatible",
   llm_base_url: "",
   llm_model: "deepseek-chat",
   llm_json_mode: true,
@@ -252,10 +262,10 @@ const defaultAgentForm: AgentSettingsUpdate = {
 
 const defaultProjectForm: ProjectForm = {
   title: "",
-  genre: "fantasy",
+  genre: "",
   language: "zh-CN",
   target_length: "",
-  narrative_pov: "第三人称有限视角"
+  narrative_pov: ""
 };
 
 const defaultChapterForm: ChapterForm = {
@@ -317,6 +327,21 @@ const defaultWorldRuleForm: WorldRuleForm = {
   severity: "medium"
 };
 
+const auditText = {
+  updateProject: "workbench.project.update",
+  updateChapter: "workbench.chapter.update",
+  createChapter: "workbench.chapter.create",
+  createScene: "workbench.scene.create",
+  updateScene: "workbench.scene.update",
+  createCharacter: "workbench.character.create",
+  createLocation: "workbench.location.create",
+  createWorldRule: "workbench.world_rule.create",
+  createProposal: "workbench.proposal.create",
+  reviseProposal: "agent.context_pack.proposal_revision",
+  applyStructure: "workbench.project_structure.apply",
+  reviewPrefix: "workbench.review"
+} as const;
+
 const defaultAgentDiscussionForm: AgentDiscussionForm = {
   mode: "discuss",
   instruction: "",
@@ -328,6 +353,8 @@ const defaultAgentDiscussionForm: AgentDiscussionForm = {
 };
 
 export default function App() {
+  const [uiLocale, setUiLocale] = useState<AppLocale>(() => loadUiLocale());
+  activateLocale(uiLocale);
   const [apiBase, setApiBase] = useState("http://127.0.0.1:8000");
   const [projects, setProjects] = useState<ProjectOutline[]>([]);
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
@@ -373,7 +400,7 @@ export default function App() {
   const [desktopUpdate, setDesktopUpdate] = useState<TauriUpdate | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
     state: "idle",
-    message: "尚未检查更新。"
+    message: () => uiText.runtime.updateIdle
   });
   const [desktopSettings, setDesktopSettings] = useState<DesktopSettings | null>(null);
   const [desktopBackend, setDesktopBackend] = useState<DesktopBackendStatus | null>(null);
@@ -386,6 +413,8 @@ export default function App() {
   const [selectedAgentSourceIds, setSelectedAgentSourceIds] = useState<Set<string>>(
     () => new Set()
   );
+  const [crossLanguagePolicy, setCrossLanguagePolicy] =
+    useState<CrossLanguagePolicy>("project_only");
   const [sourceImportProgress, setSourceImportProgress] = useState<SourceImportProgress | null>(null);
   const [expandedLibraryPaths, setExpandedLibraryPaths] = useState<Set<string>>(
     () => new Set(["library"])
@@ -401,7 +430,31 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const actionInFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [technicalError, setTechnicalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Ephemeral messages contain the catalog value that was active when the
+    // operation completed. Drop them on an intentional locale switch so a
+    // message from the previous UI language cannot leak into the new one.
+    setError(null);
+    setTechnicalError(null);
+    setNotice(null);
+    setSourceImportProgress((current) => current?.active ? current : null);
+    try {
+      window.localStorage.setItem(UI_LOCALE_STORAGE_KEY, uiLocale);
+    } catch {
+      // The active locale still works for this session when storage is unavailable.
+    }
+    document.documentElement.lang = uiLocale;
+    document.title = appText.documentTitle;
+    if (isDesktopRuntime()) {
+      invoke("set_native_locale", { locale: uiLocale }).catch((exc) => {
+        setError(uiText.errors.requestFailed);
+        setTechnicalError(technicalErrorMessage(exc));
+      });
+    }
+  }, [uiLocale]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === projectId) ?? null,
@@ -453,11 +506,20 @@ export default function App() {
     actionInFlightRef.current = true;
     setBusy(label);
     setError(null);
+    setTechnicalError(null);
     setNotice(null);
     try {
       await action();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : String(exc));
+      const message = exc instanceof Error ? exc.message : String(exc);
+      if (isLocalizedUserError(message)) {
+        setError(message);
+      } else {
+        setError(uiText.errors.requestFailed);
+        setTechnicalError(
+          exc instanceof ApiRequestError ? exc.technicalDetails : toErrorMessage(exc)
+        );
+      }
     } finally {
       actionInFlightRef.current = false;
       setBusy(null);
@@ -480,7 +542,8 @@ export default function App() {
     setDesktopBackend(status);
     setDesktopBackendChecked(true);
     if (status.error && (!status.reachable || !status.workspaceCompatible)) {
-      setError(status.error);
+      setError(uiText.errors.requestFailed);
+      setTechnicalError(status.error);
     }
     return status;
   }, []);
@@ -490,7 +553,7 @@ export default function App() {
     const status = await invoke<DesktopBackendStatus>("stop_backend");
     setDesktopBackend(status);
     setDesktopBackendChecked(true);
-    setNotice(status.reachable ? "已请求停止受管后端；仍检测到外部后端在运行。" : "受管后端已停止。");
+    setNotice(status.reachable ? uiText.runtime.backendStopExternal : uiText.runtime.backendStopped);
   }, []);
 
   const refreshSources = useCallback(
@@ -584,7 +647,7 @@ export default function App() {
           const request = await prepareSourceDocumentImport(
             file,
             mediaType,
-            retryTarget?.language || selectedProject?.language || "zh-CN"
+            retryTarget?.language
           );
           if (retryTarget) {
             request.title = retryTarget.title;
@@ -603,7 +666,8 @@ export default function App() {
             progress.failed += 1;
             progress.issues.push({
               name: result.document.title,
-              message: result.document.error ?? uiText.library.unknownReadError
+              message: uiText.library.unknownReadError,
+              technicalDetails: result.document.error ?? undefined
             });
           }
           for (const path of getAncestorFolderPaths(result.document.relative_path)) {
@@ -611,7 +675,12 @@ export default function App() {
           }
         } catch (exc) {
           progress.failed += 1;
-          progress.issues.push({ name: file.name, message: toErrorMessage(exc) });
+          const detail = exc instanceof ApiRequestError ? exc.technicalDetails : toErrorMessage(exc);
+          progress.issues.push({
+            name: file.name,
+            message: isLocalizedUserError(detail) ? detail : uiText.errors.requestFailed,
+            technicalDetails: isLocalizedUserError(detail) ? undefined : detail
+          });
         }
         setSourceImportProgress({ ...progress });
       }
@@ -622,7 +691,7 @@ export default function App() {
       if (firstPersistedId) setSelectedSourceDocumentId(firstPersistedId);
       setNotice(retryTarget ? uiText.notices.sourceRetryFinished : uiText.notices.sourceImportFinished);
     },
-    [apiBase, projectId, refreshSources, selectedProject]
+    [apiBase, projectId, refreshSources]
   );
 
   const handleLibraryInputChange = useCallback(
@@ -825,13 +894,13 @@ export default function App() {
     });
     setApiKeyInput("");
     setClearApiKey(false);
-    setNotice("智能体设置已保存。");
+    setNotice(uiText.notices.settingsSaved);
   }, [agentForm, apiBase, apiKeyInput, clearApiKey]);
 
   const checkForUpdates = useCallback(async (silent = false) => {
     setDesktopUpdate(null);
     if (!silent) {
-      setUpdateStatus({ state: "checking", message: "正在检查更新..." });
+      setUpdateStatus({ state: "checking", message: () => uiText.runtime.updateChecking });
     }
     if (isDesktopRuntime()) {
       try {
@@ -841,7 +910,7 @@ export default function App() {
           setUpdateStatus({
             state: "available",
             channel: "desktop",
-            message: `发现新版本 ${update.version}，可在程序内安装并重启。`,
+            message: () => uiText.runtime.desktopUpdateAvailable(update.version),
             latestVersion: update.version,
             publishedAt: update.date,
             canInstall: true
@@ -851,13 +920,14 @@ export default function App() {
         setUpdateStatus({
           state: "current",
           channel: "desktop",
-          message: `当前已是最新版本 ${APP_VERSION}。`
+          message: () => uiText.runtime.updateCurrent(APP_VERSION)
         });
       } catch (exc) {
         setUpdateStatus({
           state: "error",
           channel: "desktop",
-          message: `桌面更新通道暂不可用：${toErrorMessage(exc)}`
+          message: () => uiText.runtime.updateChannelUnavailable,
+          technicalDetails: toErrorMessage(exc)
         });
       }
       return;
@@ -871,17 +941,17 @@ export default function App() {
         setUpdateStatus({
           state: "current",
           channel: "github",
-          message: "暂未发布 GitHub Release（发布版本），当前版本可继续使用。"
+          message: () => uiText.runtime.noGithubRelease
         });
         return;
       }
       if (!response.ok) {
-        throw new Error(`GitHub 返回 ${response.status}`);
+        throw new Error(`GitHub returned HTTP ${response.status}`);
       }
       const release = (await response.json()) as GitHubRelease;
       const latestVersion = normalizeVersion(release.tag_name ?? "");
       if (!latestVersion) {
-        throw new Error("最新 GitHub Release（发布版本）没有有效版本号");
+        throw new Error("Latest GitHub Release has no valid version number.");
       }
       const installer = release.assets?.find((asset) =>
         /StoryGraph[ .]Agent_.*_x64-setup\.exe$/i.test(asset.name)
@@ -891,7 +961,7 @@ export default function App() {
         setUpdateStatus({
           state: "available",
           channel: "github",
-          message: `发现新版本 ${latestVersion}，可直接下载 Windows 安装器。`,
+          message: () => uiText.runtime.installerUpdateAvailable(latestVersion),
           latestVersion,
           releaseUrl: release.html_url,
           installerUrl: installer?.browser_download_url,
@@ -902,7 +972,7 @@ export default function App() {
       setUpdateStatus({
         state: "current",
         channel: "github",
-        message: `当前已是最新版本 ${APP_VERSION}。`,
+        message: () => uiText.runtime.updateCurrent(APP_VERSION),
         latestVersion,
         releaseUrl: release.html_url,
         publishedAt: release.published_at
@@ -911,7 +981,8 @@ export default function App() {
       setUpdateStatus({
         state: "error",
         channel: "github",
-        message: `暂时无法检查更新：${toErrorMessage(exc)}`
+        message: () => uiText.runtime.updateCheckFailed,
+        technicalDetails: toErrorMessage(exc)
       });
     }
   }, []);
@@ -921,7 +992,7 @@ export default function App() {
       setUpdateStatus({
         state: "error",
         channel: "desktop",
-        message: "没有可安装的桌面更新，请先检查更新。"
+        message: () => uiText.runtime.noInstallableUpdate
       });
       return;
     }
@@ -929,7 +1000,7 @@ export default function App() {
     setUpdateStatus({
       state: "installing",
       channel: "desktop",
-      message: `正在下载并安装 v${desktopUpdate.version}，完成后会重启应用。`,
+      message: () => uiText.runtime.installingUpdate(desktopUpdate.version),
       latestVersion: desktopUpdate.version,
       publishedAt: desktopUpdate.date,
       canInstall: false
@@ -943,19 +1014,20 @@ export default function App() {
       setUpdateStatus({
         state: "installing",
         channel: "desktop",
-        message: "更新已安装，应用正在重启。",
+        message: () => uiText.runtime.installedRestarting,
         latestVersion: desktopUpdate.version,
         publishedAt: desktopUpdate.date
       });
       const { relaunch } = await import("@tauri-apps/plugin-process");
       await relaunch();
     } catch (exc) {
-      const failureMessage = toErrorMessage(exc);
+      const failureMessage = technicalErrorMessage(exc);
       if (updateInstalled) {
         setUpdateStatus({
           state: "error",
           channel: "desktop",
-          message: `更新已安装，但自动重启失败：${failureMessage}。请手动退出并重新打开应用以完成更新。`,
+          message: () => uiText.runtime.installedManualRestart,
+          technicalDetails: failureMessage,
           latestVersion: desktopUpdate.version,
           publishedAt: desktopUpdate.date,
           canInstall: false
@@ -964,26 +1036,30 @@ export default function App() {
       }
 
       let backendRecoveryMessage: string;
+      let backendRecoveryDetails: string | null = null;
       try {
         const status = await invoke<DesktopBackendStatus>("start_backend");
         setDesktopBackend(status);
         setDesktopBackendChecked(true);
+        backendRecoveryDetails = status.error ?? null;
         if (status.reachable && status.workspaceCompatible) {
-          backendRecoveryMessage = "本地后端已恢复，工作台可以继续使用。";
+          backendRecoveryMessage = uiText.runtime.backendRecovered;
         } else if (status.reachable) {
-          backendRecoveryMessage = `本地后端已启动，但工作区不兼容：${status.error || "请检查后端工作区设置。"}`;
+          backendRecoveryMessage = uiText.runtime.backendRecoveredIncompatible;
         } else {
-          backendRecoveryMessage = `本地后端恢复失败：${status.error || "启动后仍无法连接。"}`;
+          backendRecoveryMessage = uiText.runtime.backendRecoveryFailed;
         }
       } catch (recoveryExc) {
         setDesktopBackend(null);
         setDesktopBackendChecked(true);
-        backendRecoveryMessage = `本地后端恢复失败：${toErrorMessage(recoveryExc)}`;
+        backendRecoveryMessage = uiText.runtime.backendRecoveryFailed;
+        backendRecoveryDetails = technicalErrorMessage(recoveryExc);
       }
       setUpdateStatus({
         state: "error",
         channel: "desktop",
-        message: `安装更新失败：${failureMessage}；${backendRecoveryMessage}`,
+        message: () => `${uiText.runtime.updateInstallFailed} ${backendRecoveryMessage}`,
+        technicalDetails: [failureMessage, backendRecoveryDetails].filter(Boolean).join("\n"),
         latestVersion: desktopUpdate.version,
         publishedAt: desktopUpdate.date,
         canInstall: true
@@ -993,47 +1069,63 @@ export default function App() {
 
   const createProject = useCallback(async () => {
     if (!projectForm.title.trim()) {
-      throw new Error("请先填写小说项目名称。");
+      throw new Error(uiText.errors.projectNameRequired);
     }
     const result = await apiPost<{ project_id: string }>(apiBase, "/projects", {
       title: projectForm.title.trim(),
-      genre: projectForm.genre.trim() || "fiction",
-      language: projectForm.language.trim() || "zh-CN",
+      genre: projectForm.genre.trim() || getLocaleCatalog(projectForm.language).contentDefaults.genre,
+      language: normalizeAppLocale(projectForm.language),
       target_length: projectForm.target_length.trim() || null,
-      narrative_pov: projectForm.narrative_pov.trim() || null
+      narrative_pov:
+        projectForm.narrative_pov.trim() ||
+        getLocaleCatalog(projectForm.language).contentDefaults.narrativePov
     });
     setProjectForm(defaultProjectForm);
     await refreshWorkspace(result.project_id);
     await refreshGraphPreview(result.project_id);
     setWorkspaceTab("sources");
-    setNotice("项目已创建。可以先导入已有小说，并生成章节/场景结构草稿。");
+    setNotice(uiText.notices.projectCreated);
   }, [apiBase, projectForm, refreshGraphPreview, refreshWorkspace]);
 
   const updateProject = useCallback(async () => {
-    if (!projectId) throw new Error("请先选择项目。");
+    if (!projectId) throw new Error(uiText.errors.selectProject);
+    if (!selectedProject) throw new Error(uiText.errors.selectProject);
     if (!projectForm.title.trim()) {
-      throw new Error("项目名称不能为空。");
+      throw new Error(uiText.errors.projectNameNotEmpty);
+    }
+    if (projectForm.language !== "zh-CN" && projectForm.language !== "en-US") {
+      throw new Error(uiText.errors.projectLanguageRequired);
+    }
+    if (
+      projectForm.language !== selectedProject?.language &&
+      !window.confirm(uiText.language.projectLanguageChangeConfirm)
+    ) {
+      return;
     }
     await apiPatch<GraphNodePayload>(apiBase, `/projects/${projectId}`, {
       title: projectForm.title.trim(),
       genre: projectForm.genre.trim() || null,
-      language: projectForm.language.trim() || null,
+      language: projectForm.language,
+      expected_language: selectedProject.language,
+      language_change_policy: "future_outputs_only",
       target_length: projectForm.target_length.trim() || null,
       narrative_pov: projectForm.narrative_pov.trim() || null,
       reviewer: "author",
-      rationale: "作者从工作台编辑项目信息。",
+      rationale: auditText.updateProject,
       source_ref: "author_seed:workbench_project"
     });
     await refreshWorkspace(projectId, sceneId);
     await refreshGraphPreview(projectId);
-    setNotice("项目信息已更新。");
-  }, [apiBase, projectForm, projectId, refreshGraphPreview, refreshWorkspace, sceneId]);
+    setCrossLanguagePolicy("project_only");
+    setSelectedAgentSourceIds(new Set());
+    setNotice(uiText.notices.projectUpdated);
+  }, [apiBase, projectForm, projectId, refreshGraphPreview, refreshWorkspace, sceneId, selectedProject]);
 
   const updateChapter = useCallback(async () => {
-    if (!projectId) throw new Error("请先选择项目。");
+    if (!projectId) throw new Error(uiText.errors.selectProject);
     const targetChapterId = currentChapterId;
-    if (!targetChapterId) throw new Error("请先选择要整理的章节。");
-    if (!chapterForm.title.trim()) throw new Error("请填写章节标题。");
+    if (!targetChapterId) throw new Error(uiText.errors.chooseChapterForEdit);
+    if (!chapterForm.title.trim()) throw new Error(uiText.errors.chapterTitleRequired);
     await apiPatch<GraphNodePayload>(apiBase, `/projects/${projectId}/chapters/${targetChapterId}`, {
       title: chapterForm.title.trim(),
       volume_index: toPositiveInteger(chapterForm.volume_index, 1),
@@ -1042,12 +1134,12 @@ export default function App() {
       purpose: chapterForm.purpose.trim() || null,
       status: chapterForm.status.trim() || "planned",
       reviewer: "author",
-      rationale: "作者从工作台整理章节元数据。",
+      rationale: auditText.updateChapter,
       source_ref: "author_seed:workbench_chapter_metadata"
     });
     await refreshWorkspace(projectId, sceneId);
     await refreshGraphPreview(projectId);
-    setNotice("章节元数据已更新。");
+    setNotice(uiText.notices.chapterUpdated);
   }, [
     apiBase,
     chapterForm,
@@ -1059,8 +1151,8 @@ export default function App() {
   ]);
 
   const createChapter = useCallback(async () => {
-    if (!projectId) throw new Error("请先选择或创建项目。");
-    if (!chapterForm.title.trim()) throw new Error("请填写章节标题。");
+    if (!projectId) throw new Error(uiText.errors.selectProjectOrCreate);
+    if (!chapterForm.title.trim()) throw new Error(uiText.errors.chapterTitleRequired);
     await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/chapters`, {
       title: chapterForm.title.trim(),
       volume_index: toPositiveInteger(chapterForm.volume_index, 1),
@@ -1069,7 +1161,7 @@ export default function App() {
       purpose: chapterForm.purpose.trim() || null,
       status: chapterForm.status.trim() || "planned",
       reviewer: "author",
-      rationale: "作者从工作台创建章节。",
+      rationale: auditText.createChapter,
       source_ref: "author_seed:workbench_outline"
     });
     setChapterForm((current) => ({
@@ -1083,10 +1175,10 @@ export default function App() {
   }, [apiBase, chapterForm, projectId, refreshGraphPreview, refreshWorkspace, sceneId]);
 
   const createScene = useCallback(async () => {
-    if (!projectId) throw new Error("请先选择或创建项目。");
+    if (!projectId) throw new Error(uiText.errors.selectProjectOrCreate);
     const targetChapterId = sceneForm.chapter_id || selectedProject?.chapters[0]?.id || "";
-    if (!targetChapterId) throw new Error("请先选择章节。");
-    if (!sceneForm.title.trim()) throw new Error("请填写场景标题。");
+    if (!targetChapterId) throw new Error(uiText.errors.chooseChapter);
+    if (!sceneForm.title.trim()) throw new Error(uiText.errors.sceneTitleRequired);
     const result = await apiPost<GraphNodePayload>(
       apiBase,
       `/projects/${projectId}/chapters/${targetChapterId}/scenes`,
@@ -1107,7 +1199,7 @@ export default function App() {
         must_not_violate: splitLines(sceneForm.must_not_violate),
         status: sceneForm.status.trim() || "planned",
         reviewer: "author",
-        rationale: "作者从工作台创建场景。",
+        rationale: auditText.createScene,
         source_ref: "author_seed:workbench_outline"
       }
     );
@@ -1122,8 +1214,8 @@ export default function App() {
   }, [apiBase, projectId, refreshGraphPreview, refreshWorkspace, sceneForm, selectedProject]);
 
   const updateScene = useCallback(async () => {
-    if (!projectId || !sceneId) throw new Error("请先选择要整理的场景。");
-    if (!sceneForm.title.trim()) throw new Error("请填写场景标题。");
+    if (!projectId || !sceneId) throw new Error(uiText.errors.chooseSceneForEdit);
+    if (!sceneForm.title.trim()) throw new Error(uiText.errors.sceneTitleRequired);
     await apiPatch<GraphNodePayload>(apiBase, `/projects/${projectId}/scenes/${sceneId}`, {
       title: sceneForm.title.trim(),
       scene_index: toPositiveInteger(sceneForm.scene_index, selectedScene?.scene_index ?? 1),
@@ -1141,7 +1233,7 @@ export default function App() {
       must_not_violate: splitLines(sceneForm.must_not_violate),
       status: sceneForm.status.trim() || "planned",
       reviewer: "author",
-      rationale: "作者从工作台整理场景元数据。",
+      rationale: auditText.updateScene,
       source_ref: "author_seed:workbench_scene_metadata"
     });
     await refreshWorkspace(projectId, sceneId);
@@ -1159,14 +1251,14 @@ export default function App() {
   ]);
 
   const createCharacter = useCallback(async () => {
-    if (!projectId) throw new Error("请先选择或创建项目。");
-    if (!characterForm.name.trim()) throw new Error("请填写人物名称。");
+    if (!projectId) throw new Error(uiText.errors.selectProjectOrCreate);
+    if (!characterForm.name.trim()) throw new Error(uiText.errors.characterNameRequired);
     const shouldFillCurrentScene = !sceneForm.pov_character_id.trim();
     const node = await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/characters`, {
       name: characterForm.name.trim(),
       properties: { role: characterForm.role.trim() || undefined },
       reviewer: "author",
-      rationale: "作者从工作台创建人物。",
+      rationale: auditText.createCharacter,
       source_ref: "author_seed:workbench_story_bible"
     });
     setCharacterForm(defaultCharacterForm);
@@ -1181,22 +1273,18 @@ export default function App() {
     );
     await refreshStoryBibleRefs(projectId);
     await refreshGraphPreview(projectId);
-    setNotice(
-      shouldFillCurrentScene
-        ? `人物已写入${localizedTerms.canonSeed}：${node.id}；已填入场景视角和出场人物表单，保存场景元数据后生效。`
-        : `人物已写入${localizedTerms.canonSeed}：${node.id}。`
-    );
+    setNotice(uiText.runtime.characterCreated(node.id, shouldFillCurrentScene));
   }, [apiBase, characterForm, projectId, refreshGraphPreview, refreshStoryBibleRefs, sceneForm]);
 
   const createLocation = useCallback(async () => {
-    if (!projectId) throw new Error("请先选择或创建项目。");
-    if (!locationForm.name.trim()) throw new Error("请填写地点名称。");
+    if (!projectId) throw new Error(uiText.errors.selectProjectOrCreate);
+    if (!locationForm.name.trim()) throw new Error(uiText.errors.locationNameRequired);
     const shouldFillCurrentScene = !sceneForm.location_id.trim();
     const node = await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/locations`, {
       name: locationForm.name.trim(),
       properties: { type: locationForm.type.trim() || undefined },
       reviewer: "author",
-      rationale: "作者从工作台创建地点。",
+      rationale: auditText.createLocation,
       source_ref: "author_seed:workbench_story_bible"
     });
     setLocationForm(defaultLocationForm);
@@ -1205,24 +1293,20 @@ export default function App() {
     );
     await refreshStoryBibleRefs(projectId);
     await refreshGraphPreview(projectId);
-    setNotice(
-      shouldFillCurrentScene
-        ? `地点已写入${localizedTerms.canonSeed}：${node.id}；已填入场景地点表单，保存场景元数据后生效。`
-        : `地点已写入${localizedTerms.canonSeed}：${node.id}。`
-    );
+    setNotice(uiText.runtime.locationCreated(node.id, shouldFillCurrentScene));
   }, [apiBase, locationForm, projectId, refreshGraphPreview, refreshStoryBibleRefs, sceneForm]);
 
   const createWorldRule = useCallback(async () => {
-    if (!projectId) throw new Error("请先选择或创建项目。");
+    if (!projectId) throw new Error(uiText.errors.selectProjectOrCreate);
     if (!worldRuleForm.domain.trim() || !worldRuleForm.rule.trim()) {
-      throw new Error("请填写规则领域和规则内容。");
+      throw new Error(uiText.errors.worldRuleRequired);
     }
     await apiPost<GraphNodePayload>(apiBase, `/projects/${projectId}/world-rules`, {
       domain: worldRuleForm.domain.trim(),
       rule: worldRuleForm.rule.trim(),
       severity: worldRuleForm.severity,
       reviewer: "author",
-      rationale: "作者从工作台创建世界规则。",
+      rationale: auditText.createWorldRule,
       source_ref: "author_seed:workbench_story_bible"
     });
     setWorldRuleForm(defaultWorldRuleForm);
@@ -1233,10 +1317,11 @@ export default function App() {
   const saveDocumentAsDraft = useCallback(
     async (document: SourceDocument) => {
       if (!endpoint) throw new Error(uiText.errors.selectSceneForDraft);
+      requireProjectContentLanguage(document, selectedProject?.language);
       const sourceText = requireReadySourceText(document);
       const saved = await apiPost<Draft>(apiBase, `${endpoint}/draft`, {
         text: sourceText,
-        summary: `${uiText.library.importedDraftSummaryPrefix}${document.title}`
+        summary: `${getLocaleCatalog(selectedProject?.language).ui.library.importedDraftSummaryPrefix}${document.title}`
       });
       setDraft(saved);
       setDraftText(saved.text);
@@ -1245,12 +1330,13 @@ export default function App() {
       setNotice(uiText.notices.sourceSavedAsDraft(document.title, saved.version));
       return saved;
     },
-    [apiBase, endpoint]
+    [apiBase, endpoint, selectedProject]
   );
 
   const saveDocumentAsStyleSample = useCallback(
     async (document: SourceDocument) => {
       if (!projectId) throw new Error(uiText.errors.selectProjectForStyle);
+      requireProjectContentLanguage(document, selectedProject?.language);
       const sourceText = requireReadySourceText(document);
       await apiPost(apiBase, `/projects/${projectId}/style-samples`, {
         text: sourceText,
@@ -1259,11 +1345,11 @@ export default function App() {
         tone: contextPack?.style_constraints.tone ?? null,
         dialogue_style: contextPack?.style_constraints.dialogue_style ?? null,
         tags: ["source_document"],
-        summary: `${uiText.library.importedStyleSummaryPrefix}${document.title}`
+        summary: `${getLocaleCatalog(selectedProject?.language).ui.library.importedStyleSummaryPrefix}${document.title}`
       });
       setNotice(uiText.notices.sourceSavedAsStyle(document.title));
     },
-    [apiBase, contextPack, projectId]
+    [apiBase, contextPack, projectId, selectedProject]
   );
 
   const analyzeDocumentStructure = useCallback(
@@ -1272,12 +1358,24 @@ export default function App() {
       if (document.extraction_status !== "ready") {
         throw new Error(uiText.errors.sourceNotReadyStructure);
       }
+      if (document.language === "und") {
+        throw new Error(uiText.errors.sourceLanguageRequired);
+      }
+      const projectLanguage = outputLanguageOrNull(selectedProject?.language);
+      if (!projectLanguage) throw new Error(uiText.errors.projectLanguageRequired);
+      if (
+        document.language !== projectLanguage &&
+        crossLanguagePolicy === "project_only"
+      ) {
+        throw new Error(uiText.errors.mixedLanguageStructure);
+      }
       const result = await apiPost<ProjectStructureDraftResult>(
         apiBase,
         `/projects/${projectId}/sources/${document.id}/structure-draft`,
         {
           max_chapters: 24,
-          max_scenes_per_chapter: 12
+          max_scenes_per_chapter: 12,
+          cross_language_policy: crossLanguagePolicy
         }
       );
       await refreshProposals(projectId);
@@ -1293,25 +1391,26 @@ export default function App() {
         result.truncated
       ));
     },
-    [apiBase, projectId, refreshProposals]
+    [apiBase, crossLanguagePolicy, projectId, refreshProposals, selectedProject]
   );
 
   const saveDocumentAsProposal = useCallback(
     async (document: SourceDocument) => {
       if (!projectId || !sceneId) throw new Error(uiText.errors.selectSceneForDraft);
+      requireProjectContentLanguage(document, selectedProject?.language);
       const sourceText = requireReadySourceText(document);
       const proposal = await apiPost<ProposalArtifact>(
         apiBase,
         `/projects/${projectId}/proposals`,
         {
           artifact_type: "scene_draft",
-          title: `${uiText.library.importedProposalTitlePrefix}${document.title}`,
+          title: `${getLocaleCatalog(selectedProject?.language).ui.library.importedProposalTitlePrefix}${document.title}`,
           body: sourceText,
           target_refs: [{ kind: "scene", ref: sceneId }],
           source_refs: [{ kind: "source_document", ref: document.id, note: document.title }],
           created_by: "author",
           created_via: "import",
-          provenance_note: `${uiText.library.importedProposalNotePrefix}${document.title}`
+          provenance_note: `${getLocaleCatalog(selectedProject?.language).ui.library.importedProposalNotePrefix}${document.title}`
         }
       );
       await refreshProposals(projectId);
@@ -1319,7 +1418,7 @@ export default function App() {
       setWorkspaceTab("proposals");
       setNotice(uiText.notices.sourceSavedAsProposal(document.title));
     },
-    [apiBase, projectId, refreshProposals, sceneId]
+    [apiBase, projectId, refreshProposals, sceneId, selectedProject]
   );
 
   const archiveSourceDocument = useCallback(
@@ -1344,6 +1443,35 @@ export default function App() {
     [apiBase, projectId, refreshSources, selectedSourceDocumentId]
   );
 
+  const updateSourceDocumentLanguage = useCallback(
+    async (document: SourceDocumentSummary, language: "zh-CN" | "en-US") => {
+      if (!projectId) throw new Error(uiText.errors.selectProject);
+      const request: SourceDocumentUpdateRequest = {
+        language,
+        expected_updated_at: document.updated_at
+      };
+      const updated = await apiPatch<SourceDocument>(
+        apiBase,
+        `/projects/${projectId}/sources/${document.id}`,
+        request
+      );
+      setSelectedSourceDocument(updated);
+      if (
+        crossLanguagePolicy === "project_only" &&
+        updated.language !== outputLanguageOrNull(selectedProject?.language)
+      ) {
+        setSelectedAgentSourceIds((current) => {
+          const next = new Set(current);
+          next.delete(updated.id);
+          return next;
+        });
+      }
+      await refreshSources(projectId);
+      setSelectedSourceDocumentId(updated.id);
+    },
+    [apiBase, crossLanguagePolicy, projectId, refreshSources, selectedProject]
+  );
+
   const archiveDemo = useCallback(async () => {
     const result = await apiPost<DemoArchiveResult>(apiBase, "/demo/archive");
     await refreshWorkspace();
@@ -1355,28 +1483,26 @@ export default function App() {
     setRunEvents([]);
     setContinuityReport(null);
     await refreshFacts();
-    setNotice(
-      `内置演示已从工作区移除：归档 ${result.nodes_archived} 个节点、${result.relationships_archived} 条关系。`
-    );
+    setNotice(uiText.runtime.archiveDemo(result.nodes_archived, result.relationships_archived));
   }, [apiBase, refreshFacts, refreshWorkspace]);
 
   const buildContext = useCallback(async () => {
-    if (!endpoint) throw new Error("请先选择场景。");
+    if (!endpoint) throw new Error(uiText.errors.selectScene);
     const pack = await apiPost<ContextPack>(apiBase, `${endpoint}/context-pack`);
     setContextPack(pack);
     setWorkspaceTab("write");
     setActiveTab("context");
-    setNotice("上下文包已刷新。");
+    setNotice(uiText.notices.contextRefreshed);
   }, [apiBase, endpoint]);
 
   const saveDraft = useCallback(async () => {
-    if (!endpoint) throw new Error("请先选择场景。");
+    if (!endpoint) throw new Error(uiText.errors.selectScene);
     const saved = await apiPost<Draft>(apiBase, `${endpoint}/draft`, {
       text: draftText,
       summary: draftSummary
     });
     setDraft(saved);
-    setNotice(`草稿 v${saved.version} 已保存。`);
+    setNotice(uiText.runtime.draftSaved(saved.version));
     setWorkspaceTab("write");
   }, [apiBase, draftSummary, draftText, endpoint]);
 
@@ -1430,17 +1556,24 @@ export default function App() {
     if (agentDiscussionForm.mode === "revise_selection" && !selectedText) {
       throw new Error(uiText.errors.agentSelectionRequired);
     }
+    if (
+      agentDiscussionForm.mode !== "discuss" &&
+      (!agentDiscussionForm.includeLatestDraft || !draft || draftText !== draft.text)
+    ) {
+      throw new Error(uiText.errors.agentRevisionRequiresSavedDraft);
+    }
     const payload: AgentDiscussionRequest = {
       mode: agentDiscussionForm.mode,
       instruction,
       selected_text: agentDiscussionForm.includeLatestDraft ? selectedText || null : null,
-      base_text: agentDiscussionForm.includeLatestDraft ? draftText : null,
+      base_text: null,
       include_context_pack: agentDiscussionForm.includeContextPack,
       include_latest_draft: agentDiscussionForm.includeLatestDraft,
       local_sources: [],
       source_document_ids: Array.from(selectedAgentSourceIds),
       allow_web_search: agentDiscussionForm.allowWebSearch,
-      web_search_query: agentDiscussionForm.webSearchQuery.trim() || null
+      web_search_query: agentDiscussionForm.webSearchQuery.trim() || null,
+      cross_language_policy: crossLanguagePolicy
     };
     const result = await apiPost<AgentDiscussionResult>(
       apiBase,
@@ -1463,27 +1596,29 @@ export default function App() {
   }, [
     agentDiscussionForm,
     apiBase,
+    draft,
     draftText,
     endpoint,
     projectId,
     refreshProposals,
-    selectedAgentSourceIds
+    selectedAgentSourceIds,
+    crossLanguagePolicy
   ]);
 
   const generateDraft = useCallback(async () => {
-    if (!endpoint) throw new Error("请先选择场景。");
+    if (!endpoint) throw new Error(uiText.errors.selectScene);
     const saved = await apiPost<Draft>(apiBase, `${endpoint}/draft`);
     const pack = await apiPost<ContextPack>(apiBase, `${endpoint}/context-pack`);
     setContextPack(pack);
     setDraft(saved);
     setDraftText(saved.text);
     setDraftSummary(saved.summary ?? "");
-    setNotice(`草稿 v${saved.version} 已生成。`);
+    setNotice(uiText.runtime.draftGenerated(saved.version));
     setWorkspaceTab("write");
   }, [apiBase, endpoint]);
 
   const runScene = useCallback(async () => {
-    if (!endpoint) throw new Error("请先选择场景。");
+    if (!endpoint) throw new Error(uiText.errors.selectScene);
     const result = await apiPost<SceneRunResult>(
       apiBase,
       `${endpoint}/runs/scene-generation`
@@ -1505,20 +1640,29 @@ export default function App() {
     );
     setRunEvents(events.events);
     await refreshFacts();
-    setNotice(`工作流状态：${formatStatus(result.workflow_run.status)}。`);
+    setNotice(uiText.runtime.workflowStatus(formatStatus(result.workflow_run.status)));
   }, [apiBase, endpoint, refreshFacts]);
 
   const startNewProposal = useCallback(() => {
+    const contentLanguage = outputLanguageOrNull(selectedProject?.language);
     setSelectedProposalId(null);
     setProposalArtifactType("scene_draft");
-    setProposalTitle(selectedScene ? `${localizeText(selectedScene.title)} 协作草稿` : "");
+    setProposalTitle(
+      selectedScene && contentLanguage
+        ? `${selectedScene.title} ${getLocaleCatalog(contentLanguage).contentDefaults.proposalSuffix}`
+        : ""
+    );
     setProposalText("");
     setProposalSourceDraftId(draft?.id ?? "");
-  }, [draft, selectedScene]);
+  }, [draft, selectedProject, selectedScene]);
 
   const saveProposal = useCallback(async () => {
-    if (!projectId) throw new Error("请先选择或创建项目。");
-    const title = proposalTitle.trim() || "未命名协作草稿";
+    if (!projectId) throw new Error(uiText.errors.selectProjectOrCreate);
+    const contentLanguage = outputLanguageOrNull(selectedProject?.language);
+    if (!contentLanguage) throw new Error(uiText.errors.projectLanguageRequired);
+    const title =
+      proposalTitle.trim() ||
+      getLocaleCatalog(contentLanguage).contentDefaults.untitledProposal;
     const body = proposalText;
     if (selectedProposal) {
       const saved = await apiPatch<ProposalArtifact>(
@@ -1532,7 +1676,7 @@ export default function App() {
       );
       await refreshProposals(projectId);
       setSelectedProposalId(saved.id);
-      setNotice(`协作草稿已保存为 v${saved.version}；草稿库、候选事实和正典均未改变。`);
+      setNotice(uiText.runtime.proposalSaved(saved.version));
       return;
     }
     const targetRefs =
@@ -1552,12 +1696,12 @@ export default function App() {
         source_refs: [{ kind: "author_instruction", ref: "workbench:proposal_editor" }],
         created_by: "author",
         created_via: "manual",
-        provenance_note: "作者从协作草稿箱创建。"
+        provenance_note: auditText.createProposal
       }
     );
     await refreshProposals(projectId);
     setSelectedProposalId(saved.id);
-    setNotice(`协作草稿已创建为 v${saved.version}；尚未进入草稿库、候选事实或正典。`);
+    setNotice(uiText.runtime.proposalCreated(saved.version));
   }, [
     apiBase,
     projectId,
@@ -1567,11 +1711,12 @@ export default function App() {
     proposalTitle,
     refreshProposals,
     sceneId,
+    selectedProject,
     selectedProposal
   ]);
 
   const requestAgentProposal = useCallback(async () => {
-    if (!endpoint) throw new Error("请先选择场景。");
+    if (!endpoint) throw new Error(uiText.errors.selectScene);
     if (
       selectedProposal &&
       selectedProposal.status !== "accepted" &&
@@ -1584,13 +1729,13 @@ export default function App() {
           actor: "agent",
           created_via: "workflow",
           expected_version: selectedProposal.version,
-          note: "智能体从当前上下文包生成新的协作草稿版本。"
+          note: auditText.reviseProposal
         }
       );
       await refreshProposals(projectId);
       setSelectedProposalId(revised.id);
       setWorkspaceTab("proposals");
-      setNotice(`智能体已修订协作草稿为 v${revised.version}；当前场景草稿未被覆盖。`);
+      setNotice(uiText.runtime.proposalRevised(revised.version));
       return;
     }
     const result = await apiPost<SceneRunResult>(
@@ -1617,7 +1762,7 @@ export default function App() {
   }, [apiBase, endpoint, projectId, refreshProposals, selectedProposal]);
 
   const extractStateToProposal = useCallback(async () => {
-    if (!endpoint) throw new Error("请先选择场景。");
+    if (!endpoint) throw new Error(uiText.errors.selectScene);
     const result = await apiPost<{
       proposal: ProposalArtifact;
       candidate_previews: CandidateFact[];
@@ -1626,15 +1771,11 @@ export default function App() {
     await refreshProposals(projectId);
     setSelectedProposalId(result.proposal.id);
     setWorkspaceTab("proposals");
-    setNotice(
-      result.candidate_previews.length
-        ? `已生成事实草稿协作提案，包含 ${result.candidate_previews.length} 条候选预览。`
-        : "已生成事实草稿协作提案，当前草稿未发现候选事实。"
-    );
+    setNotice(uiText.runtime.factDraftCreated(result.candidate_previews.length));
   }, [apiBase, endpoint, projectId, refreshProposals]);
 
   const submitProposalReview = useCallback(async () => {
-    if (!selectedProposal || !projectId) throw new Error("请先选择协作草稿。");
+    if (!selectedProposal || !projectId) throw new Error(uiText.errors.selectProposal);
     const saved = await apiPost<ProposalArtifact>(
       apiBase,
       `/projects/${projectId}/proposals/${selectedProposal.id}/submit-review`,
@@ -1642,12 +1783,12 @@ export default function App() {
     );
     await refreshProposals(projectId);
     setSelectedProposalId(saved.id);
-    setNotice(`协作草稿 ${saved.id} 已标记为待审。`);
+    setNotice(uiText.runtime.proposalSubmitted(saved.id));
   }, [apiBase, projectId, refreshProposals, selectedProposal]);
 
   const reviewProposal = useCallback(
     async (decision: "accept" | "reject") => {
-      if (!selectedProposal || !projectId) throw new Error("请先选择协作草稿。");
+      if (!selectedProposal || !projectId) throw new Error(uiText.errors.selectProposal);
       const saved = await apiPost<ProposalArtifact>(
         apiBase,
         `/projects/${projectId}/proposals/${selectedProposal.id}/${decision}`,
@@ -1655,13 +1796,13 @@ export default function App() {
       );
       await refreshProposals(projectId);
       setSelectedProposalId(saved.id);
-      setNotice(`协作草稿已${decision === "accept" ? "接受" : "拒绝"}；正典未改变。`);
+      setNotice(uiText.runtime.proposalDecided(decision === "accept"));
     },
     [apiBase, projectId, refreshProposals, selectedProposal]
   );
 
   const promoteProposalToDraft = useCallback(async () => {
-    if (!selectedProposal || !projectId || !sceneId) throw new Error("请先选择场景和协作草稿。");
+    if (!selectedProposal || !projectId || !sceneId) throw new Error(uiText.errors.selectSceneAndProposal);
     const result = await apiPost<ProposalDraftPromotionResult>(
       apiBase,
       `/projects/${projectId}/proposals/${selectedProposal.id}/promote/draft`,
@@ -1672,17 +1813,17 @@ export default function App() {
     setDraftSummary(result.draft.summary ?? "");
     await refreshProposals(projectId);
     setSelectedProposalId(result.proposal.id);
-    setNotice(`已转为当前场景草稿 v${result.draft.version}；正典未改变。`);
+    setNotice(uiText.runtime.proposalPromoted(result.draft.version));
   }, [apiBase, projectId, refreshProposals, sceneId, selectedProposal]);
 
   const applyProjectStructureProposal = useCallback(async () => {
-    if (!selectedProposal || !projectId) throw new Error("请先选择项目结构草稿。");
+    if (!selectedProposal || !projectId) throw new Error(uiText.errors.selectProjectStructureProposal);
     const result = await apiPost<ProjectStructureApplyResult>(
       apiBase,
       `/projects/${projectId}/proposals/${selectedProposal.id}/apply/project-structure`,
       {
         reviewer: "author",
-        rationale: "作者确认导入文档生成的项目结构草稿。",
+        rationale: auditText.applyStructure,
         expected_version: selectedProposal.version
       }
     );
@@ -1695,9 +1836,11 @@ export default function App() {
       setWorkspaceTab("write");
     }
     setNotice(
-      result.already_applied
-        ? `该项目结构已应用过：复用 ${result.chapters.length} 个章节、${result.scenes.length} 个场景；正典事实仍未改变。`
-        : `已应用项目结构：创建 ${result.chapters.length} 个章节、${result.scenes.length} 个场景；正典事实仍未改变。`
+      uiText.runtime.structureApplied(
+        result.chapters.length,
+        result.scenes.length,
+        result.already_applied
+      )
     );
   }, [
     apiBase,
@@ -1710,10 +1853,10 @@ export default function App() {
   ]);
 
   const promoteProposalToCandidates = useCallback(async () => {
-    if (!selectedProposal || !projectId) throw new Error("请先选择协作草稿。");
+    if (!selectedProposal || !projectId) throw new Error(uiText.errors.selectProposal);
     const sourceDraftId =
       proposalSourceDraftId.trim() || findProposalRef(selectedProposal, "draft") || draft?.id || "";
-    if (!sourceDraftId) throw new Error("请提供真实来源草稿 ID。");
+    if (!sourceDraftId) throw new Error(uiText.errors.sourceDraftRequired);
     const result = await apiPost<ProposalCandidatePromotionResult>(
       apiBase,
       `/projects/${projectId}/proposals/${selectedProposal.id}/promote/candidate-facts`,
@@ -1726,11 +1869,7 @@ export default function App() {
     await refreshFacts();
     setSelectedProposalId(result.proposal.id);
     setActiveTab("facts");
-    setNotice(
-      result.candidates.length
-        ? `已提交 ${result.candidates.length} 条候选事实；正典尚未改变。`
-        : "来源草稿中没有可抽取的候选事实。"
-    );
+    setNotice(uiText.runtime.candidatesSubmitted(result.candidates.length));
   }, [
     apiBase,
     draft,
@@ -1746,7 +1885,7 @@ export default function App() {
       await apiPost<CandidateFact>(
         apiBase,
         `/projects/${projectId}/facts/${factId}/${action}`,
-        { reviewer: "author", note: `工作台执行：${reviewActionLabels[action]}` }
+        { reviewer: "author", note: `${auditText.reviewPrefix}.${action}` }
       );
       const remaining = await refreshFacts();
       if (run?.status === "awaiting_review" && remaining.length === 0) {
@@ -1757,11 +1896,11 @@ export default function App() {
           `/runs/${resumed.id}/events`
         );
         setRunEvents(events.events);
-        setNotice(`候选事实已${reviewActionLabels[action]}，工作流审阅暂停已恢复。`);
+        setNotice(uiText.runtime.factReviewed(reviewActionLabels[action], true));
         return;
       }
       await refreshGraphPreview(projectId);
-      setNotice(`候选事实已${reviewActionLabels[action]}。`);
+      setNotice(uiText.runtime.factReviewed(reviewActionLabels[action], false));
     },
     [apiBase, projectId, refreshFacts, refreshGraphPreview, run]
   );
@@ -1770,7 +1909,8 @@ export default function App() {
     if (!isDesktopRuntime()) return;
     refreshDesktopBackend("start").catch((exc) => {
       setDesktopBackendChecked(true);
-      setError(toErrorMessage(exc));
+      setError(uiText.errors.requestFailed);
+      setTechnicalError(technicalErrorMessage(exc));
     });
   }, [refreshDesktopBackend]);
 
@@ -1782,12 +1922,14 @@ export default function App() {
     }
     if (isDesktopRuntime() && desktopBackend && !desktopBackend.workspaceCompatible) {
       setWorkspaceLoaded(true);
-      setError(desktopBackend.error ?? "当前桌面后端工作区与设置不一致，请先处理后端连接。");
+      setError(uiText.runtime.backendWorkspaceConflict);
+      setTechnicalError(desktopBackend.error ?? null);
       return;
     }
     refreshWorkspace().catch((exc) => {
       setWorkspaceLoaded(true);
-      setError(toErrorMessage(exc));
+      setError(uiText.errors.requestFailed);
+      setTechnicalError(technicalErrorMessage(exc));
     });
   }, [
     apiBase,
@@ -1822,16 +1964,21 @@ export default function App() {
     setSelectedSourceDocumentId(null);
     setSelectedSourceDocument(null);
     setSelectedAgentSourceIds(new Set());
+    setCrossLanguagePolicy("project_only");
     setSourceImportProgress(null);
     setExpandedLibraryPaths(new Set(["library"]));
     setAgentDiscussionResult(null);
     if (!projectId) return;
-    refreshSources(projectId).catch((exc) => setError(toErrorMessage(exc)));
+    refreshSources(projectId).catch((exc) => {
+      setError(uiText.errors.requestFailed);
+      setTechnicalError(technicalErrorMessage(exc));
+    });
   }, [projectId, refreshSources]);
 
   useEffect(() => {
     setAgentDiscussionResult(null);
     setSelectedAgentSourceIds(new Set());
+    setCrossLanguagePolicy("project_only");
     setDraftSelection("");
     setDraft(null);
     setDraftText("");
@@ -1856,7 +2003,10 @@ export default function App() {
         if (!cancelled) setSelectedSourceDocument(document);
       })
       .catch((exc) => {
-        if (!cancelled) setError(toErrorMessage(exc));
+        if (!cancelled) {
+          setError(uiText.errors.requestFailed);
+          setTechnicalError(technicalErrorMessage(exc));
+        }
       })
       .finally(() => {
         if (!cancelled) setSourceDetailLoading(false);
@@ -1910,9 +2060,22 @@ export default function App() {
   const llmConfigured = Boolean(
     agentSettings?.api_key_configured && agentSettings.llm_base_url && agentSettings.llm_model
   );
-  const canRunScene = hasScene && canGenerate && !writerNeedsKey;
-  const canDiscussWithAgent = hasScene && canGenerate && llmConfigured;
+  const projectLanguageReady = outputLanguageOrNull(selectedProject?.language) !== null;
+  const canRunScene = hasScene && canGenerate && !writerNeedsKey && projectLanguageReady;
+  const canDiscussWithAgent = hasScene && canGenerate && llmConfigured && projectLanguageReady;
   const toggleAgentSource = useCallback((sourceId: string) => {
+    const source = sourceDocuments.find((item) => item.id === sourceId);
+    if (!source || source.language === "und") {
+      setNotice(uiText.language.sourceUnknownDisabled);
+      return;
+    }
+    if (
+      source.language !== outputLanguageOrNull(selectedProject?.language) &&
+      crossLanguagePolicy !== "explicit_reference"
+    ) {
+      setNotice(uiText.language.sourceMismatchDisabled);
+      return;
+    }
     setSelectedAgentSourceIds((current) => {
       const next = new Set(current);
       if (next.has(sourceId)) {
@@ -1924,7 +2087,23 @@ export default function App() {
       }
       return next;
     });
-  }, []);
+  }, [crossLanguagePolicy, selectedProject, sourceDocuments]);
+  const changeCrossLanguagePolicy = useCallback(
+    (policy: CrossLanguagePolicy) => {
+      setCrossLanguagePolicy(policy);
+      if (policy !== "project_only") return;
+      const projectLanguage = outputLanguageOrNull(selectedProject?.language);
+      const allowedIds = new Set(
+        sourceDocuments
+          .filter((source) => source.language === projectLanguage)
+          .map((source) => source.id)
+      );
+      setSelectedAgentSourceIds(
+        (current) => new Set(Array.from(current).filter((id) => allowedIds.has(id)))
+      );
+    },
+    [selectedProject, sourceDocuments]
+  );
   const runEditCommand = useCallback((command: "undo" | "redo") => {
     const active = document.activeElement;
     if (
@@ -1957,10 +2136,10 @@ export default function App() {
             <Save size={15} /> {uiText.common.save}
           </button>
           <button type="button" onClick={() => runEditCommand("undo")} title={uiText.commandBar.undoTitle}>
-            <Undo2 size={15} /> 撤销
+            <Undo2 size={15} /> {uiText.common.undo}
           </button>
           <button type="button" onClick={() => runEditCommand("redo")} title={uiText.commandBar.redoTitle}>
-            <Redo2 size={15} /> 重做
+            <Redo2 size={15} /> {uiText.common.redo}
           </button>
           <button
             type="button"
@@ -1989,7 +2168,7 @@ export default function App() {
             disabled={!canRunScene || busy !== null}
             title={uiText.commandBar.runTitle}
           >
-            <Play size={15} /> 写作
+            <Play size={15} /> {uiText.common.writing}
           </button>
         </div>
         <label className="api-control">
@@ -1997,7 +2176,7 @@ export default function App() {
           <input
             value={apiBase}
             onChange={(event) => setApiBase(event.target.value)}
-            aria-label="API 地址"
+            aria-label={uiText.runtime.apiAddressAria}
           />
         </label>
         <div className="top-actions">
@@ -2077,12 +2256,12 @@ export default function App() {
           <section className="scene-toolbar">
             <div>
               <h1>
-                {localizeText(selectedScene?.title) ||
+                {selectedScene?.title ||
                   (hasWorkspace ? uiText.workspace.importedStructureTitle : uiText.workspace.emptyWorkspaceTitle)}
               </h1>
               <p>
                 {hasScene
-                  ? `${sceneId} / 视角 ${localizeText(contextPack?.pov_character_id || selectedScene?.pov_character_id) || "未设置"}`
+                  ? `${sceneId} / ${uiText.editor.pov} ${contextPack?.pov_character_id || selectedScene?.pov_character_id || uiText.common.notSet}`
                   : hasWorkspace
                     ? uiText.workspace.noSceneWithWorkspace
                     : uiText.workspace.noSceneEmptyWorkspace}
@@ -2125,11 +2304,11 @@ export default function App() {
 
           <section className="state-strip" aria-label={uiText.workspace.workflowStatusAria}>
             <StatusDot
-              label={`${uiText.stateStrip.projectPrefix}：${localizeText(selectedProject?.title) || "未创建"}`}
+              label={`${uiText.stateStrip.projectPrefix}: ${selectedProject?.title || uiText.common.notCreated}`}
               tone={hasWorkspace ? "good" : "warning"}
             />
             <StatusDot
-              label={`${uiText.stateStrip.writerPrefix}：${formatWriter(agentSettings)}`}
+              label={`${uiText.stateStrip.writerPrefix}: ${formatWriter(agentSettings)}`}
               tone={writerNeedsKey ? "danger" : canGenerate ? "good" : "neutral"}
             />
             <StatusDot
@@ -2149,7 +2328,15 @@ export default function App() {
           {(error || notice) && (
             <div className={`message ${error ? "error" : "notice"}`}>
               {error ? <AlertTriangle size={16} /> : <Check size={16} />}
-              <span>{error ?? notice}</span>
+              <div>
+                <span>{error ?? notice}</span>
+                {error && technicalError && (
+                  <details>
+                    <summary>{uiText.errors.technicalDetails}</summary>
+                    <code>{technicalError}</code>
+                  </details>
+                )}
+              </div>
             </div>
           )}
 
@@ -2269,6 +2456,14 @@ export default function App() {
                 onSaveStyle={(document) =>
                   runAction("import-style", () => saveDocumentAsStyleSample(document))
                 }
+                onUpdateLanguage={(document, language) =>
+                  runAction("source-language", () =>
+                    updateSourceDocumentLanguage(document, language)
+                  )
+                }
+                onPolicyChange={changeCrossLanguagePolicy}
+                crossLanguagePolicy={crossLanguagePolicy}
+                projectLanguage={outputLanguageOrNull(selectedProject?.language)}
                 summary={selectedSourceSummary}
               />
             </div>
@@ -2285,6 +2480,7 @@ export default function App() {
             llmConfigured={llmConfigured}
             onFormChange={setAgentDiscussionForm}
             onOpenProposal={() => setWorkspaceTab("proposals")}
+            onPolicyChange={changeCrossLanguagePolicy}
             onSubmit={() => runAction("agent-discussion", requestAgentDiscussion)}
             onToggleSource={toggleAgentSource}
             onUseDraftSelection={useDraftSelectionForAgent}
@@ -2292,6 +2488,8 @@ export default function App() {
             selectedSourceIds={selectedAgentSourceIds}
             selectedProposal={selectedProposal}
             sources={sourceDocuments}
+            crossLanguagePolicy={crossLanguagePolicy}
+            projectLanguage={outputLanguageOrNull(selectedProject?.language)}
           />
           )}
 
@@ -2317,7 +2515,7 @@ export default function App() {
             onFilterChange={setProposalStatusFilter}
             onOpenCanonReview={() => {
               setActiveTab("facts");
-              setNotice("已打开候选事实审阅队列。");
+            setNotice(uiText.notices.openedFactReview);
             }}
             onPromoteDraft={() => runAction("proposal-draft", promoteProposalToDraft)}
             onReject={() => runAction("proposal-reject", () => reviewProposal("reject"))}
@@ -2343,7 +2541,11 @@ export default function App() {
             <summary className="draft-header">
               <span>{uiText.editor.draftTitle}</span>
               <div className="draft-header-actions">
-                <small>{draft ? `v${draft.version} / ${draft.id}` : uiText.editor.unsavedDraft}</small>
+                <small>
+                  {draft
+                    ? `v${draft.version} / ${draft.id} / ${formatArtifactLanguage(draft.content_language, draft.language_inferred)}`
+                    : uiText.editor.unsavedDraft}
+                </small>
                 <button
                   disabled={!draftText.trim() || busy !== null}
                   onClick={useDraftSelectionForAgent}
@@ -2419,9 +2621,11 @@ export default function App() {
               desktopBackend={desktopBackend}
               desktopSettings={desktopSettings}
               form={agentForm}
+              locale={uiLocale}
               onApiKeyChange={setApiKeyInput}
               onClearApiKeyChange={setClearApiKey}
               onFormChange={setAgentForm}
+              onLocaleChange={setUiLocale}
               onBackendRefresh={() => runAction("desktop-backend", () => refreshDesktopBackend("status").then(() => undefined))}
               onBackendStart={() => runAction("desktop-backend", () => refreshDesktopBackend("start").then(() => undefined))}
               onBackendStop={() => runAction("desktop-backend", stopDesktopBackend)}
@@ -2443,28 +2647,33 @@ export default function App() {
 function AgentDiscussionPanel({
   busy,
   canDiscuss,
+  crossLanguagePolicy,
   draftSelection,
   form,
   hasScene,
   llmConfigured,
   onFormChange,
   onOpenProposal,
+  onPolicyChange,
   onSubmit,
   onToggleSource,
   onUseDraftSelection,
   result,
   selectedProposal,
   selectedSourceIds,
-  sources
+  sources,
+  projectLanguage
 }: {
   busy: string | null;
   canDiscuss: boolean;
+  crossLanguagePolicy: CrossLanguagePolicy;
   draftSelection: string;
   form: AgentDiscussionForm;
   hasScene: boolean;
   llmConfigured: boolean;
   onFormChange: React.Dispatch<React.SetStateAction<AgentDiscussionForm>>;
   onOpenProposal: () => void;
+  onPolicyChange: (policy: CrossLanguagePolicy) => void;
   onSubmit: () => void;
   onToggleSource: (sourceId: string) => void;
   onUseDraftSelection: () => void;
@@ -2472,6 +2681,7 @@ function AgentDiscussionPanel({
   selectedProposal: ProposalArtifact | null;
   selectedSourceIds: Set<string>;
   sources: SourceDocumentSummary[];
+  projectLanguage: AppLocale | null;
 }) {
   const selectedRequired = form.mode === "revise_selection";
   const draftRequired = form.mode !== "discuss";
@@ -2549,6 +2759,21 @@ function AgentDiscussionPanel({
         <div className="agent-options">
           <label>
             <input
+              checked={crossLanguagePolicy === "explicit_reference"}
+              onChange={(event) =>
+                onPolicyChange(event.target.checked ? "explicit_reference" : "project_only")
+              }
+              type="checkbox"
+            />
+            {uiText.language.explicitReference}
+          </label>
+          <small className="agent-language-policy">
+            {crossLanguagePolicy === "explicit_reference"
+              ? uiText.language.explicitReferenceHelp
+              : uiText.language.projectOnly}
+          </small>
+          <label>
+            <input
               type="checkbox"
               checked={form.includeContextPack}
               onChange={(event) =>
@@ -2615,18 +2840,29 @@ function AgentDiscussionPanel({
             <div className="agent-source-list" aria-label={uiText.agentDiscussion.sourcePickerAria}>
               {sources.map((source) => {
                 const ready = source.extraction_status === "ready";
+                const languageKnown = source.language !== "und";
+                const languageAllowed =
+                  projectLanguage !== null &&
+                  (source.language === projectLanguage ||
+                    crossLanguagePolicy === "explicit_reference");
+                const selectable = ready && languageKnown && languageAllowed;
+                const languageTitle = !languageKnown
+                  ? uiText.language.sourceUnknownDisabled
+                  : !languageAllowed
+                    ? uiText.language.sourceMismatchDisabled
+                    : undefined;
                 return (
-                  <label className={!ready ? "disabled" : ""} key={source.id}>
+                  <label className={!selectable ? "disabled" : ""} key={source.id} title={languageTitle}>
                     <input
                       checked={selectedSourceIds.has(source.id)}
-                      disabled={!ready || busy !== null}
+                      disabled={!selectable || busy !== null}
                       onChange={() => onToggleSource(source.id)}
                       type="checkbox"
                     />
                     <span>
                       <strong>{source.title}</strong>
                       <small>
-                        {source.relative_path} · {source.language} · {formatStatus(source.extraction_status)} · {source.id}
+                        {source.relative_path} · {formatSourceLanguage(source.language)} · {formatStatus(source.extraction_status)} · {source.id}
                       </small>
                     </span>
                   </label>
@@ -2858,6 +3094,14 @@ function ProposalInbox({
           <MetricRow label={uiText.proposals.metadataStatus} value={selectedProposal ? proposalStatusLabels[selectedProposal.status] : uiText.proposals.unselected} />
           <MetricRow label={uiText.proposals.metadataType} value={proposalTypeLabels[proposalType]} />
           <MetricRow label={uiText.proposals.metadataVersion} value={selectedProposal ? `v${selectedProposal.version}` : uiText.proposals.newVersion} />
+          <MetricRow
+            label={uiText.language.artifactLanguageLabel}
+            value={
+              selectedProposal
+                ? formatArtifactLanguage(selectedProposal.content_language, selectedProposal.language_inferred)
+                : uiText.common.none
+            }
+          />
           <MetricRow label={uiText.proposals.metadataCreatedVia} value={formatProvenanceMethod(selectedProposal?.provenance.created_via)} />
           <label>
             <span>{uiText.proposals.sourceDraft}</span>
@@ -3015,7 +3259,7 @@ function ProjectSidebar({
     if (!importedPovLabel) return;
     onCharacterFormChange((current) => ({
       ...current,
-      name: localizeText(importedPovLabel)
+      name: importedPovLabel
     }));
   };
 
@@ -3023,7 +3267,7 @@ function ProjectSidebar({
     if (!importedLocationLabel) return;
     onLocationFormChange((current) => ({
       ...current,
-      name: localizeText(importedLocationLabel)
+      name: importedLocationLabel
     }));
   };
 
@@ -3062,16 +3306,16 @@ function ProjectSidebar({
               >
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
-                    {localizeText(project.title)}
+                    {project.title}
                   </option>
                 ))}
               </select>
               <div className="project-id">{projectId}</div>
               {selectedProject && (
                 <div className="project-card">
-                  <strong>{localizeText(selectedProject.title)}</strong>
+                  <strong>{selectedProject.title}</strong>
                   <span>
-                    {selectedProject.genre ?? uiText.sidebar.uncategorized} / {selectedProject.language ?? uiText.sidebar.languageUnset}
+                    {selectedProject.genre ?? uiText.sidebar.uncategorized} / {formatProjectLanguage(selectedProject)}
                   </span>
                   <span>
                     {chapters.length} {uiText.sidebar.chapterCount} / {projectSceneCount} {uiText.sidebar.sceneCount}
@@ -3128,7 +3372,7 @@ function ProjectSidebar({
               <div key={chapter.id} className="chapter">
                 <div className="chapter-row">
                   <BookOpen size={15} />
-                  <span>{localizeText(chapter.title)}</span>
+                  <span>{chapter.title}</span>
                   <small>{formatStatus(chapter.status ?? "planned")}</small>
                 </div>
                 {chapter.scenes.length ? (
@@ -3141,7 +3385,7 @@ function ProjectSidebar({
                       type="button"
                     >
                       <ChevronRight size={14} />
-                      <span>{localizeText(scene.title)}</span>
+                      <span>{scene.title}</span>
                       <small>{formatStatus(scene.status ?? "planned")}</small>
                     </button>
                   ))
@@ -3180,14 +3424,26 @@ function ProjectSidebar({
                   onProjectFormChange((current) => ({ ...current, genre: event.target.value }))
                 }
               />
-              <input
-                placeholder={uiText.sidebar.languagePlaceholder}
-                value={projectForm.language}
-                onChange={(event) =>
-                  onProjectFormChange((current) => ({ ...current, language: event.target.value }))
+              <select
+                aria-label={uiText.language.projectLanguageLabel}
+                value={
+                  projectForm.language === "zh-CN" || projectForm.language === "en-US"
+                    ? projectForm.language
+                    : ""
                 }
-              />
+                onChange={(event) => {
+                  const language = normalizeAppLocale(event.target.value);
+                  onProjectFormChange((current) => ({ ...current, language }));
+                }}
+              >
+                {projectForm.language !== "zh-CN" && projectForm.language !== "en-US" && (
+                  <option value="" disabled>{uiText.language.projectLanguageNeedsReview}</option>
+                )}
+                <option value="zh-CN">{uiText.language.chinese}</option>
+                <option value="en-US">{uiText.language.english}</option>
+              </select>
             </div>
+            <small className="field-help">{uiText.language.projectLanguageHelp}</small>
             <input
               placeholder={uiText.sidebar.targetLengthPlaceholder}
               value={projectForm.target_length}
@@ -3336,7 +3592,7 @@ function ProjectSidebar({
             <option value="">{uiText.sidebar.chooseChapter}</option>
             {chapters.map((chapter) => (
               <option key={chapter.id} value={chapter.id}>
-                {localizeText(chapter.title)}
+                {chapter.title}
               </option>
             ))}
           </select>
@@ -3397,7 +3653,7 @@ function ProjectSidebar({
               {importedPovLabel && (
                 <div className="scene-hint-row">
                   <span className="scene-hint-label">
-                    {uiText.sidebar.importedPovLabel}: {localizeText(importedPovLabel)}
+                    {uiText.sidebar.importedPovLabel}: {importedPovLabel}
                     {matchedImportedPovCharacter && (
                       <small>{uiText.sidebar.matchedPrefix} {matchedImportedPovCharacter.id}</small>
                     )}
@@ -3427,7 +3683,7 @@ function ProjectSidebar({
               {importedLocationLabel && (
                 <div className="scene-hint-row">
                   <span className="scene-hint-label">
-                    {uiText.sidebar.importedLocationLabel}: {localizeText(importedLocationLabel)}
+                    {uiText.sidebar.importedLocationLabel}: {importedLocationLabel}
                     {matchedImportedLocation && <small>{uiText.sidebar.matchedPrefix} {matchedImportedLocation.id}</small>}
                   </span>
                   <div className="scene-hint-actions">
@@ -3468,7 +3724,7 @@ function ProjectSidebar({
             {projectScenes
               .filter((scene) => scene.id !== selectedScene?.id)
               .map((scene) => (
-                <option key={scene.id} value={scene.id} label={localizeText(scene.title)} />
+                <option key={scene.id} value={scene.id} label={scene.title} />
               ))}
           </datalist>
           <div className="compact-grid">
@@ -3737,10 +3993,10 @@ function ProjectSidebar({
                 }))
               }
             >
-              <option value="low">低</option>
-              <option value="medium">中</option>
-              <option value="high">高</option>
-              <option value="critical">严重</option>
+              <option value="low">{formatSeverity("low")}</option>
+              <option value="medium">{formatSeverity("medium")}</option>
+              <option value="high">{formatSeverity("high")}</option>
+              <option value="critical">{formatSeverity("critical")}</option>
             </select>
             <button
               disabled={!canReview || !projectId || busy !== null}
@@ -3789,8 +4045,14 @@ function SourceImportStatus({ progress }: { progress: SourceImportProgress }) {
       {progress.issues.length > 0 && (
         <div className="source-import-issues">
           {progress.issues.map((issue, index) => (
-            <span key={`${issue.name}:${index}`} title={issue.message}>
-              <AlertTriangle size={13} /> {issue.name}：{issue.message}
+            <span key={`${issue.name}:${index}`}>
+              <AlertTriangle size={13} /> {issue.name}: {issue.message}
+              {issue.technicalDetails && (
+                <details>
+                  <summary>{uiText.errors.technicalDetails}</summary>
+                  <code>{issue.technicalDetails}</code>
+                </details>
+              )}
             </span>
           ))}
         </div>
@@ -3907,32 +4169,48 @@ function LibraryTreeItem({
 function DocumentReader({
   busy,
   canGenerate,
+  crossLanguagePolicy,
   document: doc,
   hasProject,
   hasScene,
   loading,
   onAnalyzeStructure,
   onArchive,
+  onPolicyChange,
   onRetry,
   onSaveDraft,
   onSaveProposal,
   onSaveStyle,
+  onUpdateLanguage,
+  projectLanguage,
   summary
 }: {
   busy: string | null;
   canGenerate: boolean;
+  crossLanguagePolicy: CrossLanguagePolicy;
   document: SourceDocument | null;
   hasProject: boolean;
   hasScene: boolean;
   loading: boolean;
   onAnalyzeStructure: (document: SourceDocumentSummary) => void;
   onArchive: (document: SourceDocumentSummary) => void;
+  onPolicyChange: (policy: CrossLanguagePolicy) => void;
   onRetry: (document: SourceDocumentSummary, file: File) => void;
   onSaveDraft: (document: SourceDocument) => void;
   onSaveProposal: (document: SourceDocument) => void;
   onSaveStyle: (document: SourceDocument) => void;
+  onUpdateLanguage: (document: SourceDocumentSummary, language: "zh-CN" | "en-US") => void;
+  projectLanguage: AppLocale | null;
   summary: SourceDocumentSummary | null;
 }) {
+  const [languageDraft, setLanguageDraft] = useState<"zh-CN" | "en-US">("zh-CN");
+  useEffect(() => {
+    if (summary?.language === "zh-CN" || summary?.language === "en-US") {
+      setLanguageDraft(summary.language);
+    } else {
+      setLanguageDraft(projectLanguage ?? "zh-CN");
+    }
+  }, [projectLanguage, summary?.id, summary?.language]);
   if (!summary) {
     return (
       <div className="document-reader empty">
@@ -3958,9 +4236,26 @@ function DocumentReader({
   }
 
   const ready = doc.extraction_status === "ready";
-  const canSceneBridge = ready && canGenerate && hasScene && busy === null;
-  const canProjectBridge = ready && canGenerate && hasProject && busy === null;
+  const sameLanguage = doc.language === projectLanguage;
+  const canManageSource = canGenerate && hasProject && busy === null;
+  const canSceneBridge = ready && sameLanguage && canGenerate && hasScene && busy === null;
+  const canProjectBridge = ready && sameLanguage && canGenerate && hasProject && busy === null;
+  const canAnalyzeStructure =
+    ready && canManageSource &&
+    projectLanguage !== null &&
+    doc.language !== "und" &&
+    (doc.language === projectLanguage || crossLanguagePolicy === "explicit_reference");
   const canArchive = hasProject && canGenerate && busy === null;
+  const contentBridgeLanguageTitle = doc.language === "und"
+    ? uiText.language.sourceUnknownDisabled
+    : !sameLanguage
+      ? uiText.errors.sourceContentLanguageMismatch
+      : null;
+  const structureLanguageTitle = doc.language === "und"
+    ? uiText.language.sourceUnknownDisabled
+    : !canAnalyzeStructure && doc.language !== projectLanguage
+      ? uiText.language.sourceMismatchDisabled
+      : null;
 
   return (
     <div className="document-reader">
@@ -3971,20 +4266,62 @@ function DocumentReader({
         </div>
         <div className="reader-tags">
           <span>{sourceMediaTypeLabel(doc.media_type)}</span>
-          <span>{doc.language}</span>
+          <span>{formatSourceLanguage(doc.language)}</span>
           <span>{formatFileSize(doc.byte_size)}</span>
           <span>{formatStatus(doc.extraction_status)}</span>
           <span title={doc.id}>{doc.id}</span>
         </div>
+      </div>
+      <div className="source-language-editor">
+        <label>
+          <span>{uiText.language.sourceLanguageLabel}</span>
+          <select
+            value={languageDraft}
+            onChange={(event) => setLanguageDraft(normalizeAppLocale(event.target.value))}
+            disabled={!canManageSource}
+          >
+            <option value="zh-CN">{uiText.language.chinese}</option>
+            <option value="en-US">{uiText.language.english}</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={!canManageSource || languageDraft === doc.language}
+          onClick={() => onUpdateLanguage(summary, languageDraft)}
+        >
+          {uiText.language.saveSourceLanguage}
+        </button>
+        {doc.language === "und" && (
+          <small className="warning">{uiText.language.sourceUnknownDisabled}</small>
+        )}
+        <label className="checkbox-row source-language-policy">
+          <input
+            checked={crossLanguagePolicy === "explicit_reference"}
+            onChange={(event) =>
+              onPolicyChange(event.target.checked ? "explicit_reference" : "project_only")
+            }
+            type="checkbox"
+          />
+          <span>{uiText.language.explicitReference}</span>
+        </label>
+        <small>
+          {crossLanguagePolicy === "explicit_reference"
+            ? uiText.language.explicitReferenceHelp
+            : uiText.language.projectOnly}
+        </small>
       </div>
       <div className="reader-bridge">
         <span>{uiText.library.bridgeText}</span>
         <div>
           <button
             className="primary"
-            disabled={!canProjectBridge}
+            disabled={!canAnalyzeStructure}
             onClick={() => onAnalyzeStructure(summary)}
-            title={!hasProject ? uiText.errors.selectProjectOrCreate : uiText.library.buildStructureTitle}
+            title={
+              !hasProject
+                ? uiText.errors.selectProjectOrCreate
+                : structureLanguageTitle ?? uiText.library.buildStructureTitle
+            }
             type="button"
           >
             <BookOpen size={14} /> {uiText.library.buildStructure}
@@ -3992,7 +4329,7 @@ function DocumentReader({
           <button
             disabled={!canSceneBridge}
             onClick={() => onSaveDraft(doc)}
-            title={uiText.library.saveDraftTitle}
+            title={contentBridgeLanguageTitle ?? uiText.library.saveDraftTitle}
             type="button"
           >
             <FileText size={14} /> {uiText.library.saveDraft}
@@ -4000,7 +4337,7 @@ function DocumentReader({
           <button
             disabled={!canSceneBridge}
             onClick={() => onSaveProposal(doc)}
-            title={uiText.library.saveProposalTitle}
+            title={contentBridgeLanguageTitle ?? uiText.library.saveProposalTitle}
             type="button"
           >
             <SplitSquareVertical size={14} /> {uiText.library.saveProposal}
@@ -4008,7 +4345,7 @@ function DocumentReader({
           <button
             disabled={!canProjectBridge}
             onClick={() => onSaveStyle(doc)}
-            title={uiText.library.saveStyleTitle}
+            title={contentBridgeLanguageTitle ?? uiText.library.saveStyleTitle}
             type="button"
           >
             <Wand2 size={14} /> {uiText.library.saveStyle}
@@ -4048,14 +4385,24 @@ function DocumentReader({
         <div className="reader-error">
           <AlertTriangle size={17} />
           <strong>{uiText.library.readErrorTitle}</strong>
-          <span>{doc.error ?? uiText.library.unknownReadError}</span>
+          <span>{uiText.library.unknownReadError}</span>
+          {doc.error && (
+            <details>
+              <summary>{uiText.errors.technicalDetails}</summary>
+              <code>{doc.error}</code>
+            </details>
+          )}
         </div>
       ) : (
         <>
           {doc.warnings.length > 0 && (
             <div className="reader-warning">
               <AlertTriangle size={15} />
-              <span>{doc.warnings.slice(0, 2).join(" ")}</span>
+              <span>{uiText.library.sourceWarningTitle}</span>
+              <details>
+                <summary>{uiText.errors.technicalDetails}</summary>
+                <code>{doc.warnings.slice(0, 2).join("\n")}</code>
+              </details>
             </div>
           )}
           <pre>{doc.extracted_text}</pre>
@@ -4072,12 +4419,14 @@ function AgentSettingsInspector({
   desktopBackend,
   desktopSettings,
   form,
+  locale,
   onApiKeyChange,
   onBackendRefresh,
   onBackendStart,
   onBackendStop,
   onClearApiKeyChange,
   onFormChange,
+  onLocaleChange,
   onRefresh,
   onSave,
   onInstallUpdate,
@@ -4091,12 +4440,14 @@ function AgentSettingsInspector({
   desktopBackend: DesktopBackendStatus | null;
   desktopSettings: DesktopSettings | null;
   form: AgentSettingsUpdate;
+  locale: AppLocale;
   onApiKeyChange: (value: string) => void;
   onBackendRefresh: () => void;
   onBackendStart: () => void;
   onBackendStop: () => void;
   onClearApiKeyChange: (value: boolean) => void;
   onFormChange: React.Dispatch<React.SetStateAction<AgentSettingsUpdate>>;
+  onLocaleChange: (locale: AppLocale) => void;
   onRefresh: () => void;
   onSave: () => void;
   onInstallUpdate: () => void;
@@ -4106,12 +4457,27 @@ function AgentSettingsInspector({
 }) {
   const descriptions = settings?.permission_descriptions ?? defaultPermissionDescriptions;
   const apiKeyStatus = settings?.api_key_configured
-    ? `${uiText.settings.configuredKey}（${settings.api_key_preview ?? uiText.settings.hiddenKey}）`
+    ? `${uiText.settings.configuredKey} (${settings.api_key_preview ?? uiText.settings.hiddenKey})`
     : uiText.common.notConfigured;
   const updateTarget = updateStatus.installerUrl ?? updateStatus.releaseUrl;
 
   return (
     <div className="settings-panel">
+      <section className="settings-block">
+        <div className="settings-title"><BookOpen size={15} /> {uiText.language.uiLocaleLabel}</div>
+        <label>
+          <span>{uiText.language.uiLocaleLabel}</span>
+          <select
+            aria-label={uiText.language.uiLocaleLabel}
+            disabled={busy !== null}
+            value={locale}
+            onChange={(event) => onLocaleChange(normalizeAppLocale(event.target.value))}
+          >
+            <option value="zh-CN">{uiText.language.chinese}</option>
+            <option value="en-US">{uiText.language.english}</option>
+          </select>
+        </label>
+      </section>
       {isDesktopRuntime() && (
         <section className="settings-block">
           <div className="settings-title"><Database size={15} /> {uiText.settings.desktopBackend}</div>
@@ -4135,7 +4501,11 @@ function AgentSettingsInspector({
           {desktopBackend?.error && (
             <div className={`desktop-backend-card ${desktopBackend.workspaceCompatible ? "warning" : "danger"}`}>
               <AlertTriangle size={15} />
-              <span>{desktopBackend.error}</span>
+              <span>{uiText.runtime.backendWorkspaceConflict}</span>
+              <details>
+                <summary>{uiText.errors.technicalDetails}</summary>
+                <code>{desktopBackend.error}</code>
+              </details>
             </div>
           )}
           {desktopBackend?.reachable && !desktopBackend.managed && desktopBackend.workspaceCompatible && (
@@ -4269,9 +4639,15 @@ function AgentSettingsInspector({
         <div className="settings-title"><Download size={15} /> {uiText.settings.versionSection}</div>
         <MetricRow label={uiText.settings.currentVersion} value={`v${APP_VERSION}`} />
         <div className={`update-card ${updateStatus.state}`}>
-          <span>{updateStatus.message}</span>
+          <span>{updateStatus.message()}</span>
+          {updateStatus.technicalDetails && (
+            <details>
+              <summary>{uiText.errors.technicalDetails}</summary>
+              <code>{updateStatus.technicalDetails}</code>
+            </details>
+          )}
           {updateStatus.publishedAt && (
-            <small>{uiText.settings.publishedAt}：{formatDateTime(updateStatus.publishedAt)}</small>
+            <small>{uiText.settings.publishedAt}: {formatDateTime(updateStatus.publishedAt)}</small>
           )}
           {updateStatus.channel === "desktop" && (
             <small>{uiText.settings.desktopUpdateNote}</small>
@@ -4316,13 +4692,17 @@ function ContextInspector({ pack }: { pack: ContextPack | null }) {
   return (
     <div className="inspector-body">
       <MetricRow label={uiText.inspector.budget} value={`${pack.budget.estimated_tokens}/${pack.budget.target_tokens}`} />
+      <MetricRow
+        label={uiText.language.artifactLanguageLabel}
+        value={formatArtifactLanguage(pack.output_language, false)}
+      />
       <MetricRow label={uiText.inspector.graphQueries} value={String(pack.provenance.graph_query_ids.length)} />
-      <ListBlock title={uiText.inspector.mustInclude} items={pack.must_include.map(localizeText)} />
-      <ListBlock title={uiText.inspector.mustNotViolate} items={pack.must_not_violate.map(localizeText)} tone="danger" />
-      <ListBlock title={uiText.inspector.relationships} items={pack.active_relationships.map(localizeText)} />
-      <ListBlock title={uiText.inspector.foreshadowing} items={pack.unresolved_foreshadowing.map(localizeText)} />
-      <ListBlock title={uiText.inspector.missingContext} items={pack.missing_context.map((gap) => `${formatSeverity(gap.severity)}: ${localizeText(gap.ref)} - ${formatKnownMessage(gap.message)}`)} tone="warning" />
-      <ListBlock title={uiText.inspector.droppedItems} items={pack.budget.dropped_items.map(localizeText)} />
+      <ListBlock title={uiText.inspector.mustInclude} items={pack.must_include} />
+      <ListBlock title={uiText.inspector.mustNotViolate} items={pack.must_not_violate} tone="danger" />
+      <ListBlock title={uiText.inspector.relationships} items={pack.active_relationships} />
+      <ListBlock title={uiText.inspector.foreshadowing} items={pack.unresolved_foreshadowing} />
+      <ListBlock title={uiText.inspector.missingContext} items={pack.missing_context.map((gap) => `${formatSeverity(gap.severity)}: ${gap.ref} - ${formatKnownMessage(gap.message)}`)} tone="warning" />
+      <ListBlock title={uiText.inspector.droppedItems} items={pack.budget.dropped_items} />
     </div>
   );
 }
@@ -4332,6 +4712,14 @@ function ContinuityInspector({ run, report }: { run: WorkflowRun | null; report:
   return (
     <div className="inspector-body">
       <MetricRow label={uiText.inspector.currentStep} value={stepLabels[run?.current_step as keyof typeof stepLabels] ?? uiText.common.none} />
+      <MetricRow
+        label={uiText.language.artifactLanguageLabel}
+        value={
+          run || report
+            ? formatArtifactLanguage(run?.output_language ?? report?.output_language, run?.language_inferred)
+            : uiText.common.none
+        }
+      />
       <MetricRow label={uiText.inspector.reviewPayload} value={formatStatus(run?.review_payload.status ?? "none")} />
       <MetricRow label={uiText.inspector.continuity} value={formatStatus(report?.status ?? "not checked")} />
       <MetricRow label={uiText.inspector.blockingIssues} value={String(blockingCount)} />
@@ -4341,7 +4729,7 @@ function ContinuityInspector({ run, report }: { run: WorkflowRun | null; report:
           <ListBlock title={uiText.inspector.checkedDimensions} items={report.checked_dimensions.map(formatDimension)} />
           <ListBlock
             title={uiText.inspector.issues}
-            items={report.issues.map((issue) => `${formatSeverity(issue.severity)}: ${formatIssueType(issue.issue_type)} - ${formatKnownMessage(issue.description)} ${uiText.inspector.suggestion}：${formatKnownMessage(issue.suggestion)}`)}
+            items={report.issues.map((issue) => `${formatSeverity(issue.severity)}: ${formatIssueType(issue.issue_type)} - ${formatKnownMessage(issue.description)} ${uiText.inspector.suggestion}: ${formatKnownMessage(issue.suggestion)}`)}
             tone={blockingCount > 0 ? "danger" : "warning"}
           />
         </>
@@ -4375,10 +4763,10 @@ function FactsInspector({
       {facts.map((fact) => (
         <div className="fact-row" key={fact.id}>
           <div>
-            <strong>{localizeText(fact.fact_type)}</strong>
-            <span>{localizeText(fact.subject_id)} {localizeText(fact.relation)} {localizeText(fact.object_id)}</span>
+            <strong>{localizeSystemValue(fact.fact_type)}</strong>
+            <span>{fact.subject_id} {localizeSystemValue(fact.relation)} {fact.object_id}</span>
           </div>
-          <p>{localizeText(fact.rationale)}</p>
+          <p>{fact.rationale}</p>
           <div className="fact-actions">
             <button onClick={() => onReview(fact.id, "accept")} disabled={busy !== null || !canReview} type="button"><Check size={14} />{reviewActionLabels.accept}</button>
             <button onClick={() => onReview(fact.id, "defer")} disabled={busy !== null || !canReview} type="button"><Clock3 size={14} />{reviewActionLabels.defer}</button>
@@ -4417,9 +4805,9 @@ function GraphPreview({
         {preview.relationships.length ? (
           preview.relationships.map((edge) => (
             <div key={edge.id}>
-              <span title={edge.source_id}>{localizeText(edge.source_label)}</span>
-              <b>{localizeText(edge.type)}</b>
-              <span title={edge.target_id}>{localizeText(edge.target_label)}</span>
+              <span title={edge.source_id}>{edge.source_label}</span>
+              <b>{localizeSystemValue(edge.type)}</b>
+              <span title={edge.target_id}>{edge.target_label}</span>
             </div>
           ))
         ) : (
@@ -4434,7 +4822,7 @@ function GraphPreview({
               key={item.id}
               className={item.id === selectedSceneId ? "current" : item.state}
             >
-              {localizeText(item.label)}
+              {item.label}
             </div>
           ))
         ) : (
@@ -4446,7 +4834,7 @@ function GraphPreview({
 }
 
 function Meta({ label, value }: { label: string; value: string }) {
-  return <div className="meta"><span>{label}</span><strong>{localizeText(value) || uiText.common.missing}</strong></div>;
+  return <div className="meta"><span>{label}</span><strong>{value || uiText.common.missing}</strong></div>;
 }
 
 function MetricRow({ label, value }: { label: string; value: string }) {
@@ -4485,7 +4873,7 @@ function findProposalRef(proposal: ProposalArtifact, kind: string): string | nul
 
 function formatProposalRefs(refs: ProposalArtifact["source_refs"]): string[] {
   return refs.map(
-    (ref) => `${formatRefKind(ref.kind)}: ${ref.ref}${ref.note ? ` / ${localizeText(ref.note)}` : ""}`
+    (ref) => `${formatRefKind(ref.kind)}: ${ref.ref}${ref.note ? ` / ${ref.note}` : ""}`
   );
 }
 
@@ -4539,8 +4927,8 @@ function flattenScenes(project: ProjectOutline): SceneOutline[] {
 function projectToForm(project: ProjectOutline): ProjectForm {
   return {
     title: project.title ?? "",
-    genre: project.genre ?? String(project.properties.genre ?? "fiction"),
-    language: project.language ?? String(project.properties.language ?? "zh-CN"),
+    genre: project.genre ?? String(project.properties.genre ?? ""),
+    language: outputLanguageOrNull(project.language) ?? "",
     target_length: String(project.properties.target_length ?? ""),
     narrative_pov: String(project.properties.narrative_pov ?? "")
   };
@@ -4676,7 +5064,7 @@ function findGraphNodeByLabel(nodes: GraphNodePayload[], label: string): GraphNo
 }
 
 function normalizeMatchLabel(value: string): string {
-  return localizeText(value).trim().toLocaleLowerCase();
+  return value.trim().toLocaleLowerCase();
 }
 
 function splitLines(value: string): string[] {
@@ -4701,9 +5089,9 @@ function formatWriter(settings: AgentSettings | null): string {
   if (settings.scene_writer === "llm") {
     return settings.api_key_configured
       ? `${localizedTerms.llm} ${settings.llm_model}`
-      : `${localizedTerms.llm} 未配置密钥`;
+      : uiText.runtime.modelKeyMissing;
   }
-  return "本地规则";
+  return uiText.runtime.localRules;
 }
 
 function formatWorkflowStep(stepName: string): string {
@@ -4711,16 +5099,16 @@ function formatWorkflowStep(stepName: string): string {
 }
 
 function formatDesktopBackendLabel(status: DesktopBackendStatus): string {
-  if (!status.reachable) return "后端未连接";
-  if (!status.workspaceCompatible) return "后端工作区冲突";
-  return status.managed ? `受管 ${localizedTerms.fastApi}` : `外部 ${localizedTerms.fastApi}`;
+  if (!status.reachable) return uiText.runtime.backendNotConnected;
+  if (!status.workspaceCompatible) return uiText.runtime.backendWorkspaceConflict;
+  return status.managed ? uiText.runtime.backendManaged : uiText.runtime.backendExternal;
 }
 
 function formatDesktopBackendDetail(status: DesktopBackendStatus | null): string {
   if (!status) return uiText.common.loading;
-  if (!status.reachable) return "未连接";
-  if (!status.workspaceCompatible) return "工作区冲突";
-  return status.managed ? "已连接，桌面受管" : "已连接，外部进程";
+  if (!status.reachable) return uiText.settings.notConnected;
+  if (!status.workspaceCompatible) return uiText.runtime.backendWorkspaceConflict;
+  return status.managed ? uiText.runtime.backendConnectedManaged : uiText.runtime.backendConnectedExternal;
 }
 
 function desktopBackendTone(status: DesktopBackendStatus): "good" | "warning" | "danger" | "neutral" {
@@ -4732,7 +5120,7 @@ function desktopBackendTone(status: DesktopBackendStatus): "good" | "warning" | 
 async function prepareSourceDocumentImport(
   file: File,
   mediaType: SourceMediaType,
-  language: string
+  languageOverride?: SourceLanguage
 ): Promise<SourceDocumentImportRequest> {
   const arrayBuffer = await file.arrayBuffer();
   const checksum = await sha256Hex(arrayBuffer);
@@ -4749,24 +5137,23 @@ async function prepareSourceDocumentImport(
     } else {
       extractedText = normalizeImportedText(new TextDecoder("utf-8").decode(arrayBuffer));
     }
-    if (!extractedText) throw new Error(uiText.errors.sourceEmptyText);
+    if (!extractedText) throw new Error("Source text is empty.");
   } catch (exc) {
     extractionStatus = "failed";
     extractedText = null;
     const message = toErrorMessage(exc);
     extractionError = sanitizeSourceMetadata(
-      mediaType.includes("wordprocessingml")
-        ? uiText.errors.docxExtractionFailed(message)
-        : message,
+      mediaType.includes("wordprocessingml") ? `DOCX extraction failed: ${message}` : message,
       500
     );
   }
 
+  const language = languageOverride ?? detectSourceLanguage(extractedText ?? "");
   return {
     title: file.name,
     relative_path: getImportPath(file),
     media_type: mediaType,
-    language: (language.trim() || "zh-CN").slice(0, 35),
+    language,
     byte_size: file.size,
     checksum_sha256: checksum,
     extraction_status: extractionStatus,
@@ -4777,9 +5164,41 @@ async function prepareSourceDocumentImport(
       imported_by: "author",
       imported_via: "local_file",
       source_last_modified_ms: file.lastModified,
-      note: uiText.library.importProvenanceNote
+      note: "workbench.source.import"
     }
   };
+}
+
+function formatProjectLanguage(project: ProjectOutline): string {
+  if (project.language_status === "needs_review") {
+    return uiText.language.projectLanguageNeedsReview;
+  }
+  const label = outputLanguageOrNull(project.language) === "zh-CN"
+    ? uiText.language.chinese
+    : outputLanguageOrNull(project.language) === "en-US"
+      ? uiText.language.english
+      : null;
+  if (label) {
+    return project.language_status === "inferred"
+      ? `${label}${uiText.language.inferredLanguage}`
+      : label;
+  }
+  return uiText.sidebar.languageUnset;
+}
+
+function formatSourceLanguage(language: SourceLanguage): string {
+  if (language === "zh-CN") return uiText.language.chinese;
+  if (language === "en-US") return uiText.language.english;
+  return uiText.language.undetermined;
+}
+
+function formatArtifactLanguage(
+  language: AppLocale | null | undefined,
+  inferred: boolean | undefined
+): string {
+  if (!language) return uiText.language.historicalLanguageUnknown;
+  const label = language === "zh-CN" ? uiText.language.chinese : uiText.language.english;
+  return `${label}${inferred ? uiText.language.inferredLanguage : ""}`;
 }
 
 async function sha256Hex(arrayBuffer: ArrayBuffer): Promise<string> {
@@ -4927,12 +5346,35 @@ function normalizeImportedText(text: string): string {
   return text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
 }
 
+function detectSourceLanguage(text: string): SourceLanguage {
+  const sample = text.slice(0, 100_000);
+  const hanCount = sample.match(/\p{Script=Han}/gu)?.length ?? 0;
+  const latinCount = sample.match(/[A-Za-z]/g)?.length ?? 0;
+  if (hanCount >= 8 && hanCount >= latinCount * 0.15) return "zh-CN";
+  if (latinCount >= 20 && hanCount <= latinCount * 0.02) return "en-US";
+  return "und";
+}
+
 function requireReadySourceText(document: SourceDocument): string {
   const text = normalizeImportedText(document.extracted_text ?? "");
   if (document.extraction_status !== "ready" || !text) {
     throw new Error(uiText.errors.sourceDetailNotReady);
   }
   return text;
+}
+
+function requireProjectContentLanguage(
+  document: SourceDocumentSummary,
+  projectLanguage: string | null | undefined
+): void {
+  if (document.language === "und") throw new Error(uiText.errors.sourceLanguageRequired);
+  if (document.language !== outputLanguageOrNull(projectLanguage)) {
+    throw new Error(uiText.errors.sourceContentLanguageMismatch);
+  }
+}
+
+function outputLanguageOrNull(value: string | null | undefined): AppLocale | null {
+  return value === "zh-CN" || value === "en-US" ? value : null;
 }
 
 function sourceMediaTypeLabel(mediaType: SourceMediaType): string {
@@ -4961,7 +5403,7 @@ function formatFileSize(bytes: number): string {
 function toErrorMessage(exc: unknown): string {
   const message = exc instanceof Error ? exc.message : String(exc);
   if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
-    return "无法连接本机 FastAPI 后端。请在“设置 > 桌面后端”检查 8000 端口是否被旧后端占用，或先启动/连接受管后端。";
+    return "Local FastAPI backend is unreachable. Check the configured backend and port.";
   }
   return message;
 }
@@ -4992,6 +5434,25 @@ function formatDateTime(value: string): string {
     }).format(new Date(value));
   } catch {
     return value;
+  }
+}
+
+function technicalErrorMessage(exc: unknown): string {
+  return exc instanceof ApiRequestError ? exc.technicalDetails : toErrorMessage(exc);
+}
+
+function isLocalizedUserError(message: string): boolean {
+  return Object.values(uiText.errors).some(
+    (value) => typeof value === "string" && value === message
+  );
+}
+
+function loadUiLocale(): AppLocale {
+  if (typeof window === "undefined") return "zh-CN";
+  try {
+    return normalizeAppLocale(window.localStorage.getItem(UI_LOCALE_STORAGE_KEY));
+  } catch {
+    return "zh-CN";
   }
 }
 

@@ -54,6 +54,7 @@ def test_api_agent_discussion_revises_selection_as_non_canon_proposal(
                     "ref": "local:note",
                     "title": "资料.md",
                     "text": "本地资料片段：主角此时不能知道秘密。",
+                    "language": "zh-CN",
                 }
             ],
         },
@@ -62,6 +63,9 @@ def test_api_agent_discussion_revises_selection_as_non_canon_proposal(
 
     assert response.status_code == 200
     assert payload["replacement_applied"] is True
+    assert payload["output_language"] == "zh-CN"
+    assert payload["cross_language_policy"] == "project_only"
+    assert "cross_language_policy=project_only" in payload["proposal"]["provenance"]["note"]
     assert payload["reply"] == "已保留视角限制，只改写选中段落。"
     assert payload["proposal"]["artifact_type"] == "scene_draft"
     assert payload["proposal"]["status"] == "agent_revised"

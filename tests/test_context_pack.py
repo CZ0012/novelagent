@@ -14,6 +14,7 @@ from storygraph.core.time import utc_now
 from storygraph.models.style import StyleSample
 from storygraph.services.context_pack_builder import ContextPackBuilder
 from storygraph.services.scene_writer import RuleBasedSceneWriter
+from storygraph.stores.draft_store import SQLiteDraftStore
 from storygraph.stores.style_sample_store import SQLiteStyleSampleStore
 
 
@@ -97,6 +98,7 @@ def test_context_pack_retrieves_style_samples_from_store():
         StyleSample(
             id="style_tower_cold",
             project_id=PROJECT_ID,
+            language="en-US",
             text="Cold restrained tower prose with half-seen clues and short lines.",
             source_ref="author_style:chapter_001",
             pov="third-person limited",
@@ -110,6 +112,7 @@ def test_context_pack_retrieves_style_samples_from_store():
         StyleSample(
             id="style_wrong_project",
             project_id="project_other",
+            language="en-US",
             text="Cold tower prose that belongs to another project.",
             source_ref="author_style:other",
             pov="third-person limited",
@@ -190,6 +193,7 @@ def test_context_pack_respects_scene_scoped_knowledge_boundaries():
         node_id="secret_future_password",
         node_type="Secret",
         properties={
+            "project_id": PROJECT_ID,
             "content": "The tower door password.",
             "truth_status": "true",
             "reveal_plan": "Reveal after scene_005.",
@@ -200,7 +204,7 @@ def test_context_pack_respects_scene_scoped_knowledge_boundaries():
         relation_type="KNOWS_SECRET",
         source_id=POV_CHARACTER_ID,
         target_id="secret_future_password",
-        properties={"valid_from_scene": "scene_005"},
+        properties={"project_id": PROJECT_ID, "valid_from_scene": "scene_005"},
     )
 
     pack = ContextPackBuilder(graph).build(project_id=PROJECT_ID, scene_id=SCENE_ID)
@@ -227,3 +231,52 @@ def test_context_pack_hides_future_scoped_active_relationships():
 
     assert not any("rel_linj_future_suspects_helianya" in item for item in pack.active_relationships)
     assert not any("SUSPECTS" in item for item in pack.active_relationships)
+
+
+def test_context_pack_rejects_scene_from_another_project_before_returning_content():
+    graph = build_fantasy_demo_graph()
+    graph.update_node(
+        SCENE_ID,
+        {
+            "project_id": "project_other",
+            "goal": "PRIVATE_CROSS_PROJECT_SENTINEL",
+        },
+        reviewer="author",
+        rationale="Synthetic project-scope regression fixture.",
+        source_ref="test_context_pack:scope",
+    )
+
+    with pytest.raises(ContractError, match="does not belong"):
+        ContextPackBuilder(graph).build(project_id=PROJECT_ID, scene_id=SCENE_ID)
+
+
+def test_context_pack_excludes_previous_draft_with_mismatched_language_snapshot():
+    graph = build_fantasy_demo_graph(locale="en-US")
+    graph.update_node(
+        SCENE_ID,
+        {"previous_scene_id": "scene_previous_language"},
+        reviewer="author",
+        rationale="Synthetic language-snapshot regression fixture.",
+        source_ref="test_context_pack:language",
+    )
+    drafts = SQLiteDraftStore()
+    draft = drafts.create_draft(
+        project_id=PROJECT_ID,
+        scene_id="scene_previous_language",
+        content_language="zh-CN",
+        text="PRIVATE_OLD_LANGUAGE_DRAFT",
+        summary="PRIVATE_OLD_LANGUAGE_SUMMARY",
+    )
+
+    pack = ContextPackBuilder(graph, draft_store=drafts).build(
+        project_id=PROJECT_ID,
+        scene_id=SCENE_ID,
+    )
+
+    assert pack.previous_scene_summary is None
+    assert draft.id not in pack.provenance.draft_refs
+    assert any(
+        gap.kind == "draft_language_mismatch" and gap.severity == "critical"
+        for gap in pack.missing_context
+    )
+    assert "PRIVATE_OLD_LANGUAGE" not in pack.model_dump_json()

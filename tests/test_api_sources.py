@@ -408,10 +408,10 @@ def test_llm_source_structure_fields_are_bounded_before_proposal_persistence(
 
     monkeypatch.setattr("apps.api.main.create_llm_provider", lambda settings: FakeProvider())
     client = TestClient(create_app(_llm_settings(tmp_path)))
-    project_id = _create_project(client, "结构字段预算项目")
+    project_id = _create_project(client, "Structure field budget", language="en-US")
     source = client.post(
         f"/projects/{project_id}/sources",
-        json=_source_payload(text="用于结构分析的短正文。"),
+        json=_source_payload(text="Short source text for structure analysis.", language="en-US"),
     ).json()["document"]
 
     response = client.post(
@@ -490,6 +490,7 @@ def test_agent_discussion_resolves_only_explicit_ready_source_ids_with_stable_re
                     "ref": "legacy:note",
                     "title": "兼容资料.txt",
                     "text": "旧请求内联资料。",
+                    "language": "zh-CN",
                 }
             ],
         },
@@ -581,7 +582,8 @@ def test_agent_source_resolution_rejects_cross_project_and_failed_sources_before
                     "kind": "source_document",
                     "ref": alpha_ready["id"],
                     "title": "Spoofed persisted source",
-                    "text": "This inline text was not loaded from Source Store.",
+                        "text": "This inline text was not loaded from Source Store.",
+                        "language": "en-US",
                 }
             ],
         },
@@ -595,6 +597,66 @@ def test_agent_source_resolution_rejects_cross_project_and_failed_sources_before
     assert client.get(f"/projects/{beta_id}/proposals").json()["proposals"] == []
 
 
+def test_source_language_can_be_corrected_in_place_with_optimistic_concurrency(tmp_path):
+    client = TestClient(create_app(_json_settings(tmp_path)))
+    project_id = _create_project(client, "来源语言修正项目")
+    created = client.post(
+        f"/projects/{project_id}/sources",
+        json=_source_payload(
+            text="English source text.",
+            relative_path="notes/english.md",
+            language="zh-cn",
+        ),
+    ).json()["document"]
+    detail_before = client.get(
+        f"/projects/{project_id}/sources/{created['id']}"
+    ).json()
+
+    corrected_response = client.patch(
+        f"/projects/{project_id}/sources/{created['id']}",
+        json={
+            "language": "en-us",
+            "expected_updated_at": detail_before["updated_at"],
+        },
+    )
+    corrected = corrected_response.json()
+
+    assert corrected_response.status_code == 200
+    assert corrected["id"] == detail_before["id"]
+    assert corrected["language"] == "en-US"
+    for field in (
+        "relative_path",
+        "checksum_sha256",
+        "extraction_status",
+        "extracted_text",
+        "provenance",
+        "created_at",
+    ):
+        assert corrected[field] == detail_before[field]
+
+    idempotent = client.patch(
+        f"/projects/{project_id}/sources/{created['id']}",
+        json={
+            "language": "en-US",
+            "expected_updated_at": corrected["updated_at"],
+        },
+    )
+    stale = client.patch(
+        f"/projects/{project_id}/sources/{created['id']}",
+        json={
+            "language": "zh-CN",
+            "expected_updated_at": detail_before["updated_at"],
+        },
+    )
+
+    assert idempotent.status_code == 200
+    assert idempotent.json() == corrected
+    assert stale.status_code == 409
+    assert client.get(
+        f"/projects/{project_id}/sources/{created['id']}"
+    ).json() == corrected
+
+
 def _source_payload(
     *,
     text: str | None,
@@ -604,13 +666,14 @@ def _source_payload(
     extraction_status: str = "ready",
     original_bytes: bytes | None = None,
     error: str | None = None,
+    language: str = "zh-CN",
 ) -> dict:
     source_bytes = original_bytes if original_bytes is not None else (text or "").encode("utf-8")
     return {
         "title": title,
         "relative_path": relative_path,
         "media_type": media_type,
-        "language": "zh-CN",
+        "language": language,
         "byte_size": len(source_bytes),
         "checksum_sha256": sha256(source_bytes).hexdigest(),
         "extraction_status": extraction_status,
@@ -626,8 +689,13 @@ def _source_payload(
     }
 
 
-def _create_project(client: TestClient, title: str) -> str:
-    response = client.post("/projects", json={"title": title})
+def _create_project(
+    client: TestClient,
+    title: str,
+    *,
+    language: str = "zh-CN",
+) -> str:
+    response = client.post("/projects", json={"title": title, "language": language})
     assert response.status_code == 200
     return response.json()["project_id"]
 

@@ -81,6 +81,7 @@ class Neo4jGraphStore(GraphStore):
 
     def create_node(self, node: GraphNode, *, allow_canon: bool = False) -> GraphNode:
         self._validate_node(node)
+        self._validate_project_language_properties(node.type, node.properties)
         if node.status == "CANON" and not allow_canon:
             raise GraphStoreError("canon_write_forbidden", "Automated create_node cannot write CANON")
         if self._node_exists(node.id):
@@ -105,6 +106,28 @@ class Neo4jGraphStore(GraphStore):
         event_id: str | None = None,
     ) -> GraphNode:
         node = self.get_node(node_id, include_non_canon=True)
+        self._validate_project_language_properties(node.type, properties)
+        if node.type == "Project":
+            current_language = self._effective_project_language(node.properties)
+            if (
+                "language" in properties
+                and properties["language"] != current_language
+            ):
+                raise GraphStoreError(
+                    "conflict_detected",
+                    "Project language changes require expected_language and "
+                    "future_outputs_only semantics.",
+                )
+            return self._update_project_properties_cas(
+                node_id,
+                expected_language=None,
+                language=None,
+                properties=properties,
+                reviewer=reviewer,
+                rationale=rationale,
+                source_ref=source_ref,
+                event_id=event_id,
+            )
         updated = node.model_copy(
             update={
                 "properties": {**node.properties, **properties},
@@ -131,6 +154,129 @@ class Neo4jGraphStore(GraphStore):
             event_id=updated.event_id,
         )
         return self._node_from_entity(entity)
+
+    def update_project_language(
+        self,
+        project_id: str,
+        *,
+        expected_language: str,
+        language: str,
+        properties: dict,
+        reviewer: str,
+        rationale: str,
+        source_ref: str,
+    ) -> GraphNode:
+        return self._update_project_properties_cas(
+            project_id,
+            expected_language=expected_language,
+            language=language,
+            properties=properties,
+            reviewer=reviewer,
+            rationale=rationale,
+            source_ref=source_ref,
+        )
+
+    def _update_project_properties_cas(
+        self,
+        project_id: str,
+        *,
+        expected_language: str | None,
+        language: str | None,
+        properties: dict,
+        reviewer: str,
+        rationale: str,
+        source_ref: str,
+        event_id: str | None = None,
+    ) -> GraphNode:
+        for _attempt in range(5):
+            project = self.get_node(project_id, include_non_canon=True)
+            if project.type != "Project":
+                raise GraphStoreError(
+                    "conflict_detected",
+                    f"Node is not a Project: {project_id}",
+                )
+            current_language = self._effective_project_language(project.properties)
+            if expected_language is not None and current_language != expected_language:
+                raise GraphStoreError(
+                    "conflict_detected",
+                    "Project language changed; refresh and retry.",
+                )
+            merged_properties = {**project.properties, **properties}
+            if language is not None:
+                merged_properties["language"] = language
+            self._validate_project_language_properties("Project", merged_properties)
+            now = utc_now()
+            updated = project.model_copy(
+                update={
+                    "properties": merged_properties,
+                    "updated_at": now,
+                    "event_id": event_id or new_id("evt"),
+                    "reviewer": reviewer,
+                    "reviewed_at": now,
+                    "rationale": rationale,
+                    "source_ref": source_ref,
+                }
+            )
+            event = EventLogEntry(
+                event_id=updated.event_id,
+                operation="update_node",
+                target=project_id,
+                source_ref=source_ref,
+                reviewer=reviewer,
+                rationale=rationale,
+                created_at=now,
+                payload={**properties, **({"language": language} if language else {})},
+            )
+            try:
+                with self.driver.session(database=self.database) as session:
+                    entity = session.execute_write(
+                        self._write_project_update_cas,
+                        project_id,
+                        json.dumps(project.properties),
+                        self._node_props(updated),
+                        self._event_props(event),
+                    )
+            except GraphStoreError:
+                raise
+            except Exception as exc:
+                raise GraphStoreError(
+                    "backend_unavailable",
+                    f"Neo4j project update failed: {exc}",
+                ) from exc
+            if entity is not None:
+                return self._node_from_entity(entity)
+        raise GraphStoreError(
+            "conflict_detected",
+            "Project changed repeatedly; refresh and retry.",
+        )
+
+    @staticmethod
+    def _write_project_update_cas(
+        tx: Any,
+        project_id: str,
+        expected_properties_json: str,
+        node_props: dict,
+        event_props: dict,
+    ) -> Any | None:
+        record = tx.run(
+            """
+            MATCH (n:StoryGraphNode {id: $project_id})
+            WHERE n.type = 'Project' AND n.properties_json = $expected_properties_json
+            SET n += $node_props
+            WITH n
+            MERGE (e:StoryGraphEvent {event_id: $event_id})
+            SET e = $event_props
+            RETURN n
+            """,
+            {
+                "project_id": project_id,
+                "expected_properties_json": expected_properties_json,
+                "node_props": node_props,
+                "event_id": event_props["event_id"],
+                "event_props": event_props,
+            },
+        ).single()
+        return record["n"] if record is not None else None
 
     def create_relation(
         self, relation: GraphRelationship, *, allow_canon: bool = False

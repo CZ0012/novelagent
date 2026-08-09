@@ -10,7 +10,13 @@ import re
 from typing import Any
 
 from storygraph.core.errors import ContractError
+from storygraph.models.project import CrossLanguagePolicy, OutputLanguage, localized
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
+from storygraph.services.project_language import (
+    authoritative_language_message,
+    enforce_source_language_policy,
+    validate_generated_output_language,
+)
 
 
 @dataclass(frozen=True)
@@ -27,15 +33,34 @@ class RuleBasedProjectStructureAnalyzer:
     def __init__(
         self,
         *,
+        output_language: OutputLanguage,
         max_source_chars: int = 40000,
         max_chapters: int = 12,
         max_scenes_per_chapter: int = 8,
     ) -> None:
+        self.output_language = output_language
         self.max_source_chars = max_source_chars
         self.max_chapters = max_chapters
         self.max_scenes_per_chapter = max_scenes_per_chapter
 
-    def analyze(self, *, project_id: str, title: str, source_text: str) -> ProjectStructureDraft:
+    def analyze(
+        self,
+        *,
+        project_id: str,
+        title: str,
+        source_text: str,
+        source_language: str,
+        cross_language_policy: CrossLanguagePolicy = "project_only",
+    ) -> ProjectStructureDraft:
+        enforce_source_language_policy(
+            output_language=self.output_language,
+            source_languages=[source_language],
+            policy=cross_language_policy,
+        )
+        if source_language != self.output_language:
+            raise ContractError(
+                "Cross-language structure analysis requires a configured LLM provider."
+            )
         text, truncated = self._source_slice(source_text)
         chapters = self._chapters_from_text(title=title, text=text)
         outline = self._normalize_outline(
@@ -43,7 +68,12 @@ class RuleBasedProjectStructureAnalyzer:
                 "schema": "project_structure_draft_v1",
                 "project_id": project_id,
                 "source_title": title,
-                "summary": self._summary(text) or f"从《{title}》导入生成的项目结构初稿。",
+                "summary": self._summary(text)
+                or localized(
+                    self.output_language,
+                    zh=f"从《{title}》导入生成的项目结构初稿。",
+                    en=f"Initial project structure imported from {title}.",
+                ),
                 "chapters": chapters,
             },
             project_id=project_id,
@@ -81,7 +111,12 @@ class RuleBasedProjectStructureAnalyzer:
                 if current_title or current_paragraphs:
                     chapters.append(
                         self._chapter(
-                            title=current_title or f"{title} 片段",
+                            title=current_title
+                            or localized(
+                                self.output_language,
+                                zh=f"{title} 片段",
+                                en=f"{title} excerpt",
+                            ),
                             chapter_index=len(chapters) + 1,
                             paragraphs=current_paragraphs,
                         )
@@ -95,7 +130,12 @@ class RuleBasedProjectStructureAnalyzer:
         if current_title or current_paragraphs:
             chapters.append(
                 self._chapter(
-                    title=current_title or "导入正文结构",
+                    title=current_title
+                    or localized(
+                        self.output_language,
+                        zh="导入正文结构",
+                        en="Imported manuscript structure",
+                    ),
                     chapter_index=len(chapters) + 1,
                     paragraphs=current_paragraphs,
                 )
@@ -108,15 +148,36 @@ class RuleBasedProjectStructureAnalyzer:
     def _chapter(self, *, title: str, chapter_index: int, paragraphs: list[str]) -> dict[str, Any]:
         scenes = self._scenes_from_paragraphs(paragraphs)
         return {
-            "title": title or f"第 {chapter_index} 章",
+            "title": title
+            or localized(
+                self.output_language,
+                zh=f"第 {chapter_index} 章",
+                en=f"Chapter {chapter_index}",
+            ),
             "chapter_index": chapter_index,
-            "summary": self._summary(" ".join(paragraphs)) or "待作者补充章节摘要。",
-            "purpose": "从导入正文自动生成的章节结构初稿，需作者确认。",
+            "summary": self._summary(" ".join(paragraphs))
+            or localized(
+                self.output_language,
+                zh="待作者补充章节摘要。",
+                en="Chapter summary to be completed by the author.",
+            ),
+            "purpose": localized(
+                self.output_language,
+                zh="从导入正文自动生成的章节结构初稿，需作者确认。",
+                en=(
+                    "Initial chapter structure inferred from the imported manuscript; "
+                    "author confirmation required."
+                ),
+            ),
             "scenes": scenes or [
                 {
-                    "title": "场景 1",
+                    "title": localized(self.output_language, zh="场景 1", en="Scene 1"),
                     "scene_index": 1,
-                    "summary": "待作者补充场景摘要。",
+                    "summary": localized(
+                        self.output_language,
+                        zh="待作者补充场景摘要。",
+                        en="Scene summary to be completed by the author.",
+                    ),
                     "goal": "",
                     "conflict": "",
                     "timeline_position": None,
@@ -142,7 +203,12 @@ class RuleBasedProjectStructureAnalyzer:
                 {
                     "title": self._scene_title(group[0], index + 1),
                     "scene_index": index + 1,
-                    "summary": summary or "待作者补充场景摘要。",
+                    "summary": summary
+                    or localized(
+                        self.output_language,
+                        zh="待作者补充场景摘要。",
+                        en="Scene summary to be completed by the author.",
+                    ),
                     "goal": summary or "",
                     "conflict": "",
                     "timeline_position": None,
@@ -167,12 +233,15 @@ class RuleBasedProjectStructureAnalyzer:
             return ""
         return compact[:120]
 
-    @staticmethod
-    def _scene_title(text: str, index: int) -> str:
+    def _scene_title(self, text: str, index: int) -> str:
         first_sentence = re.split(r"[。！？!?]", text.strip(), maxsplit=1)[0].strip()
         if len(first_sentence) > 18:
             first_sentence = first_sentence[:18]
-        return first_sentence or f"场景 {index}"
+        return first_sentence or localized(
+            self.output_language,
+            zh=f"场景 {index}",
+            en=f"Scene {index}",
+        )
 
     def _normalize_outline(
         self,
@@ -201,7 +270,11 @@ class RuleBasedProjectStructureAnalyzer:
             normalized_chapters.append(
                 {
                     "title": self._text(raw_chapter.get("title"), max_chars=120)
-                    or f"第 {chapter_index} 章",
+                    or localized(
+                        self.output_language,
+                        zh=f"第 {chapter_index} 章",
+                        en=f"Chapter {chapter_index}",
+                    ),
                     "chapter_index": self._positive_int(
                         raw_chapter.get("chapter_index"), chapter_index
                     ),
@@ -224,7 +297,11 @@ class RuleBasedProjectStructureAnalyzer:
     def _normalize_scene(self, raw_scene: dict[str, Any], *, scene_index: int) -> dict[str, Any]:
         return {
             "title": self._text(raw_scene.get("title"), max_chars=120)
-            or f"场景 {scene_index}",
+            or localized(
+                self.output_language,
+                zh=f"场景 {scene_index}",
+                en=f"Scene {scene_index}",
+            ),
             "scene_index": self._positive_int(raw_scene.get("scene_index"), scene_index),
             "summary": self._text(raw_scene.get("summary"), max_chars=500),
             "goal": self._text(raw_scene.get("goal"), max_chars=300),
@@ -266,6 +343,7 @@ class LLMProjectStructureAnalyzer(RuleBasedProjectStructureAnalyzer):
         *,
         provider: LLMProvider,
         model: str,
+        output_language: OutputLanguage,
         prompt_path: Path | None = None,
         max_source_chars: int = 40000,
         max_chapters: int = 12,
@@ -273,6 +351,7 @@ class LLMProjectStructureAnalyzer(RuleBasedProjectStructureAnalyzer):
         temperature: float = 0.1,
     ) -> None:
         super().__init__(
+            output_language=output_language,
             max_source_chars=max_source_chars,
             max_chapters=max_chapters,
             max_scenes_per_chapter=max_scenes_per_chapter,
@@ -284,7 +363,20 @@ class LLMProjectStructureAnalyzer(RuleBasedProjectStructureAnalyzer):
         )
         self.temperature = temperature
 
-    def analyze(self, *, project_id: str, title: str, source_text: str) -> ProjectStructureDraft:
+    def analyze(
+        self,
+        *,
+        project_id: str,
+        title: str,
+        source_text: str,
+        source_language: str,
+        cross_language_policy: CrossLanguagePolicy = "project_only",
+    ) -> ProjectStructureDraft:
+        enforce_source_language_policy(
+            output_language=self.output_language,
+            source_languages=[source_language],
+            policy=cross_language_policy,
+        )
         text, truncated = self._source_slice(source_text)
         response = self.provider.generate(
             LLMRequest(
@@ -295,11 +387,17 @@ class LLMProjectStructureAnalyzer(RuleBasedProjectStructureAnalyzer):
                     project_id=project_id,
                     title=title,
                     source_text=text,
+                    source_language=source_language,
+                    cross_language_policy=cross_language_policy,
                 ),
             )
         )
         payload = self._parse_response(response.content)
         outline = self._normalize_outline(payload, project_id=project_id, title=title)
+        validate_generated_output_language(
+            output_language=self.output_language,
+            fields=_outline_language_fields(outline),
+        )
         if truncated:
             outline["truncated"] = True
         return ProjectStructureDraft(
@@ -309,10 +407,21 @@ class LLMProjectStructureAnalyzer(RuleBasedProjectStructureAnalyzer):
             created_via="llm",
         )
 
-    def _messages(self, *, project_id: str, title: str, source_text: str) -> list[LLMMessage]:
+    def _messages(
+        self,
+        *,
+        project_id: str,
+        title: str,
+        source_text: str,
+        source_language: str,
+        cross_language_policy: CrossLanguagePolicy,
+    ) -> list[LLMMessage]:
         prompt = self.prompt_path.read_text(encoding="utf-8")
         payload = {
             "project_id": project_id,
+            "output_language": self.output_language,
+            "source_language": source_language,
+            "cross_language_policy": cross_language_policy,
             "source_title": title,
             "max_chapters": self.max_chapters,
             "max_scenes_per_chapter": self.max_scenes_per_chapter,
@@ -320,6 +429,10 @@ class LLMProjectStructureAnalyzer(RuleBasedProjectStructureAnalyzer):
         }
         return [
             LLMMessage(role="system", content=prompt),
+            LLMMessage(
+                role="system",
+                content=authoritative_language_message(self.output_language),
+            ),
             LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False, indent=2)),
         ]
 
@@ -336,3 +449,27 @@ class LLMProjectStructureAnalyzer(RuleBasedProjectStructureAnalyzer):
         if not isinstance(payload, dict):
             raise ContractError("LLM project structure analyzer response must be a JSON object")
         return payload
+
+
+def _outline_language_fields(outline: dict[str, Any]) -> dict[str, str | None]:
+    fields: dict[str, str | None] = {"summary": outline.get("summary")}
+    for chapter_index, chapter in enumerate(outline.get("chapters", [])):
+        if not isinstance(chapter, dict):
+            continue
+        prefix = f"chapters[{chapter_index}]"
+        for key in ("title", "summary", "purpose"):
+            value = chapter.get(key)
+            fields[f"{prefix}.{key}"] = value if isinstance(value, str) else None
+        for scene_index, scene in enumerate(chapter.get("scenes", [])):
+            if not isinstance(scene, dict):
+                continue
+            scene_prefix = f"{prefix}.scenes[{scene_index}]"
+            for key in (
+                "title",
+                "summary",
+                "goal",
+                "conflict",
+            ):
+                value = scene.get(key)
+                fields[f"{scene_prefix}.{key}"] = value if isinstance(value, str) else None
+    return fields

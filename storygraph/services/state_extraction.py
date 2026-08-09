@@ -9,6 +9,7 @@ from storygraph.core.time import utc_now
 from storygraph.models.candidate import CandidateFact, ProposedGraphPatch, SourceSpan
 from storygraph.models.common import EvidenceItem
 from storygraph.models.draft import Draft
+from storygraph.models.project import DEFAULT_OUTPUT_LANGUAGE, localized
 
 
 FACT_MARKER_RE = re.compile(r"\[\[fact:(?P<body>.*?)\]\]", re.DOTALL)
@@ -38,9 +39,14 @@ class RuleBasedStateExtractor:
             candidate_id = raw_fields.get("id", new_id("fact"))
             confidence = float(raw_fields.get("confidence", "0.8"))
             operation = raw_fields.get("operation", "create_relation" if object_id else "update_node")
+            output_language = draft.content_language or DEFAULT_OUTPUT_LANGUAGE
             rationale = raw_fields.get(
                 "rationale",
-                "The draft explicitly marked this state change for extraction.",
+                localized(
+                    output_language,
+                    zh="草稿通过显式标记声明了这项待提取的状态变化。",
+                    en="The draft explicitly marked this state change for extraction.",
+                ),
             )
             patch_properties = self._patch_properties(raw_fields)
             patch = ProposedGraphPatch(
@@ -76,7 +82,11 @@ class RuleBasedStateExtractor:
                             kind="draft_text",
                             ref=draft.id,
                             quote=source_span.quote,
-                            note="Explicit extraction marker.",
+                            note=localized(
+                                output_language,
+                                zh="显式事实提取标记。",
+                                en="Explicit extraction marker.",
+                            ),
                         ),
                         *(supporting_evidence or []),
                     ],

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import unicodedata
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import RLock
 from typing import Protocol
@@ -37,6 +38,16 @@ class SourceStore(Protocol):
         raise NotImplementedError
 
     def archive(self, *, project_id: str, source_id: str) -> SourceDocument:
+        raise NotImplementedError
+
+    def update_language(
+        self,
+        *,
+        project_id: str,
+        source_id: str,
+        language: str,
+        expected_updated_at: str,
+    ) -> SourceDocument:
         raise NotImplementedError
 
 
@@ -211,6 +222,36 @@ class SQLiteSourceDocumentStore(SourceStore):
             self._connection.commit()
             return archived
 
+    def update_language(
+        self,
+        *,
+        project_id: str,
+        source_id: str,
+        language: str,
+        expected_updated_at: str,
+    ) -> SourceDocument:
+        with self._lock:
+            document = self.get(project_id=project_id, source_id=source_id)
+            if document.updated_at != expected_updated_at:
+                raise ContractError(
+                    "SourceDocument changed since it was loaded; refresh and retry."
+                )
+            if document.language == language:
+                return document
+            updated = SourceDocument.model_validate(
+                {
+                    **document.model_dump(),
+                    "language": language,
+                    "updated_at": _next_updated_at(document.updated_at),
+                }
+            )
+            self._update(
+                updated,
+                normalized_path=normalize_source_path(updated.relative_path),
+            )
+            self._connection.commit()
+            return updated
+
     def close(self) -> None:
         with self._lock:
             self._connection.close()
@@ -302,3 +343,13 @@ def normalize_source_path(relative_path: str) -> str:
 
 # Compatibility name for early SG-018 callers; new integrations should use the explicit class name.
 SQLiteSourceStore = SQLiteSourceDocumentStore
+
+
+def _next_updated_at(previous: str) -> str:
+    current = utc_now()
+    if current > previous:
+        return current
+    parsed = datetime.fromisoformat(previous.replace("Z", "+00:00"))
+    return (parsed.astimezone(UTC) + timedelta(seconds=1)).isoformat().replace(
+        "+00:00", "Z"
+    )

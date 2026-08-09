@@ -10,7 +10,8 @@ The Graph Store represents structured narrative state. It must not store full dr
 
 - Primary producer: Canon Agent after human review.
 - Primary consumers: Context Agent, QA Agent, Director, future API and CLI layers.
-- Related contracts: `candidate_fact_v1`, `context_pack_v1`, `continuity_report_v1`.
+- Related contracts: `candidate_fact_v1`, `context_pack_v1`,
+  `continuity_report_v1`, `language_policy_v1`.
 
 ## Canon Principles
 
@@ -36,6 +37,10 @@ Minimum v1 labels:
 - `Foreshadowing`
 - `WorldRule`
 - `StyleProfile`
+
+`Project.language` is the authoritative project content and Agent-output
+language defined by `language_policy_v1`. New project writes accept only
+`zh-CN` or `en-US`. It is not a UI locale or Source Document language.
 
 ## Core Edge Labels
 
@@ -130,6 +135,23 @@ Creates a non-conflicting node in a non-canon status unless the caller is an app
 
 Updates node properties with provenance and event logging.
 
+Generic `update_node` MUST NOT create, remove, or change `Project.language`.
+That field uses the dedicated compare-and-set operation below so a stale client
+cannot relabel the project or overwrite a concurrent metadata update.
+
+### `update_project_language`
+
+Atomically compares the project's effective current language with
+`expected_language` and, only on a match, persists the new `zh-CN` or `en-US`
+value together with provenance and its event-log entry. For comparison, a
+legacy missing value has the inferred effective value defined by
+`language_policy_v1`; persisting that same value is still an explicit
+confirmation write.
+
+A mismatch or concurrent compare-and-set loss MUST leave both the Project node
+and Event Log unchanged. CandidateFact patches, seed paths, and generic node
+updates MUST NOT call around this operation or mutate `Project.language`.
+
 ### `create_relation`
 
 Creates a relationship between existing nodes with edge metadata.
@@ -180,6 +202,12 @@ Records the append-only event log entry for every canon mutation.
 
 ## Write Invariants
 
+- A `Project.language` change is an explicit, provenance-bearing update with an
+  expected previous language and `future_outputs_only` semantics. It must use
+  `update_project_language`; generic `update_node`, seed paths, and
+  CandidateFact patches cannot alter the field. It never translates or relabels
+  existing story, source, proposal, draft, style, workflow, or continuity
+  records.
 - No write may omit provenance.
 - No automated write may create `CANON` status directly.
 - Human-authored seed operations may create `CANON` only when the action includes reviewer, rationale, source reference, and an event log entry.
@@ -224,6 +252,7 @@ Required v1 error categories:
 - `missing_provenance`
 - `canon_write_forbidden`
 - `conflict_detected`
+- `project_language_changed`
 - `backend_unavailable`
 
 ## Open Decisions

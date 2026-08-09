@@ -9,6 +9,8 @@ not a Proposal Artifact, not a CandidateFact, and not Graph Store canon. Import
 and extraction may populate only the Source Store. Any later Agent output must
 enter Proposal Store or another existing review boundary explicitly.
 
+Language semantics follow `language_policy_v1`.
+
 ## Required Fields
 
 ```json
@@ -47,7 +49,9 @@ Required top-level fields:
 - `relative_path`: normalized slash-separated import path; it must not contain
   an absolute drive, UNC path, `.` segment, or `..` segment.
 - `media_type`: normalized supported media type.
-- `language`: BCP 47-style language label such as `zh-CN` or `en-US`.
+- `language`: canonical valid BCP 47 language tag such as `zh-CN` or `en-US`, or
+  `und` while the author has not confirmed it. Validation, normalization, and
+  model-use rules follow `language_policy_v1`.
 - `byte_size`: original local file size in bytes.
 - `checksum_sha256`: lowercase 64-character SHA-256 of the original file bytes.
 - `extraction_status`: `ready`, `failed`, or `archived`.
@@ -118,6 +122,7 @@ The import identity key is:
 POST /projects/{project_id}/sources
 GET  /projects/{project_id}/sources
 GET  /projects/{project_id}/sources/{source_document_id}
+PATCH /projects/{project_id}/sources/{source_document_id}
 POST /projects/{project_id}/sources/{source_document_id}/archive
 POST /projects/{project_id}/sources/{source_document_id}/structure-draft
 ```
@@ -141,6 +146,14 @@ POST /projects/{project_id}/sources/{source_document_id}/structure-draft
 - requires read permission;
 - returns the project-scoped detail including `extracted_text`.
 
+`PATCH /projects/{project_id}/sources/{source_document_id}`:
+
+- requires at least local `read_generate` permission;
+- accepts a corrected `language` plus `expected_updated_at` for optimistic
+  concurrency;
+- changes language metadata only and must not change stable ID, checksum,
+  extracted text, archive state, or provenance.
+
 `POST /projects/{project_id}/sources/{source_document_id}/archive`:
 
 - requires at least local `read_generate` permission;
@@ -152,14 +165,19 @@ POST /projects/{project_id}/sources/{source_document_id}/structure-draft
 
 - requires at least local `read_generate` permission and a `ready` source;
 - resolves text in the backend rather than accepting duplicate private text;
+- accepts `cross_language_policy`, defaulting to `project_only`, and applies
+  `language_policy_v1` before any provider call;
 - creates only a non-canon `project_structure_draft` Proposal Artifact;
 - records `ProposalRef(kind="source_document", ref=<stable id>)`;
 - must not create Chapter or Scene nodes until the existing explicit proposal
   accept-and-apply action is completed by the author.
 
 The legacy `POST /projects/{project_id}/imports/structure-draft` text request may
-remain temporarily for compatibility, but the project workbench should use the
-source-backed route after migration.
+remain temporarily for compatibility, but it MUST require a valid
+`source_language` and apply the same `cross_language_policy`. A missing or
+invalid source language is `422`, including when `explicit_reference` was
+requested. The project workbench should use the source-backed route after
+migration.
 
 ## Agent Discussion Integration
 
@@ -167,18 +185,27 @@ source-backed route after migration.
 
 ```json
 {
-  "source_document_ids": ["source_001"]
+  "source_document_ids": ["source_001"],
+  "cross_language_policy": "project_only"
 }
 ```
 
 - The default is an empty list; no Source Store document is included implicitly.
 - Every id must belong to the route project and have `extraction_status = ready`.
 - The backend resolves bounded text and records stable `source_document` refs.
+- `project_only` rejects a source whose language differs from
+  `Project.language`; `explicit_reference` permits only a known valid different
+  BCP 47 tag selected in this request. `und` is rejected under both policies.
+- A language rejection occurs before any model provider call and never includes
+  source text in the error.
 - The client must show which documents are selected before sending the request.
 - If the author disables current-draft inclusion, the client must not send the
   editor text as `base_text` or through another field.
 - Existing inline `local_sources` requests may remain temporarily for API
-  compatibility, but persisted-workbench documents should use stable ids.
+  compatibility, but every item MUST include a valid `language` and obey the
+  same cross-language policy. Missing/invalid language is `422`; it is never
+  inherited from the project. Persisted-workbench documents should use stable
+  ids.
 
 Agent output remains a non-canon `scene_rebuild` or `scene_draft` Proposal
 Artifact. It must not overwrite Draft Store, create CandidateFacts, or write
@@ -206,10 +233,17 @@ but must never copy a full private document.
   scoped by `project_id`.
 - Looking up another project's Source Document must return not-found behavior,
   not document metadata.
-- `language` belongs to the source record and is available for later output
-  language controls. v1 does not infer canon or translate text automatically.
-- Chinese and English documents must not be mixed automatically. Cross-language
-  inclusion requires explicit author selection in a later workflow.
+- `language` belongs to the source record and follows `language_policy_v1`; it
+  never sets `Project.language` or `output_language`.
+- Chinese, English, and other tagged documents must not be mixed automatically.
+  Cross-language use requires both explicit stable-source selection and
+  `cross_language_policy = explicit_reference` in the same request. A legacy
+  inline/text request uses its explicitly supplied payload plus required known
+  `source_language` as the compatibility equivalent; it never gains stable
+  Source Store identity.
+- Cross-language use does not translate, relabel, or change output language.
+- `und` documents remain storable and reviewable but cannot enter Agent or
+  structure prompts until the author assigns a valid known language.
 
 ## Canon Safety Invariants
 

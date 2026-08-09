@@ -11,13 +11,16 @@ Style samples are soft writing guidance. They are not graph canon, do not overri
 - Primary producer: explicit author/API/CLI style-sample ingest.
 - Primary consumer: Context Agent through `ContextPackBuilder`.
 - Secondary consumers: Writing Agent and QA Agent through `context_pack_v1`.
-- Related contracts: `context_pack_v1`, `graph_store_v1`.
+- Related contracts: `context_pack_v1`, `graph_store_v1`,
+  `language_policy_v1`.
 
 ## Required Style Sample Fields
 
 - `contract_version`: must be `style_sample_v1`
 - `id`
 - `project_id`
+- `language`: known canonical BCP 47 tag; new project style samples normally use
+  the current `Project.language`
 - `text`
 - `source_ref`
 - `pov`
@@ -32,6 +35,7 @@ Style samples are soft writing guidance. They are not graph canon, do not overri
 Search must accept:
 
 - `project_id`
+- `language`
 - `query`
 - `pov`
 - `tone`
@@ -51,7 +55,7 @@ Each match should include:
 
 - The MVP implementation uses deterministic local lexical and metadata scoring.
 - It must not require external embeddings, OpenAI API keys, or network access.
-- Results must be filtered by `project_id`.
+- Results must first be filtered by exact `project_id` and exact `language`.
 - Ordering must be stable: higher score first, then `sample.id`.
 - `limit` must be explicit and positive.
 
@@ -63,9 +67,11 @@ Context Pack builders may include matched sample snippets in `retrieved_style_sa
 
 ## Invariants
 
+- Language handling follows `language_policy_v1`. `und` style samples are not
+  eligible for automatic retrieval, and a project-language change does not
+  relabel existing samples.
 - Style samples must not mutate Graph Store canon.
 - Style samples must not create `CandidateFact` records.
 - Style samples must not contain full chapters in retrieved context.
 - Automated draft generation must not auto-ingest style samples.
 - Retrieved samples are `P6` context and should be dropped before hard scene constraints when budget pressure requires trimming.
-

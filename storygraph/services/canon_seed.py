@@ -28,8 +28,8 @@ class AuthorCanonSeedService:
         source_ref: str,
     ) -> GraphNode:
         self._require_provenance(reviewer=reviewer, rationale=rationale, source_ref=source_ref)
-        self.graph_store.get_node(project_id)
-        node_properties = {"project_id": project_id, "name": name, **(properties or {})}
+        self._require_project(project_id)
+        node_properties = {**(properties or {}), "project_id": project_id, "name": name}
         return self.graph_store.seed_canon_node(
             node_id=node_id or slug_id("character", name),
             node_type="Character",
@@ -51,8 +51,8 @@ class AuthorCanonSeedService:
         source_ref: str,
     ) -> GraphNode:
         self._require_provenance(reviewer=reviewer, rationale=rationale, source_ref=source_ref)
-        self.graph_store.get_node(project_id)
-        node_properties = {"project_id": project_id, "name": name, **(properties or {})}
+        self._require_project(project_id)
+        node_properties = {**(properties or {}), "project_id": project_id, "name": name}
         return self.graph_store.seed_canon_node(
             node_id=node_id or slug_id("location", name),
             node_type="Location",
@@ -74,8 +74,8 @@ class AuthorCanonSeedService:
         source_ref: str,
     ) -> GraphNode:
         self._require_provenance(reviewer=reviewer, rationale=rationale, source_ref=source_ref)
-        self.graph_store.get_node(project_id)
-        node_properties = {"project_id": project_id, "title": title, **(properties or {})}
+        self._require_project(project_id)
+        node_properties = {**(properties or {}), "project_id": project_id, "title": title}
         chapter = self.graph_store.seed_canon_node(
             node_id=node_id or slug_id("chapter", title),
             node_type="Chapter",
@@ -110,16 +110,25 @@ class AuthorCanonSeedService:
         source_ref: str,
     ) -> GraphNode:
         self._require_provenance(reviewer=reviewer, rationale=rationale, source_ref=source_ref)
-        self.graph_store.get_node(project_id)
-        chapter = self.graph_store.get_node(chapter_id)
-        if chapter.type != "Chapter" or chapter.properties.get("project_id") != project_id:
-            raise ContractError("Chapter does not belong to the requested project.")
+        self._require_project(project_id)
+        self._require_owned_node(project_id, chapter_id, expected_type="Chapter")
+        raw_properties = dict(properties or {})
+        property_previous_scene_id = raw_properties.get("previous_scene_id")
+        if (
+            previous_scene_id is not None
+            and property_previous_scene_id is not None
+            and property_previous_scene_id != previous_scene_id
+        ):
+            raise ContractError("Scene previous_scene_id values do not match.")
+        effective_previous_scene_id = previous_scene_id or property_previous_scene_id
         node_properties = {
+            **raw_properties,
             "project_id": project_id,
             "chapter_id": chapter_id,
             "title": title,
-            **(properties or {}),
+            "previous_scene_id": effective_previous_scene_id,
         }
+        self.validate_scene_references(project_id=project_id, properties=node_properties)
         scene = self.graph_store.seed_canon_node(
             node_id=node_id or slug_id("scene", title),
             node_type="Scene",
@@ -138,12 +147,13 @@ class AuthorCanonSeedService:
             reviewer=reviewer,
             rationale=rationale,
         )
-        if previous_scene_id:
-            self.graph_store.get_node(previous_scene_id)
+        if effective_previous_scene_id:
             self.graph_store.seed_canon_relation(
-                relation_id=slug_id("rel", f"{previous_scene_id}_NEXT_SCENE_{scene.id}"),
+                relation_id=slug_id(
+                    "rel", f"{effective_previous_scene_id}_NEXT_SCENE_{scene.id}"
+                ),
                 relation_type="NEXT_SCENE",
-                source_id=previous_scene_id,
+                source_id=effective_previous_scene_id,
                 target_id=scene.id,
                 properties={"project_id": project_id},
                 source_ref=source_ref,
@@ -165,12 +175,12 @@ class AuthorCanonSeedService:
         source_ref: str,
     ) -> GraphNode:
         self._require_provenance(reviewer=reviewer, rationale=rationale, source_ref=source_ref)
-        self.graph_store.get_node(project_id)
+        self._require_project(project_id)
         node_properties = {
+            **(properties or {}),
             "project_id": project_id,
             "domain": domain,
             "rule": rule,
-            **(properties or {}),
         }
         return self.graph_store.seed_canon_node(
             node_id=node_id or slug_id("worldrule", f"{domain}_{rule[:40]}"),
@@ -195,10 +205,10 @@ class AuthorCanonSeedService:
         source_ref: str,
     ) -> GraphRelationship:
         self._require_provenance(reviewer=reviewer, rationale=rationale, source_ref=source_ref)
-        self.graph_store.get_node(project_id)
-        self.graph_store.get_node(source_id)
-        self.graph_store.get_node(target_id)
-        relation_properties = {"project_id": project_id, **(properties or {})}
+        self._require_project(project_id)
+        self._require_owned_node(project_id, source_id)
+        self._require_owned_node(project_id, target_id)
+        relation_properties = {**(properties or {}), "project_id": project_id}
         return self.graph_store.seed_canon_relation(
             relation_id=relation_id or slug_id("rel", f"{source_id}_{relation_type}_{target_id}"),
             relation_type=relation_type,
@@ -209,6 +219,57 @@ class AuthorCanonSeedService:
             reviewer=reviewer,
             rationale=rationale,
         )
+
+    def validate_scene_references(self, *, project_id: str, properties: dict) -> None:
+        reference_types = {
+            "pov_character_id": "Character",
+            "location_id": "Location",
+            "previous_scene_id": "Scene",
+        }
+        for field_name, expected_type in reference_types.items():
+            node_id = properties.get(field_name)
+            if node_id:
+                self._require_owned_node(
+                    project_id,
+                    str(node_id),
+                    expected_type=expected_type,
+                )
+        required_characters = properties.get("required_characters", [])
+        if not isinstance(required_characters, list):
+            raise ContractError("Scene required_characters must be a list.")
+        for character_id in required_characters:
+            if not isinstance(character_id, str) or not character_id:
+                raise ContractError("Scene required_characters must contain stable IDs.")
+            self._require_owned_node(
+                project_id,
+                character_id,
+                expected_type="Character",
+            )
+
+    def _require_project(self, project_id: str) -> GraphNode:
+        project = self.graph_store.get_node(project_id)
+        if project.type != "Project":
+            raise ContractError(f"Node {project_id} is not a Project.")
+        return project
+
+    def _require_owned_node(
+        self,
+        project_id: str,
+        node_id: str,
+        *,
+        expected_type: str | None = None,
+    ) -> GraphNode:
+        node = self.graph_store.get_node(node_id)
+        belongs = (
+            node.id == project_id
+            if node.type == "Project"
+            else node.properties.get("project_id") == project_id
+        )
+        if not belongs:
+            raise ContractError("Referenced node does not belong to the requested project.")
+        if expected_type is not None and node.type != expected_type:
+            raise ContractError(f"Referenced node must be a {expected_type}.")
+        return node
 
     @staticmethod
     def _require_provenance(*, reviewer: str, rationale: str, source_ref: str) -> None:

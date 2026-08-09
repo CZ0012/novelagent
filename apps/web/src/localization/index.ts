@@ -1,19 +1,53 @@
 import { zhCN } from "./zh-CN";
+import { enUS } from "./en-US";
+import type { LocaleCatalog } from "./schema";
 
-const activeLocale = zhCN;
+export type AppLocale = "zh-CN" | "en-US";
+export const UI_LOCALE_STORAGE_KEY = "storygraph.ui_locale.v1";
+export const SUPPORTED_UI_LOCALES: readonly AppLocale[] = ["zh-CN", "en-US"];
 
-export const APP_LOCALE = activeLocale.locale;
-export const appText = activeLocale.app;
-export const uiText = activeLocale.ui;
-export const localizedTerms = activeLocale.terms;
-export const permissionLabels = activeLocale.permissions.labels;
-export const defaultPermissionDescriptions = activeLocale.permissions.descriptions;
-export const proposalTypeLabels = activeLocale.proposalTypes;
-export const proposalStatusLabels = activeLocale.proposalStatuses;
-export const stepLabels = activeLocale.steps;
-export const reviewActionLabels = activeLocale.reviewActions;
+const catalogs: Record<AppLocale, LocaleCatalog> = {
+  "zh-CN": zhCN,
+  "en-US": enUS
+};
 
-export function localizeText(value: string | null | undefined): string {
+let activeLocale: LocaleCatalog = zhCN;
+
+export let APP_LOCALE = activeLocale.locale;
+export let appText = activeLocale.app;
+export let uiText = activeLocale.ui;
+export let localizedTerms = activeLocale.terms;
+export let permissionLabels = activeLocale.permissions.labels;
+export let defaultPermissionDescriptions = activeLocale.permissions.descriptions;
+export let proposalTypeLabels = activeLocale.proposalTypes;
+export let proposalStatusLabels = activeLocale.proposalStatuses;
+export let stepLabels = activeLocale.steps;
+export let reviewActionLabels = activeLocale.reviewActions;
+
+export function normalizeAppLocale(value: string | null | undefined): AppLocale {
+  return value === "en-US" ? "en-US" : "zh-CN";
+}
+
+export function getLocaleCatalog(locale: string | null | undefined): LocaleCatalog {
+  return catalogs[normalizeAppLocale(locale)];
+}
+
+export function activateLocale(locale: AppLocale): LocaleCatalog {
+  activeLocale = catalogs[locale];
+  APP_LOCALE = activeLocale.locale;
+  appText = activeLocale.app;
+  uiText = activeLocale.ui;
+  localizedTerms = activeLocale.terms;
+  permissionLabels = activeLocale.permissions.labels;
+  defaultPermissionDescriptions = activeLocale.permissions.descriptions;
+  proposalTypeLabels = activeLocale.proposalTypes;
+  proposalStatusLabels = activeLocale.proposalStatuses;
+  stepLabels = activeLocale.steps;
+  reviewActionLabels = activeLocale.reviewActions;
+  return activeLocale;
+}
+
+export function localizeSystemValue(value: string | null | undefined): string {
   if (!value) return "";
   return activeLocale.demoText[value as keyof typeof activeLocale.demoText] ?? value;
 }

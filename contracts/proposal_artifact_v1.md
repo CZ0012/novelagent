@@ -6,6 +6,8 @@ plans, generated draft text, fact drafts, scene rebuild notes, or proposed canon
 patches before any explicit promotion into Draft Store, Candidate Store, or
 canon review.
 
+Language semantics follow `language_policy_v1`.
+
 Proposal artifacts are runtime project data. They are not coordination Markdown,
 not Draft Store records, not CandidateFact records, and not Graph Store canon.
 
@@ -16,6 +18,7 @@ not Draft Store records, not CandidateFact records, and not Graph Store canon.
   "contract_version": "proposal_artifact_v1",
   "id": "proposal_001",
   "project_id": "project_sample",
+  "content_language": "zh-CN",
   "artifact_type": "scene_draft",
   "status": "drafting",
   "title": "第二章开场提案",
@@ -61,6 +64,44 @@ not Draft Store records, not CandidateFact records, and not Graph Store canon.
 - `canon_patch`
 - `outline_draft`
 - `project_structure_draft`
+
+## Content Language
+
+`content_language` is required for new Proposal Artifacts and follows
+`language_policy_v1`. For Agent- or workflow-created artifacts it MUST equal the
+server-derived `output_language` frozen for that operation. It is project content
+metadata, not UI locale or source language.
+
+Changing `Project.language` affects future proposal versions only. Existing
+proposal bodies, titles, and language snapshots are never translated, rewritten,
+or relabeled. Legacy proposals without this field remain readable only through
+the inferred compatibility projection defined by `language_policy_v1`.
+
+A revision that changes `content_language` is a content rewrite, not a metadata
+relabel. It MUST atomically supply every proposal-authored natural-language
+content field in the new language; in v1 those content fields are `title` and
+`body`, so both require complete replacements. Proper names, stable identifiers,
+and bounded verbatim source quotations remain subject to the exceptions in
+`language_policy_v1`. Any newly generated human-readable ref, provenance, or
+review note MUST also follow the version snapshot, while preserved historical
+audit text and verbatim quotations are not silently translated. If validation
+or persistence of any rewritten field fails, the store MUST create no new
+version.
+
+Versions created only to change status, record a review decision, or append
+`derived_refs` MUST preserve the previous version's exact `content_language`.
+They MUST NOT adopt the project's current language or a request-supplied
+different language merely because `Project.language` changed.
+
+A legacy proposal whose `content_language` is absent has unknown historical
+language. A compatibility projection may display an inferred value with
+`language_inferred = true`, but that value is not a confirmed snapshot. Such a
+proposal MUST NOT be made ready, reviewed, accepted, rejected, promoted, or
+given derived refs until an explicit content revision atomically supplies a
+confirmed `content_language` and complete replacement `title` and `body`.
+Supplying only a language tag, performing a state-only transition, or copying
+the current `Project.language` MUST NOT convert unknown legacy content into a
+confirmed-language version.
 
 ## Statuses
 
@@ -199,6 +240,8 @@ structure only when:
 
 ## Canon Safety Invariants
 
+- A selected source language never changes `content_language`; cross-language
+  sources follow `language_policy_v1` and are never translated automatically.
 - Proposal artifacts MUST NOT directly mutate Graph Store canon.
 - Proposal artifacts MUST NOT directly create Draft Store or CandidateFact
   records without an explicit promotion endpoint.

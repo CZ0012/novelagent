@@ -27,6 +27,8 @@ Maintain code compliance, contract discipline, tests, lint/build health, and saf
 - Regression-test concurrent accept/reject transitions, Candidate persistence failure, Graph failure compensation, and durable-backend graph/event transaction rollback.
 - Verify Source Store restart persistence, normalized-path/`checksum_sha256` idempotency, summary/detail text projection, archive behavior, permission gates, and project isolation. Cross-project or archived IDs must never reach Agent/structure prompts.
 - Verify new persistent proposal refs use `source_document` with stable IDs/checksum provenance, while legacy `imported_document` remains non-resolvable compatibility data.
+- Verify the full `ui_locale × Project.language` matrix, server-derived immutable output snapshots, exact project/language style filtering, future-only project-language changes, and legacy inferred-language projections.
+- Verify language mismatch and `und` rejection happen before provider invocation, `explicit_reference` still preserves `Project.language`, and legacy inline/structure inputs without valid source language return `422` without exposing private text.
 - Check that frontend and desktop code call backend APIs instead of creating independent canon or draft storage paths.
 - Check that release/update documentation distinguishes source-built outputs, updater artifacts, GitHub Release download fallback, published signed release channels, and Windows Authenticode signing.
 - Check that local file-writing and command documentation distinguishes PowerShell from Windows PowerShell where relevant.
@@ -40,6 +42,7 @@ Maintain code compliance, contract discipline, tests, lint/build health, and saf
 - Permission levels: `read_only`, `read_generate`, `full`.
 - Persistence boundaries for CLI, API, Web, desktop, imports, and demo seed flows.
 - Source Store boundaries: at least `read_generate` for import/archive/Agent/structure use, read permission for list/detail, explicit source selection, and no import side effects in Draft/Proposal/Candidate/Graph/Event stores.
+- Language boundaries: `ui_locale` is local display state only; project output is `zh-CN` or `en-US`; Source uses valid BCP 47 metadata; no implicit translation; provider-call count is zero for rejected language inputs.
 - Version synchronization across `VERSION`, Python, Web, and Tauri files when versioning is touched.
 
 ## Outputs

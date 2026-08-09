@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from typing import Literal
 
 from storygraph.core.agent_config import (
@@ -39,8 +39,20 @@ from storygraph.models.proposal import (
 from storygraph.models.candidate import CandidateFact
 from storygraph.models.common import EvidenceItem
 from storygraph.models.draft import Draft
-from storygraph.models.source import SourceDocument, SourceImportProvenance
+from storygraph.models.source import (
+    SourceDocument,
+    SourceImportProvenance,
+    canonicalize_source_language,
+    validate_safe_source_metadata,
+)
 from storygraph.models.style import StyleSample
+from storygraph.models.project import (
+    DEFAULT_OUTPUT_LANGUAGE,
+    CrossLanguagePolicy,
+    OutputLanguage,
+    localized,
+    validate_output_language,
+)
 from storygraph.services import (
     AgentDiscussionService,
     AuthorCanonSeedService,
@@ -68,27 +80,44 @@ from storygraph.stores import (
 from storygraph.stores.graph_factory import open_configured_graph_store, save_configured_graph_store
 from storygraph.stores.memory_graph import InMemoryGraphStore
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
+from storygraph.services.project_language import resolve_project_output_language
+from storygraph.services.project_language import enforce_source_language_policy
+from storygraph.services.project_language import project_language_projection
 from storygraph.workflows import SceneGenerationWorkflow
 
 
 class CreateProjectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
     genre: str = "fantasy"
-    language: str = "zh-CN"
+    language: OutputLanguage = "zh-CN"
     target_length: str | None = None
     narrative_pov: str | None = None
 
+    @field_validator("language", mode="before")
+    @classmethod
+    def legacy_project_language(cls, value):
+        return {"zh_CN": "zh-CN", "en_US": "en-US"}.get(value, value)
 
 class UpdateProjectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str | None = None
     genre: str | None = None
-    language: str | None = None
+    language: OutputLanguage | None = None
+    expected_language: str | None = Field(default=None, min_length=1, max_length=35)
+    language_change_policy: Literal["future_outputs_only"] | None = None
     target_length: str | None = None
     narrative_pov: str | None = None
     reviewer: str = Field("author", min_length=1)
     rationale: str = Field("作者从工作台编辑项目信息。", min_length=1)
     source_ref: str = Field("author_seed:workbench_project", min_length=1)
 
+    @field_validator("language", mode="before")
+    @classmethod
+    def legacy_project_language(cls, value):
+        return {"zh_CN": "zh-CN", "en_US": "en-US"}.get(value, value)
 
 class AuthorSeedRequest(BaseModel):
     reviewer: str = Field(..., min_length=1)
@@ -199,17 +228,25 @@ class ReviewRequest(BaseModel):
 
 
 class DemoSeedRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     reviewer: str = Field("author", min_length=1)
     rationale: str = Field(
         "作者明确初始化内置奇幻演示项目。",
         min_length=1,
     )
     source_ref: str = Field("demo:fantasy_project_v1", min_length=1)
-    locale: str = "zh-CN"
+    locale: OutputLanguage = "zh-CN"
     overwrite_existing: bool = True
+
+    @field_validator("locale", mode="before")
+    @classmethod
+    def legacy_demo_locale(cls, value):
+        return {"zh_CN": "zh-CN", "en_US": "en-US"}.get(value, value)
 
 
 class DraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     text: str | None = None
     summary: str | None = None
 
@@ -219,21 +256,49 @@ class StateExtractionRequest(BaseModel):
 
 
 class DocumentFactExtractionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str = Field(..., min_length=1)
     text: str = Field(..., min_length=1)
     source_ref: str = Field(..., min_length=1)
+    source_language: str = Field(..., min_length=1, max_length=35)
+    cross_language_policy: CrossLanguagePolicy = "project_only"
     max_facts: int = Field(16, ge=1, le=32)
+
+    @field_validator("source_language")
+    @classmethod
+    def canonical_source_language(cls, value: str) -> str:
+        return canonicalize_source_language(value)
+
+    @field_validator("source_ref")
+    @classmethod
+    def safe_source_ref(cls, value: str) -> str:
+        return validate_safe_source_metadata(value, field_name="source_ref") or ""
 
 
 class ProjectStructureDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     title: str = Field(..., min_length=1)
     text: str = Field(..., min_length=1)
     source_ref: str = Field(..., min_length=1)
+    source_language: str = Field(..., min_length=1, max_length=35)
+    cross_language_policy: CrossLanguagePolicy = "project_only"
     max_chapters: int = Field(12, ge=1, le=40)
     max_scenes_per_chapter: int = Field(8, ge=1, le=24)
 
+    @field_validator("source_language")
+    @classmethod
+    def canonical_source_language(cls, value: str) -> str:
+        return canonicalize_source_language(value)
+
+    @field_validator("source_ref")
+    @classmethod
+    def safe_source_ref(cls, value: str) -> str:
+        return validate_safe_source_metadata(value, field_name="source_ref") or ""
+
 
 class SourceDocumentImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str = Field(..., min_length=1, max_length=500)
     relative_path: str = Field(..., min_length=1, max_length=2048)
     media_type: Literal[
@@ -250,25 +315,64 @@ class SourceDocumentImportRequest(BaseModel):
     error: str | None = Field(default=None, max_length=500)
     provenance: SourceImportProvenance
 
+    @field_validator("language")
+    @classmethod
+    def canonical_language(cls, value: str) -> str:
+        return canonicalize_source_language(value)
+
 
 class SourceStructureDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     max_chapters: int = Field(12, ge=1, le=40)
     max_scenes_per_chapter: int = Field(8, ge=1, le=24)
+    cross_language_policy: CrossLanguagePolicy = "project_only"
+
+
+class SourceDocumentUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    language: str = Field(..., min_length=1, max_length=35)
+    expected_updated_at: str = Field(..., min_length=1)
+
+    @field_validator("language")
+    @classmethod
+    def canonical_language(cls, value: str) -> str:
+        return canonicalize_source_language(value)
 
 
 class SceneGenerationRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     output_target: Literal["draft_store", "proposal_workspace"] = "draft_store"
 
 
 class AgentDiscussionSourceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     kind: str = "imported_document"
     ref: str = Field(..., min_length=1)
     title: str = Field(..., min_length=1)
     text: str = Field(..., min_length=1)
+    language: str = Field(..., min_length=1, max_length=35)
     note: str | None = None
+
+    @field_validator("language")
+    @classmethod
+    def canonical_language(cls, value: str) -> str:
+        return canonicalize_source_language(value)
+
+    @field_validator("ref", "title")
+    @classmethod
+    def safe_source_identity(cls, value: str) -> str:
+        return validate_safe_source_metadata(value, field_name="inline source metadata") or ""
+
+    @field_validator("note")
+    @classmethod
+    def safe_source_note(cls, value: str | None) -> str | None:
+        return validate_safe_source_metadata(value, field_name="inline source note")
 
 
 class AgentDiscussionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     mode: Literal["discuss", "revise_selection", "revise_scene"] = "discuss"
     instruction: str = Field(..., min_length=1)
     selected_text: str | None = None
@@ -279,6 +383,7 @@ class AgentDiscussionRequest(BaseModel):
     source_document_ids: list[str] = Field(default_factory=list, max_length=32)
     allow_web_search: bool = False
     web_search_query: str | None = None
+    cross_language_policy: CrossLanguagePolicy = "project_only"
 
 
 class ProposalCreateRequest(BaseModel):
@@ -362,7 +467,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.8")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.9")
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -462,17 +567,27 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         source_ref: ProposalRef,
         max_chapters: int,
         max_scenes_per_chapter: int,
+        source_language: str,
+        cross_language_policy: CrossLanguagePolicy,
     ) -> dict:
+        output_language = resolve_project_output_language(graph, project_id)
+        enforce_source_language_policy(
+            output_language=output_language,
+            source_languages=[source_language],
+            policy=cross_language_policy,
+        )
         if _llm_is_configured(settings):
             analyzer = LLMProjectStructureAnalyzer(
                 provider=create_llm_provider(settings),
                 model=settings.llm_model,
+                output_language=output_language,
                 max_chapters=max_chapters,
                 max_scenes_per_chapter=max_scenes_per_chapter,
             )
             model_ref = f"{agent_config.provider_label}/{settings.llm_model}"
         else:
             analyzer = RuleBasedProjectStructureAnalyzer(
+                output_language=output_language,
                 max_chapters=max_chapters,
                 max_scenes_per_chapter=max_scenes_per_chapter,
             )
@@ -481,14 +596,21 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             project_id=project_id,
             title=title,
             source_text=source_text,
+            source_language=source_language,
+            cross_language_policy=cross_language_policy,
         )
         now = utc_now()
         proposal = ProposalArtifact(
             id=new_id("proposal"),
             project_id=project_id,
+            content_language=output_language,
             artifact_type="project_structure_draft",
             status="agent_revised",
-            title=f"项目结构草稿：{title}",
+            title=localized(
+                output_language,
+                zh=f"项目结构草稿：{title}",
+                en=f"Project structure draft: {title}",
+            ),
             body=draft.body,
             body_format="structured_json",
             target_refs=[ProposalRef(kind="project", ref=project_id)],
@@ -497,7 +619,17 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 created_by="agent",
                 created_via=draft.created_via,  # type: ignore[arg-type]
                 model_ref=model_ref,
-                note="Agent proposed project chapters and scenes from an imported document.",
+                note=localized(
+                    output_language,
+                    zh=(
+                        "智能体根据导入资料生成了项目章节与场景提案；"
+                        f"cross_language_policy={cross_language_policy}。"
+                    ),
+                    en=(
+                        "Agent proposed project chapters and scenes from an imported "
+                        f"document; cross_language_policy={cross_language_policy}."
+                    ),
+                ),
             ),
             version=1,
             created_at=now,
@@ -508,6 +640,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             "proposal": stored.model_dump(),
             "outline": draft.outline,
             "truncated": draft.truncated,
+            "output_language": output_language,
+            "cross_language_policy": cross_language_policy,
         }
 
     def get_project_source(project_id: str, source_document_id: str) -> SourceDocument:
@@ -545,6 +679,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     ref=document.id,
                     title=document.title,
                     text=document.extracted_text,
+                    language=document.language,
                     note=document.relative_path,
                 )
             )
@@ -567,6 +702,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 ref=source.ref,
                 title=source.title,
                 text=source.text,
+                language=source.language,
                 note=source.note,
             )
             for source in sources
@@ -620,7 +756,12 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         except GraphStoreError as exc:
             raise _graph_http_exception(exc) from exc
         persist_graph()
-        return {"project_id": project_id}
+        return {
+            "project_id": project_id,
+            "language": request.language,
+            "language_status": "confirmed",
+            "language_inferred": False,
+        }
 
     @app.get("/projects")
     def list_projects() -> dict:
@@ -629,13 +770,39 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     @app.get("/projects/{project_id}")
     def get_project(project_id: str) -> dict:
         try:
-            return graph_query.get_node(project_id=project_id, node_id=project_id).model_dump()
+            project = _ensure_project_exists(graph, project_id)
+            return {**project.model_dump(), **project_language_projection(project)}
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
     @app.patch("/projects/{project_id}")
     def update_project(project_id: str, request: UpdateProjectRequest) -> dict:
         require_permission(AgentPermissionLevel.FULL)
+        try:
+            project = _ensure_project_exists(graph, project_id)
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+        stored_language = project.properties.get("language")
+        current_language = (
+            stored_language if stored_language is not None else DEFAULT_OUTPUT_LANGUAGE
+        )
+        language_write = (
+            request.language is not None and request.language != stored_language
+        )
+        if language_write:
+            if request.expected_language is None or request.language_change_policy is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "修改项目语言时必须提供 expected_language 和 "
+                        "language_change_policy=future_outputs_only。"
+                    ),
+                )
+            if request.expected_language != current_language:
+                raise HTTPException(
+                    status_code=409,
+                    detail="项目语言已变化，请刷新后重试。",
+                )
         properties = {
             key: value
             for key, value in {
@@ -648,15 +815,30 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             if value is not None
         }
         try:
-            node = graph.update_node(
-                project_id,
-                properties,
-                reviewer=request.reviewer,
-                rationale=request.rationale,
-                source_ref=request.source_ref,
-            )
+            if language_write:
+                node = graph.update_project_language(
+                    project_id,
+                    expected_language=request.expected_language or current_language,
+                    language=request.language or current_language,
+                    properties={
+                        key: value
+                        for key, value in properties.items()
+                        if key != "language"
+                    },
+                    reviewer=request.reviewer,
+                    rationale=request.rationale,
+                    source_ref=request.source_ref,
+                )
+            else:
+                node = graph.update_node(
+                    project_id,
+                    properties,
+                    reviewer=request.reviewer,
+                    rationale=request.rationale,
+                    source_ref=request.source_ref,
+                )
             persist_graph()
-            return node.model_dump()
+            return {**node.model_dump(), **project_language_projection(node)}
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
@@ -864,6 +1046,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             sample = StyleSample(
                 id=request.id or new_id("style_sample"),
                 project_id=project_id,
+                language=resolve_project_output_language(graph, project_id),
                 text=request.text,
                 source_ref=request.source_ref,
                 pov=request.pov,
@@ -971,6 +1154,24 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         except ContractError as exc:
             raise _contract_http_exception(exc) from exc
 
+    @app.patch("/projects/{project_id}/sources/{source_document_id}")
+    def update_source_document(
+        project_id: str,
+        source_document_id: str,
+        request: SourceDocumentUpdateRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        try:
+            get_project_source(project_id, source_document_id)
+            return source_store.update_language(
+                project_id=project_id,
+                source_id=source_document_id,
+                language=request.language,
+                expected_updated_at=request.expected_updated_at,
+            ).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
     @app.post("/projects/{project_id}/sources/{source_document_id}/structure-draft")
     def create_source_project_structure_draft(
         project_id: str,
@@ -997,6 +1198,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 ),
                 max_chapters=request.max_chapters,
                 max_scenes_per_chapter=request.max_scenes_per_chapter,
+                source_language=document.language,
+                cross_language_policy=request.cross_language_policy,
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -1013,6 +1216,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         require_permission(AgentPermissionLevel.READ_GENERATE)
         try:
             _ensure_project_exists(graph, project_id)
+            output_language = resolve_project_output_language(graph, project_id)
             return build_project_structure_draft(
                 project_id=project_id,
                 title=request.title,
@@ -1020,10 +1224,16 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 source_ref=ProposalRef(
                     kind="imported_document",
                     ref=request.source_ref,
-                    note=f"Imported source document: {request.title}",
+                    note=localized(
+                        output_language,
+                        zh=f"导入的来源资料：{request.title}",
+                        en=f"Imported source document: {request.title}",
+                    ),
                 ),
                 max_chapters=request.max_chapters,
                 max_scenes_per_chapter=request.max_scenes_per_chapter,
+                source_language=request.source_language,
+                cross_language_policy=request.cross_language_policy,
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -1039,6 +1249,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             proposal = ProposalArtifact(
                 id=request.id or new_id("proposal"),
                 project_id=project_id,
+                content_language=resolve_project_output_language(graph, project_id),
                 artifact_type=request.artifact_type,
                 status="drafting",
                 title=request.title,
@@ -1101,11 +1312,29 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     ) -> dict:
         require_permission(AgentPermissionLevel.READ_GENERATE)
         try:
-            _ensure_proposal_project(proposal_store.get(proposal_id), project_id)
+            existing = proposal_store.get(proposal_id)
+            _ensure_proposal_project(existing, project_id)
+            current_language = resolve_project_output_language(graph, project_id)
+            changes_natural_language = request.title is not None or request.body is not None
+            if (
+                existing.content_language != current_language
+                and changes_natural_language
+                and (request.title is None or request.body is None)
+            ):
+                raise ContractError(
+                    "After a project language change, a Proposal content revision must "
+                    "supply both title and body."
+                )
+            revision_language = (
+                current_language
+                if changes_natural_language
+                else existing.content_language
+            )
             proposal = proposal_store.revise(
                 proposal_id,
                 actor=request.actor,
                 created_via=request.created_via,
+                content_language=revision_language,
                 title=request.title,
                 body=request.body,
                 body_format=request.body_format,
@@ -1129,17 +1358,35 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         try:
             existing = proposal_store.get(proposal_id)
             _ensure_proposal_project(existing, project_id)
+            current_language = resolve_project_output_language(graph, project_id)
             body = request.body
+            title = request.title
             if body is None:
                 _ensure_proposal_artifact_type(existing, "scene_draft")
                 target_scene_id = _proposal_target_scene_id(existing)
                 context_pack = context_builder.build(project_id=project_id, scene_id=target_scene_id)
                 body = create_scene_writer(settings, draft_store).draft(context_pack).text
+                current_language = context_pack.output_language
+                if existing.content_language != current_language and title is None:
+                    title = localized(
+                        current_language,
+                        zh=f"场景修订：{target_scene_id}",
+                        en=f"Scene revision: {target_scene_id}",
+                    )
+            elif (
+                existing.content_language != current_language
+                and title is None
+            ):
+                raise ContractError(
+                    "After a project language change, an explicit Proposal revision must "
+                    "supply both title and body."
+                )
             proposal = proposal_store.revise(
                 proposal_id,
                 actor=request.actor,
                 created_via=request.created_via,
-                title=request.title,
+                content_language=current_language,
+                title=title,
                 body=body,
                 body_format=request.body_format,
                 target_refs=request.target_refs,
@@ -1160,10 +1407,14 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     ) -> dict:
         require_permission(AgentPermissionLevel.READ_GENERATE)
         try:
-            _ensure_proposal_project(proposal_store.get(proposal_id), project_id)
+            existing = proposal_store.get(proposal_id)
+            _ensure_proposal_project(existing, project_id)
             proposal = proposal_store.mark_ready(
                 proposal_id,
                 actor=request.actor,
+                content_language=(
+                    existing.content_language
+                ),
                 note=request.note,
                 expected_version=request.expected_version,
             )
@@ -1179,11 +1430,15 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     ) -> dict:
         require_permission(AgentPermissionLevel.FULL)
         try:
-            _ensure_proposal_project(proposal_store.get(proposal_id), project_id)
+            existing = proposal_store.get(proposal_id)
+            _ensure_proposal_project(existing, project_id)
             proposal = proposal_store.review(
                 proposal_id,
                 decision=request.decision,
                 reviewer=request.reviewer,
+                content_language=(
+                    existing.content_language
+                ),
                 note=request.note,
                 expected_version=request.expected_version,
             )
@@ -1195,11 +1450,15 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     def accept_proposal(project_id: str, proposal_id: str, request: ProposalDecisionRequest) -> dict:
         require_permission(AgentPermissionLevel.FULL)
         try:
-            _ensure_proposal_project(proposal_store.get(proposal_id), project_id)
+            existing = proposal_store.get(proposal_id)
+            _ensure_proposal_project(existing, project_id)
             proposal = proposal_store.review(
                 proposal_id,
                 decision="accepted",
                 reviewer=request.reviewer,
+                content_language=(
+                    existing.content_language
+                ),
                 note=request.note,
                 expected_version=request.expected_version,
             )
@@ -1211,11 +1470,15 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     def reject_proposal(project_id: str, proposal_id: str, request: ProposalDecisionRequest) -> dict:
         require_permission(AgentPermissionLevel.FULL)
         try:
-            _ensure_proposal_project(proposal_store.get(proposal_id), project_id)
+            existing = proposal_store.get(proposal_id)
+            _ensure_proposal_project(existing, project_id)
             proposal = proposal_store.review(
                 proposal_id,
                 decision="rejected",
                 reviewer=request.reviewer,
+                content_language=(
+                    existing.content_language
+                ),
                 note=request.note,
                 expected_version=request.expected_version,
             )
@@ -1237,21 +1500,40 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             _ensure_proposal_promotable(proposal, request.expected_version)
             _ensure_proposal_artifact_type(proposal, "scene_draft")
             graph_query.scene_node(project_id=project_id, scene_id=request.scene_id)
+            content_language = _require_proposal_content_language(proposal)
             draft = draft_store.create_draft(
                 project_id=project_id,
                 scene_id=request.scene_id,
+                content_language=content_language,
                 text=proposal.body,
-                summary=request.summary or f"由协作草稿 {proposal.id} v{proposal.version} 转为场景草稿。",
+                summary=request.summary
+                or localized(
+                    content_language,
+                    zh=f"由协作草稿 {proposal.id} v{proposal.version} 转为场景草稿。",
+                    en=f"Converted collaboration proposal {proposal.id} v{proposal.version} to a scene draft.",
+                ),
             )
             updated_proposal = proposal_store.record_derived_ref(
                 proposal_id,
                 derived_ref=ProposalRef(
                     kind="draft",
                     ref=draft.id,
-                    note=f"Current scene draft derived from proposal v{proposal.version}.",
+                    note=localized(
+                        content_language,
+                        zh=f"当前场景草稿由提案 v{proposal.version} 派生。",
+                        en=(
+                            "Current scene draft derived from proposal "
+                            f"v{proposal.version}."
+                        ),
+                    ),
                 ),
                 actor=request.actor,
-                note="Promoted proposal content to Draft Store.",
+                content_language=content_language,
+                note=localized(
+                    content_language,
+                    zh="已将提案内容提升到草稿库。",
+                    en="Promoted proposal content to Draft Store.",
+                ),
                 expected_version=proposal.version,
             )
             return {"proposal": updated_proposal.model_dump(), "draft": draft.model_dump()}
@@ -1271,14 +1553,21 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             _ensure_proposal_project(proposal, project_id)
             _ensure_proposal_promotable(proposal, request.expected_version)
             _ensure_proposal_artifact_type(proposal, "fact_draft")
+            content_language = _require_proposal_content_language(proposal)
             source_draft = draft_store.get_draft(request.source_draft_id)
             if source_draft.project_id != project_id:
                 raise HTTPException(status_code=404, detail="这个项目中没有找到来源草稿。")
+            if source_draft.content_language != content_language:
+                raise ContractError(
+                    "The fact_draft and its source Draft must have the same resolved "
+                    "content language before CandidateFact promotion."
+                )
             candidates = _fact_draft_candidates(
                 project_id=project_id,
                 proposal=proposal,
                 source_draft=source_draft,
                 extractor=extractor,
+                content_language=content_language,
             )
             candidates = [
                 review.validate_candidate_scope(candidate, project_id=project_id)
@@ -1304,12 +1593,24 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     ProposalRef(
                         kind="candidate_fact",
                         ref=candidate.id,
-                        note="CandidateFact promoted from this accepted fact_draft.",
+                        note=localized(
+                            content_language,
+                            zh="候选事实由此已接受的事实草稿提升而来。",
+                            en=(
+                                "CandidateFact promoted from this accepted "
+                                "fact_draft."
+                            ),
+                        ),
                     )
                     for candidate in submitted
                 ],
                 actor=request.actor,
-                note="Recorded CandidateFacts derived from accepted proposal content.",
+                content_language=content_language,
+                note=localized(
+                    content_language,
+                    zh="已记录由已接受提案内容派生的候选事实。",
+                    en="Recorded CandidateFacts derived from accepted proposal content.",
+                ),
                 expected_version=proposal.version,
             )
             return {
@@ -1339,6 +1640,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             _ensure_proposal_artifact_type(proposal, "project_structure_draft")
             if proposal.body_format != "structured_json":
                 raise HTTPException(status_code=409, detail="项目结构草稿必须使用 structured_json。")
+            output_language = _require_proposal_content_language(proposal)
             outline = _project_structure_from_proposal(proposal)
             source_ref = request.source_ref or f"proposal:{proposal.id}@v{proposal.version}"
             chapters: list[dict] = []
@@ -1346,7 +1648,11 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             previous_scene_id: str | None = None
             created_graph_nodes = False
             for chapter_index, chapter in enumerate(outline["chapters"], start=1):
-                chapter_title = _structure_text(chapter.get("title")) or f"第 {chapter_index} 章"
+                chapter_title = _structure_text(chapter.get("title")) or localized(
+                    output_language,
+                    zh=f"第 {chapter_index} 章",
+                    en=f"Chapter {chapter_index}",
+                )
                 chapter_id = slug_id(
                     "chapter",
                     f"{project_id}_{chapter_index}_{chapter_title}",
@@ -1381,7 +1687,11 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     created_graph_nodes = True
                 chapters.append(chapter_node.model_dump())
                 for scene_index, scene in enumerate(chapter.get("scenes", []), start=1):
-                    scene_title = _structure_text(scene.get("title")) or f"场景 {scene_index}"
+                    scene_title = _structure_text(scene.get("title")) or localized(
+                        output_language,
+                        zh=f"场景 {scene_index}",
+                        en=f"Scene {scene_index}",
+                    )
                     scene_id = slug_id(
                         "scene",
                         f"{project_id}_{chapter_index}_{scene_index}_{scene_title}",
@@ -1441,10 +1751,28 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     derived_ref=ProposalRef(
                         kind="graph_node",
                         ref=node["id"],
-                        note=f"{node['type']} created from project structure proposal v{proposal.version}.",
+                        note=localized(
+                            output_language,
+                            zh=(
+                                f"{node['type']} 由项目结构提案 "
+                                f"v{proposal.version} 创建。"
+                            ),
+                            en=(
+                                f"{node['type']} created from project structure "
+                                f"proposal v{proposal.version}."
+                            ),
+                        ),
                     ),
                     actor=request.reviewer,
-                    note="Applied project structure proposal to Chapter/Scene graph nodes.",
+                    content_language=output_language,
+                    note=localized(
+                        output_language,
+                        zh="已将项目结构提案应用为章节与场景图谱节点。",
+                        en=(
+                            "Applied project structure proposal to Chapter/Scene "
+                            "graph nodes."
+                        ),
+                    ),
                     expected_version=updated_proposal.version,
                 )
                 recorded_graph_refs.add(node["id"])
@@ -1491,13 +1819,33 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     raise _graph_http_exception(exc) from exc
                 if request.overwrite_existing:
                     try:
-                        graph.update_node(
-                            node.id,
-                            node.properties,
-                            reviewer=request.reviewer,
-                            rationale=request.rationale,
-                            source_ref=request.source_ref,
-                        )
+                        if node.type == "Project":
+                            language = validate_output_language(
+                                node.properties.get("language")
+                            )
+                            graph.update_project_language(
+                                node.id,
+                                expected_language=resolve_project_output_language(
+                                    graph, node.id
+                                ),
+                                language=language,
+                                properties={
+                                    key: value
+                                    for key, value in node.properties.items()
+                                    if key != "language"
+                                },
+                                reviewer=request.reviewer,
+                                rationale=request.rationale,
+                                source_ref=request.source_ref,
+                            )
+                        else:
+                            graph.update_node(
+                                node.id,
+                                node.properties,
+                                reviewer=request.reviewer,
+                                rationale=request.rationale,
+                                source_ref=request.source_ref,
+                            )
                         nodes_updated += 1
                     except GraphStoreError as update_exc:
                         raise _graph_http_exception(update_exc) from update_exc
@@ -1640,6 +1988,10 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             properties = _scene_update_properties(request)
             if not properties:
                 raise HTTPException(status_code=409, detail="没有可更新的场景字段。")
+            canon_seed.validate_scene_references(
+                project_id=project_id,
+                properties=properties,
+            )
             node = graph.update_node(
                 scene_id,
                 properties,
@@ -1654,25 +2006,40 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/context-pack")
     def build_context(project_id: str, scene_id: str) -> dict:
-        return context_builder.build(project_id=project_id, scene_id=scene_id).model_dump()
+        try:
+            return context_builder.build(project_id=project_id, scene_id=scene_id).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
 
     @app.get("/projects/{project_id}/scenes/{scene_id}/draft")
     def latest_draft(project_id: str, scene_id: str) -> dict:
-        draft = draft_store.latest_for_scene(project_id, scene_id)
-        return {"draft": draft.model_dump() if draft else None}
+        try:
+            graph_query.scene_node(project_id=project_id, scene_id=scene_id)
+            draft = draft_store.latest_for_scene(project_id, scene_id)
+            return {"draft": draft.model_dump() if draft else None}
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/draft")
     def write_draft(project_id: str, scene_id: str, request: DraftRequest | None = None) -> dict:
         require_permission(AgentPermissionLevel.READ_GENERATE)
-        if request and request.text is not None:
-            return draft_store.create_draft(
-                project_id=project_id,
-                scene_id=scene_id,
-                text=request.text,
-                summary=request.summary,
+        try:
+            graph_query.scene_node(project_id=project_id, scene_id=scene_id)
+            if request and request.text is not None:
+                output_language = resolve_project_output_language(graph, project_id)
+                return draft_store.create_draft(
+                    project_id=project_id,
+                    scene_id=scene_id,
+                    content_language=output_language,
+                    text=request.text,
+                    summary=request.summary,
+                ).model_dump()
+            context_pack = context_builder.build(project_id=project_id, scene_id=scene_id)
+            return create_scene_writer(settings, draft_store).write_and_save(
+                context_pack
             ).model_dump()
-        context_pack = context_builder.build(project_id=project_id, scene_id=scene_id)
-        return create_scene_writer(settings, draft_store).write_and_save(context_pack).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/agent-discussion")
     def discuss_scene_with_agent(
@@ -1684,6 +2051,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         _require_llm_configured(settings)
         try:
             graph_query.scene_node(project_id=project_id, scene_id=scene_id)
+            output_language = resolve_project_output_language(graph, project_id)
             latest = (
                 draft_store.latest_for_scene(project_id, scene_id)
                 if request.include_latest_draft
@@ -1708,6 +2076,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 scene_id=scene_id,
                 instruction=request.instruction,
                 mode=request.mode,
+                output_language=output_language,
+                cross_language_policy=request.cross_language_policy,
                 selected_text=request.selected_text,
                 base_text=request.base_text,
                 context_pack=context_pack,
@@ -1723,6 +2093,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             proposal = ProposalArtifact(
                 id=new_id("proposal"),
                 project_id=project_id,
+                content_language=output_language,
                 artifact_type=result.artifact_type,
                 status="agent_revised",
                 title=result.proposal_title,
@@ -1734,7 +2105,18 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     created_by="agent",
                     created_via="llm",
                     model_ref=settings.llm_model,
-                    note="Agent discussion produced a non-canon proposal from author-selected context.",
+                    note=localized(
+                        output_language,
+                        zh=(
+                            "智能体对话根据作者明确选择的上下文生成了非正典提案；"
+                            f"cross_language_policy={request.cross_language_policy}。"
+                        ),
+                        en=(
+                            "Agent discussion produced a non-canon proposal from "
+                            "author-selected context; "
+                            f"cross_language_policy={request.cross_language_policy}."
+                        ),
+                    ),
                 ),
                 version=1,
                 created_at=now,
@@ -1754,6 +2136,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 ],
                 "truncated_sources": result.truncated_sources,
                 "replacement_applied": result.replacement_applied,
+                "output_language": output_language,
+                "cross_language_policy": request.cross_language_policy,
             }
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -1779,15 +2163,30 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         draft = draft_store.latest_for_scene(project_id, scene_id)
         if draft is None:
             raise HTTPException(status_code=404, detail="这个场景还没有草稿。")
+        output_language = resolve_project_output_language(graph, project_id)
+        if draft.content_language != output_language:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "草稿语言快照缺失或与当前项目语言不一致；"
+                    "请先由作者另存为当前项目语言的新草稿。"
+                ),
+            )
         candidates = extractor.extract(project_id=project_id, draft=draft)
         if request.output_target == "proposal_workspace":
             now = utc_now()
+            content_language = output_language
             proposal = ProposalArtifact(
                 id=new_id("proposal"),
                 project_id=project_id,
+                content_language=content_language,
                 artifact_type="fact_draft",
                 status="agent_revised",
-                title=f"候选事实提案：{scene_id}",
+                title=localized(
+                    content_language,
+                    zh=f"候选事实提案：{scene_id}",
+                    en=f"Candidate fact proposal: {scene_id}",
+                ),
                 body=json.dumps(
                     {
                         "source_draft_id": draft.id,
@@ -1807,7 +2206,14 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 provenance=ProposalProvenance(
                     created_by="agent",
                     created_via="api",
-                    note="State extraction wrote CandidateFact previews to Proposal Store.",
+                    note=localized(
+                        content_language,
+                        zh="状态提取已将候选事实预览写入提案库。",
+                        en=(
+                            "State extraction wrote CandidateFact previews to "
+                            "Proposal Store."
+                        ),
+                    ),
                 ),
                 version=1,
                 created_at=now,
@@ -1833,11 +2239,35 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         require_permission(AgentPermissionLevel.READ_GENERATE)
         _require_llm_configured(settings)
         graph_query.scene_node(project_id=project_id, scene_id=scene_id)
-        source_draft = draft_store.create_draft(
+        output_language = resolve_project_output_language(graph, project_id)
+        try:
+            enforce_source_language_policy(
+                output_language=output_language,
+                source_languages=[request.source_language],
+                policy=request.cross_language_policy,
+            )
+            if request.source_language != output_language:
+                raise ContractError(
+                    "Cross-language document fact extraction cannot store raw source text "
+                    "as a scene Draft; use a project-language source for this legacy route."
+                )
+        except ContractError as exc:
+            raise _contract_http_exception(exc) from exc
+        provisional_now = utc_now()
+        source_draft = Draft(
+            id=new_id("draft"),
             project_id=project_id,
             scene_id=scene_id,
+            content_language=output_language,
+            version=1,
             text=request.text,
-            summary=f"导入资料源：{request.title}",
+            summary=localized(
+                output_language,
+                zh=f"导入资料源：{request.title}",
+                en=f"Imported source: {request.title}",
+            ),
+            created_at=provisional_now,
+            updated_at=provisional_now,
         )
         extractor_service = LLMDocumentFactExtractor(
             provider=create_llm_provider(settings),
@@ -1848,14 +2278,30 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             project_id=project_id,
             scene_id=scene_id,
             source_draft=source_draft,
+            output_language=output_language,
+            source_language=request.source_language,
+            cross_language_policy=request.cross_language_policy,
+        )
+        source_draft = draft_store.create_draft(
+            project_id=project_id,
+            scene_id=scene_id,
+            content_language=output_language,
+            text=request.text,
+            summary=source_draft.summary,
+            draft_id=source_draft.id,
         )
         now = utc_now()
         proposal = ProposalArtifact(
             id=new_id("proposal"),
             project_id=project_id,
+            content_language=output_language,
             artifact_type="fact_draft",
             status="agent_revised",
-            title=f"资料设定提案：{request.title}",
+            title=localized(
+                output_language,
+                zh=f"资料设定提案：{request.title}",
+                en=f"Source fact proposal: {request.title}",
+            ),
             body=fact_draft.body,
             body_format="markdown",
             target_refs=[
@@ -1869,7 +2315,21 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             provenance=ProposalProvenance(
                 created_by="agent",
                 created_via="llm",
-                note="LLM extracted explicit fact markers from imported source material.",
+                note=localized(
+                    output_language,
+                    zh=(
+                        "大模型从导入资料中提取了显式候选事实标记；"
+                        f"source_language={request.source_language}；"
+                        f"cross_language_policy={request.cross_language_policy}；"
+                        f"output_language={output_language}。"
+                    ),
+                    en=(
+                        "LLM extracted explicit fact markers from imported source material; "
+                        f"source_language={request.source_language}; "
+                        f"cross_language_policy={request.cross_language_policy}; "
+                        f"output_language={output_language}."
+                    ),
+                ),
             ),
             version=1,
             created_at=now,
@@ -1884,7 +2344,11 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 EvidenceItem(
                     kind="proposal_artifact",
                     ref=proposal.id,
-                    note="LLM fact_draft generated from imported source material.",
+                    note=localized(
+                        output_language,
+                        zh="由导入资料生成的大模型候选事实草稿。",
+                        en="LLM fact_draft generated from imported source material.",
+                    ),
                 )
             ],
         )
@@ -1893,6 +2357,9 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             "source_draft": source_draft.model_dump(),
             "candidate_previews": [candidate.model_dump() for candidate in candidate_previews],
             "truncated": fact_draft.truncated,
+            "source_language": request.source_language,
+            "output_language": output_language,
+            "cross_language_policy": request.cross_language_policy,
         }
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/runs/scene-generation")
@@ -2039,10 +2506,11 @@ def _ensure_candidate_project(
         raise HTTPException(status_code=404, detail="这个项目中没有找到该候选事实。")
 
 
-def _ensure_project_exists(graph, project_id: str) -> None:
+def _ensure_project_exists(graph, project_id: str):
     project = graph.get_node(project_id)
     if project.type != "Project":
         raise GraphStoreError("not_found", f"Project not found: {project_id}")
+    return project
 
 
 def _ensure_chapter_project(graph, *, project_id: str, chapter_id: str) -> None:
@@ -2091,17 +2559,33 @@ def _proposal_target_scene_id(proposal: ProposalArtifact) -> str:
     return scene_ref
 
 
+def _require_proposal_content_language(
+    proposal: ProposalArtifact,
+) -> OutputLanguage:
+    if proposal.content_language is None:
+        raise ContractError(
+            "Legacy ProposalArtifact language is unresolved; revise its complete title "
+            "and body before review, promotion, or derivation."
+        )
+    return proposal.content_language
+
+
 def _fact_draft_candidates(
     *,
     project_id: str,
     proposal: ProposalArtifact,
     source_draft: Draft,
     extractor: RuleBasedStateExtractor,
+    content_language: OutputLanguage,
 ) -> list[CandidateFact]:
     proposal_evidence = EvidenceItem(
         kind="proposal_artifact",
         ref=proposal.id,
-        note="CandidateFact promoted from this accepted fact_draft.",
+        note=localized(
+            content_language,
+            zh="候选事实由此已接受的事实草稿提升而来。",
+            en="CandidateFact promoted from this accepted fact_draft.",
+        ),
     )
     if proposal.body_format == "structured_json":
         candidates = _structured_fact_draft_candidates(

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Iterable
+from contextlib import contextmanager
+from threading import RLock
+from typing import Iterable, Iterator
 
-from storygraph.core.errors import GraphStoreError
+from storygraph.core.errors import ContractError, GraphStoreError
 from storygraph.core.ids import new_id
 from storygraph.core.time import utc_now
 from storygraph.models.candidate import CandidateFact
@@ -20,6 +22,14 @@ class InMemoryGraphStore(GraphStore):
         self.nodes: dict[str, GraphNode] = {}
         self.relationships: dict[str, GraphRelationship] = {}
         self.event_log = event_log or InMemoryEventLog()
+        self._mutation_lock = RLock()
+
+    @contextmanager
+    def persistence_guard(self) -> Iterator[None]:
+        """Serialize a durable snapshot with every in-memory graph mutation."""
+
+        with self._mutation_lock:
+            yield
 
     def get_node(self, node_id: str, *, include_non_canon: bool = False) -> GraphNode:
         node = self.nodes.get(node_id)
@@ -43,13 +53,17 @@ class InMemoryGraphStore(GraphStore):
         return relation
 
     def create_node(self, node: GraphNode, *, allow_canon: bool = False) -> GraphNode:
-        self._validate_node(node)
-        if node.id in self.nodes:
-            raise GraphStoreError("duplicate_id", f"Duplicate node id: {node.id}")
-        if node.status == "CANON" and not allow_canon:
-            raise GraphStoreError("canon_write_forbidden", "Automated create_node cannot write CANON")
-        self.nodes[node.id] = node
-        return node
+        with self._mutation_lock:
+            self._validate_node(node)
+            self._validate_project_language_properties(node.type, node.properties)
+            if node.id in self.nodes:
+                raise GraphStoreError("duplicate_id", f"Duplicate node id: {node.id}")
+            if node.status == "CANON" and not allow_canon:
+                raise GraphStoreError(
+                    "canon_write_forbidden", "Automated create_node cannot write CANON"
+                )
+            self.nodes[node.id] = node
+            return node
 
     def seed_canon_node(
         self,
@@ -61,31 +75,32 @@ class InMemoryGraphStore(GraphStore):
         reviewer: str = "author",
         rationale: str = "Manual project seed.",
     ) -> GraphNode:
-        now = utc_now()
-        node = GraphNode(
-            id=node_id,
-            type=node_type,
-            status="CANON",
-            created_at=now,
-            updated_at=now,
-            source_ref=source_ref,
-            event_id=new_id("evt"),
-            reviewer=reviewer,
-            reviewed_at=now,
-            rationale=rationale,
-            properties=properties,
-        )
-        self.create_node(node, allow_canon=True)
-        self._record_event(
-            operation="create_node",
-            target=node.id,
-            source_ref=source_ref,
-            reviewer=reviewer,
-            rationale=rationale,
-            payload=node.model_dump(),
-            event_id=node.event_id,
-        )
-        return node
+        with self._mutation_lock:
+            now = utc_now()
+            node = GraphNode(
+                id=node_id,
+                type=node_type,
+                status="CANON",
+                created_at=now,
+                updated_at=now,
+                source_ref=source_ref,
+                event_id=new_id("evt"),
+                reviewer=reviewer,
+                reviewed_at=now,
+                rationale=rationale,
+                properties=properties,
+            )
+            self.create_node(node, allow_canon=True)
+            self._record_event(
+                operation="create_node",
+                target=node.id,
+                source_ref=source_ref,
+                reviewer=reviewer,
+                rationale=rationale,
+                payload=node.model_dump(),
+                event_id=node.event_id,
+            )
+            return node
 
     def update_node(
         self,
@@ -97,7 +112,68 @@ class InMemoryGraphStore(GraphStore):
         source_ref: str,
         event_id: str | None = None,
     ) -> GraphNode:
-        node = self.get_node(node_id, include_non_canon=True)
+        with self._mutation_lock:
+            node = self.get_node(node_id, include_non_canon=True)
+            self._validate_project_language_properties(node.type, properties)
+            if (
+                node.type == "Project"
+                and "language" in properties
+                and properties["language"]
+                != self._effective_project_language(node.properties)
+            ):
+                raise GraphStoreError(
+                    "conflict_detected",
+                    "Project language changes require expected_language and "
+                    "future_outputs_only semantics.",
+                )
+            return self._update_node_locked(
+                node,
+                properties,
+                reviewer=reviewer,
+                rationale=rationale,
+                source_ref=source_ref,
+                event_id=event_id,
+            )
+
+    def update_project_language(
+        self,
+        project_id: str,
+        *,
+        expected_language: str,
+        language: str,
+        properties: dict,
+        reviewer: str,
+        rationale: str,
+        source_ref: str,
+    ) -> GraphNode:
+        with self._mutation_lock:
+            project = self.get_node(project_id, include_non_canon=True)
+            if project.type != "Project":
+                raise GraphStoreError("conflict_detected", f"Node is not a Project: {project_id}")
+            if self._effective_project_language(project.properties) != expected_language:
+                raise GraphStoreError(
+                    "conflict_detected",
+                    "Project language changed; refresh and retry.",
+                )
+            self._validate_project_language_properties("Project", {"language": language})
+            return self._update_node_locked(
+                project,
+                {**properties, "language": language},
+                reviewer=reviewer,
+                rationale=rationale,
+                source_ref=source_ref,
+            )
+
+    def _update_node_locked(
+        self,
+        node: GraphNode,
+        properties: dict,
+        *,
+        reviewer: str,
+        rationale: str,
+        source_ref: str,
+        event_id: str | None = None,
+    ) -> GraphNode:
         now = utc_now()
         updated = node.model_copy(
             update={
@@ -110,10 +186,10 @@ class InMemoryGraphStore(GraphStore):
                 "source_ref": source_ref,
             }
         )
-        self.nodes[node_id] = updated
+        self.nodes[node.id] = updated
         self._record_event(
             operation="update_node",
-            target=node_id,
+            target=node.id,
             source_ref=source_ref,
             reviewer=reviewer,
             rationale=rationale,
@@ -125,15 +201,20 @@ class InMemoryGraphStore(GraphStore):
     def create_relation(
         self, relation: GraphRelationship, *, allow_canon: bool = False
     ) -> GraphRelationship:
-        self._validate_relation(relation)
-        if relation.id in self.relationships:
-            raise GraphStoreError("duplicate_id", f"Duplicate relationship id: {relation.id}")
-        if relation.status == "CANON" and not allow_canon:
-            raise GraphStoreError("canon_write_forbidden", "Automated create_relation cannot write CANON")
-        if relation.source_id not in self.nodes or relation.target_id not in self.nodes:
-            raise GraphStoreError("not_found", "Relationship endpoints must exist")
-        self.relationships[relation.id] = relation
-        return relation
+        with self._mutation_lock:
+            self._validate_relation(relation)
+            if relation.id in self.relationships:
+                raise GraphStoreError(
+                    "duplicate_id", f"Duplicate relationship id: {relation.id}"
+                )
+            if relation.status == "CANON" and not allow_canon:
+                raise GraphStoreError(
+                    "canon_write_forbidden", "Automated create_relation cannot write CANON"
+                )
+            if relation.source_id not in self.nodes or relation.target_id not in self.nodes:
+                raise GraphStoreError("not_found", "Relationship endpoints must exist")
+            self.relationships[relation.id] = relation
+            return relation
 
     def seed_canon_relation(
         self,
@@ -147,33 +228,34 @@ class InMemoryGraphStore(GraphStore):
         reviewer: str = "author",
         rationale: str = "Manual project seed.",
     ) -> GraphRelationship:
-        now = utc_now()
-        relation = GraphRelationship(
-            id=relation_id,
-            type=relation_type,
-            status="CANON",
-            created_at=now,
-            updated_at=now,
-            source_ref=source_ref,
-            event_id=new_id("evt"),
-            reviewer=reviewer,
-            reviewed_at=now,
-            rationale=rationale,
-            source_id=source_id,
-            target_id=target_id,
-            properties=properties or {},
-        )
-        self.create_relation(relation, allow_canon=True)
-        self._record_event(
-            operation="create_relation",
-            target=relation.id,
-            source_ref=source_ref,
-            reviewer=reviewer,
-            rationale=rationale,
-            payload=relation.model_dump(),
-            event_id=relation.event_id,
-        )
-        return relation
+        with self._mutation_lock:
+            now = utc_now()
+            relation = GraphRelationship(
+                id=relation_id,
+                type=relation_type,
+                status="CANON",
+                created_at=now,
+                updated_at=now,
+                source_ref=source_ref,
+                event_id=new_id("evt"),
+                reviewer=reviewer,
+                reviewed_at=now,
+                rationale=rationale,
+                source_id=source_id,
+                target_id=target_id,
+                properties=properties or {},
+            )
+            self.create_relation(relation, allow_canon=True)
+            self._record_event(
+                operation="create_relation",
+                target=relation.id,
+                source_ref=source_ref,
+                reviewer=reviewer,
+                rationale=rationale,
+                payload=relation.model_dump(),
+                event_id=relation.event_id,
+            )
+            return relation
 
     def update_relation(
         self,
@@ -185,32 +267,33 @@ class InMemoryGraphStore(GraphStore):
         source_ref: str,
         event_id: str | None = None,
     ) -> GraphRelationship:
-        relation = self.relationships.get(relation_id)
-        if relation is None:
-            raise GraphStoreError("not_found", f"Relationship not found: {relation_id}")
-        now = utc_now()
-        updated = relation.model_copy(
-            update={
-                "properties": {**relation.properties, **properties},
-                "updated_at": now,
-                "event_id": event_id or new_id("evt"),
-                "reviewer": reviewer,
-                "reviewed_at": now,
-                "rationale": rationale,
-                "source_ref": source_ref,
-            }
-        )
-        self.relationships[relation_id] = updated
-        self._record_event(
-            operation="update_relation",
-            target=relation_id,
-            source_ref=source_ref,
-            reviewer=reviewer,
-            rationale=rationale,
-            payload=properties,
-            event_id=updated.event_id,
-        )
-        return updated
+        with self._mutation_lock:
+            relation = self.relationships.get(relation_id)
+            if relation is None:
+                raise GraphStoreError("not_found", f"Relationship not found: {relation_id}")
+            now = utc_now()
+            updated = relation.model_copy(
+                update={
+                    "properties": {**relation.properties, **properties},
+                    "updated_at": now,
+                    "event_id": event_id or new_id("evt"),
+                    "reviewer": reviewer,
+                    "reviewed_at": now,
+                    "rationale": rationale,
+                    "source_ref": source_ref,
+                }
+            )
+            self.relationships[relation_id] = updated
+            self._record_event(
+                operation="update_relation",
+                target=relation_id,
+                source_ref=source_ref,
+                reviewer=reviewer,
+                rationale=rationale,
+                payload=properties,
+                event_id=updated.event_id,
+            )
+            return updated
 
     def query_neighbors(
         self,
@@ -266,19 +349,37 @@ class InMemoryGraphStore(GraphStore):
     def query_scene_context(self, scene_id: str) -> dict:
         scene = self.get_node(scene_id)
         props = scene.properties
-        required = list(dict.fromkeys([props.get("pov_character_id"), *props.get("required_characters", [])]))
+        project_id = props.get("project_id")
+        if scene.type != "Scene" or not isinstance(project_id, str) or not project_id:
+            raise ContractError("Scene context requires a project-scoped Scene node.")
+        required_characters = props.get("required_characters", [])
+        if not isinstance(required_characters, list):
+            raise ContractError("Scene required_characters must be a list.")
+        required = list(
+            dict.fromkeys([props.get("pov_character_id"), *required_characters])
+        )
         required = [item for item in required if item]
         characters = []
         for character_id in required:
             try:
-                characters.append(self.get_node(character_id))
+                character = self.get_node(character_id)
+                if (
+                    character.type == "Character"
+                    and character.properties.get("project_id") == project_id
+                ):
+                    characters.append(character)
             except GraphStoreError as exc:
                 if exc.category != "not_found":
                     raise
         location = None
         if props.get("location_id"):
             try:
-                location = self.get_node(props["location_id"])
+                candidate_location = self.get_node(props["location_id"])
+                if (
+                    candidate_location.type == "Location"
+                    and candidate_location.properties.get("project_id") == project_id
+                ):
+                    location = candidate_location
             except GraphStoreError as exc:
                 if exc.category != "not_found":
                     raise
@@ -304,7 +405,12 @@ class InMemoryGraphStore(GraphStore):
             active_relationships.extend(
                 relation
                 for relation in neighbors["relationships"]
-                if self._props_visible_in_scope(
+                if relation.properties.get("project_id") == project_id
+                and relation.source_id in self.nodes
+                and relation.target_id in self.nodes
+                and self.nodes[relation.source_id].properties.get("project_id") == project_id
+                and self.nodes[relation.target_id].properties.get("project_id") == project_id
+                and self._props_visible_in_scope(
                     relation.properties,
                     scene_id=scene.id,
                     timeline_position=props.get("timeline_position"),
@@ -323,12 +429,14 @@ class InMemoryGraphStore(GraphStore):
                 for node in sorted(self.nodes.values(), key=lambda item: item.id)
                 if node.type == "WorldRule"
                 and node.status == "CANON"
+                and node.properties.get("project_id") == project_id
                 and self._node_relevant_to_scene(node, scene, required)
             ],
             "unresolved_foreshadowing": [
                 node
                 for node in self.get_unresolved_foreshadowing()
-                if self._node_relevant_to_scene(node, scene, required)
+                if node.properties.get("project_id") == project_id
+                and self._node_relevant_to_scene(node, scene, required)
             ],
         }
 
@@ -339,7 +447,14 @@ class InMemoryGraphStore(GraphStore):
         scene_id: str | None = None,
         timeline_position: str | None = None,
     ) -> KnowledgeBoundary:
-        self.get_node(character_id)
+        character = self.get_node(character_id)
+        project_id = character.properties.get("project_id")
+        if (
+            character.type != "Character"
+            or not isinstance(project_id, str)
+            or not project_id
+        ):
+            raise ContractError("Character knowledge requires a project-scoped Character node.")
         knows: list[str] = []
         falsely_believes: list[str] = []
         suspects: list[str] = []
@@ -347,6 +462,13 @@ class InMemoryGraphStore(GraphStore):
         refs: list[str] = []
         for relation in sorted(self.relationships.values(), key=lambda item: item.id):
             if relation.status != "CANON" or relation.source_id != character_id:
+                continue
+            target = self.nodes.get(relation.target_id)
+            if (
+                relation.properties.get("project_id") != project_id
+                or target is None
+                or target.properties.get("project_id") != project_id
+            ):
                 continue
             if not self._props_visible_in_scope(
                 relation.properties,
@@ -371,6 +493,7 @@ class InMemoryGraphStore(GraphStore):
             for node in sorted(self.nodes.values(), key=lambda item: item.id)
             if node.type == "Secret"
             and node.status == "CANON"
+            and node.properties.get("project_id") == project_id
             and node.id not in knownish
             and self._props_visible_in_scope(
                 node.properties,
@@ -485,6 +608,16 @@ class InMemoryGraphStore(GraphStore):
         )
 
     def commit_candidate_fact(
+        self, candidate: CandidateFact, *, reviewer: str, rationale: str
+    ) -> EventLogEntry:
+        with self._mutation_lock:
+            return self._commit_candidate_fact_locked(
+                candidate,
+                reviewer=reviewer,
+                rationale=rationale,
+            )
+
+    def _commit_candidate_fact_locked(
         self, candidate: CandidateFact, *, reviewer: str, rationale: str
     ) -> EventLogEntry:
         if candidate.review.status not in {"accepted", "edited"}:

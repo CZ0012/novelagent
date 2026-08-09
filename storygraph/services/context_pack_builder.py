@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from storygraph.core.errors import GraphStoreError
+from storygraph.core.errors import ContractError, GraphStoreError
 from storygraph.core.time import utc_now
 from storygraph.models.context import (
     ContextBudget,
@@ -12,6 +12,9 @@ from storygraph.models.context import (
     KnowledgeBoundary,
     StyleConstraints,
 )
+from storygraph.models.graph import GraphNode
+from storygraph.models.project import OutputLanguage, localized
+from storygraph.services.project_language import resolve_project_output_language
 from storygraph.stores.draft_store import SQLiteDraftStore
 from storygraph.stores.graph_base import GraphStore
 from storygraph.stores.style_sample_store import StyleSampleStore
@@ -37,11 +40,19 @@ class ContextPackBuilder:
         author_instruction_refs: list[str] | None = None,
     ) -> ContextPack:
         missing_context: list[ContextGap] = []
-        scene_context = self._query_scene_context(scene_id, missing_context)
+        output_language = resolve_project_output_language(self.graph_store, project_id)
+        scoped_scene = self.graph_store.get_node(scene_id)
+        self._ensure_scene_scope(project_id, scoped_scene)
+        self._ensure_scene_reference_scope(project_id, scoped_scene)
+        scene_context = self._query_scene_context(
+            scene_id,
+            output_language,
+            missing_context,
+        )
         scene = scene_context["scene"]
         props = scene.properties
+        self._ensure_scene_scope(project_id, scene)
         graph_query_ids = self._graph_query_plan(scene_id=scene_id, props=props)
-        self._check_project_scope(project_id, scene_id, props, missing_context)
 
         required_characters = list(
             dict.fromkeys(
@@ -52,11 +63,17 @@ class ContextPackBuilder:
             )
         )
         required_characters = [character_id for character_id in required_characters if character_id]
-        self._report_missing_scene_fields(props, scene_id, missing_context)
+        self._report_missing_scene_fields(
+            props,
+            scene_id,
+            output_language,
+            missing_context,
+        )
         self._report_missing_nodes(
             required_characters=required_characters,
             location_id=props.get("location_id"),
             scene_context=scene_context,
+            output_language=output_language,
             missing_context=missing_context,
         )
         knowledge = []
@@ -65,6 +82,7 @@ class ContextPackBuilder:
                 character_id=character_id,
                 scene_id=scene_id,
                 timeline_position=props.get("timeline_position"),
+                output_language=output_language,
                 missing_context=missing_context,
             )
             if boundary:
@@ -88,25 +106,58 @@ class ContextPackBuilder:
         previous_scene_id = props.get("previous_scene_id")
         if previous_scene_id and self.draft_store:
             draft = self.draft_store.latest_for_scene(project_id, previous_scene_id)
-            if draft:
+            if draft and draft.content_language == output_language:
                 previous_scene_summary = draft.summary
                 draft_refs.append(draft.id)
+            elif draft:
+                missing_context.append(
+                    ContextGap(
+                        kind="draft_language_mismatch",
+                        ref=previous_scene_id,
+                        severity="critical",
+                        message=localized(
+                            output_language,
+                            zh="上一场景草稿没有可信的当前项目语言快照。",
+                            en=(
+                                "The previous scene draft does not have a trusted snapshot "
+                                "for the current project language."
+                            ),
+                        ),
+                        source=scene_id,
+                    )
+                )
             else:
                 missing_context.append(
                     ContextGap(
                         kind="missing_draft",
                         ref=previous_scene_id,
                         severity="medium",
-                        message="Scene references a previous scene, but no draft summary is available.",
+                        message=localized(
+                            output_language,
+                            zh="场景引用了上一场景，但没有可用的草稿摘要。",
+                            en=(
+                                "Scene references a previous scene, but no draft summary "
+                                "is available."
+                            ),
+                        ),
                         source=scene_id,
                     )
                 )
 
         style_props = props.get("style_constraints", {})
         style = StyleConstraints(
-            pov=style_props.get("pov", props.get("narrative_pov", "third-person limited")),
+            pov=style_props.get(
+                "pov",
+                props.get("narrative_pov")
+                or localized(
+                    output_language,
+                    zh="第三人称有限视角",
+                    en="third-person limited",
+                ),
+            ),
             tense=style_props.get("tense"),
-            tone=style_props.get("tone", "restrained"),
+            tone=style_props.get("tone")
+            or localized(output_language, zh="克制", en="restrained"),
             sentence_rhythm=style_props.get("sentence_rhythm"),
             diction=style_props.get("diction"),
             dialogue_style=style_props.get("dialogue_style"),
@@ -117,6 +168,7 @@ class ContextPackBuilder:
         if self.style_sample_store:
             matches = self.style_sample_store.search(
                 project_id=project_id,
+                language=output_language,
                 query=self._style_query(props, style),
                 pov=style.pov,
                 tone=style.tone,
@@ -131,6 +183,7 @@ class ContextPackBuilder:
 
         pack = ContextPack(
             project_id=project_id,
+            output_language=output_language,
             scene_id=scene_id,
             chapter_id=props.get("chapter_id", ""),
             pov_character_id=props.get("pov_character_id", ""),
@@ -166,7 +219,12 @@ class ContextPackBuilder:
         suffix = f" strength={strength}" if strength is not None else ""
         return f"{relation.source_id} {relation.type} {relation.target_id}{suffix}"
 
-    def _query_scene_context(self, scene_id: str, missing_context: list[ContextGap]) -> dict:
+    def _query_scene_context(
+        self,
+        scene_id: str,
+        output_language: OutputLanguage,
+        missing_context: list[ContextGap],
+    ) -> dict:
         try:
             return self.graph_store.query_scene_context(scene_id)
         except GraphStoreError as exc:
@@ -178,7 +236,11 @@ class ContextPackBuilder:
                     kind="incomplete_graph_context",
                     ref=scene_id,
                     severity="high",
-                    message=f"Graph scene-context query was incomplete: {exc}",
+                    message=localized(
+                        output_language,
+                        zh=f"图谱场景上下文查询不完整：{exc}",
+                        en=f"Graph scene-context query was incomplete: {exc}",
+                    ),
                     source=scene_id,
                 )
             )
@@ -218,31 +280,47 @@ class ContextPackBuilder:
         return plan
 
     @staticmethod
-    def _check_project_scope(
+    def _ensure_scene_scope(
         project_id: str,
-        scene_id: str,
-        props: dict,
-        missing_context: list[ContextGap],
+        scene: GraphNode,
     ) -> None:
-        scene_project_id = props.get("project_id")
-        if scene_project_id and scene_project_id != project_id:
-            missing_context.append(
-                ContextGap(
-                    kind="project_mismatch",
-                    ref=scene_id,
-                    severity="critical",
-                    message=(
-                        f"Requested project {project_id} does not match scene project "
-                        f"{scene_project_id}."
-                    ),
-                    source=scene_id,
+        if scene.type != "Scene" or scene.properties.get("project_id") != project_id:
+            raise ContractError("Scene does not belong to the requested project.")
+
+    def _ensure_scene_reference_scope(self, project_id: str, scene: GraphNode) -> None:
+        props = scene.properties
+        required_characters = props.get("required_characters", [])
+        if not isinstance(required_characters, list):
+            raise ContractError("Scene required_characters must be a list.")
+        references = [
+            (props.get("chapter_id"), "Chapter"),
+            (props.get("pov_character_id"), "Character"),
+            (props.get("location_id"), "Location"),
+            (props.get("previous_scene_id"), "Scene"),
+            *((character_id, "Character") for character_id in required_characters),
+        ]
+        for node_id, expected_type in references:
+            if not node_id:
+                continue
+            try:
+                node = self.graph_store.get_node(str(node_id))
+            except GraphStoreError as exc:
+                if exc.category == "not_found":
+                    continue
+                raise
+            if (
+                node.type != expected_type
+                or node.properties.get("project_id") != project_id
+            ):
+                raise ContractError(
+                    "Scene reference does not belong to the requested project."
                 )
-            )
 
     @staticmethod
     def _report_missing_scene_fields(
         props: dict,
         scene_id: str,
+        output_language: OutputLanguage,
         missing_context: list[ContextGap],
     ) -> None:
         for field_name in ["chapter_id", "pov_character_id", "location_id"]:
@@ -252,7 +330,11 @@ class ContextPackBuilder:
                         kind="missing_scene_field",
                         ref=field_name,
                         severity="critical",
-                        message=f"Scene {scene_id} is missing required field {field_name}.",
+                        message=localized(
+                            output_language,
+                            zh=f"场景 {scene_id} 缺少必需字段 {field_name}。",
+                            en=f"Scene {scene_id} is missing required field {field_name}.",
+                        ),
                         source=scene_id,
                     )
                 )
@@ -263,6 +345,7 @@ class ContextPackBuilder:
         required_characters: list[str],
         location_id: str | None,
         scene_context: dict,
+        output_language: OutputLanguage,
         missing_context: list[ContextGap],
     ) -> None:
         found_characters = {node.id for node in scene_context.get("characters", [])}
@@ -273,7 +356,13 @@ class ContextPackBuilder:
                         kind="missing_node",
                         ref=character_id,
                         severity="critical",
-                        message=f"Required character {character_id} was not found in canon.",
+                        message=localized(
+                            output_language,
+                            zh=f"正典中没有找到必需角色 {character_id}。",
+                            en=(
+                                f"Required character {character_id} was not found in canon."
+                            ),
+                        ),
                     )
                 )
         if location_id and scene_context.get("location") is None:
@@ -282,7 +371,11 @@ class ContextPackBuilder:
                     kind="missing_node",
                     ref=location_id,
                     severity="critical",
-                    message=f"Required location {location_id} was not found in canon.",
+                    message=localized(
+                        output_language,
+                        zh=f"正典中没有找到必需地点 {location_id}。",
+                        en=f"Required location {location_id} was not found in canon.",
+                    ),
                 )
             )
 
@@ -292,6 +385,7 @@ class ContextPackBuilder:
         character_id: str,
         scene_id: str,
         timeline_position: str | None,
+        output_language: OutputLanguage,
         missing_context: list[ContextGap],
     ) -> KnowledgeBoundary | None:
         try:
@@ -313,7 +407,14 @@ class ContextPackBuilder:
                         kind="missing_node",
                         ref=character_id,
                         severity="critical",
-                        message=f"Cannot build knowledge boundary for missing character {character_id}.",
+                        message=localized(
+                            output_language,
+                            zh=f"无法为缺失角色 {character_id} 构建知识边界。",
+                            en=(
+                                "Cannot build knowledge boundary for missing character "
+                                f"{character_id}."
+                            ),
+                        ),
                         source=scene_id,
                     )
                 )
@@ -355,25 +456,33 @@ class ContextPackBuilder:
             (
                 "P6",
                 "retrieved_style_samples",
-                "style samples",
+                localized(pack.output_language, zh="风格样本", en="style samples"),
                 lambda current: current.model_copy(update={"retrieved_style_samples": []}),
             ),
             (
                 "P4",
                 "unresolved_foreshadowing",
-                "unresolved foreshadowing",
+                localized(
+                    pack.output_language,
+                    zh="未解决的伏笔",
+                    en="unresolved foreshadowing",
+                ),
                 lambda current: current.model_copy(update={"unresolved_foreshadowing": []}),
             ),
             (
                 "P3",
                 "relevant_world_rules",
-                "world rules",
+                localized(pack.output_language, zh="世界规则", en="world rules"),
                 lambda current: current.model_copy(update={"relevant_world_rules": []}),
             ),
             (
                 "P5",
                 "previous_scene_summary",
-                "previous scene summary",
+                localized(
+                    pack.output_language,
+                    zh="上一场景摘要",
+                    en="previous scene summary",
+                ),
                 lambda current: current.model_copy(update={"previous_scene_summary": None}),
             ),
         ]
@@ -389,13 +498,33 @@ class ContextPackBuilder:
             working = trim(working)
             after = self._estimate_tokens(working)
             dropped_items.append(
-                f"{priority} dropped {label} to satisfy budget; estimated_tokens {before}->{after}"
+                localized(
+                    pack.output_language,
+                    zh=(
+                        f"{priority} 为满足预算已移除{label}；"
+                        f"estimated_tokens {before}->{after}"
+                    ),
+                    en=(
+                        f"{priority} dropped {label} to satisfy budget; "
+                        f"estimated_tokens {before}->{after}"
+                    ),
+                )
             )
 
         final_estimate = self._estimate_tokens(working)
         if final_estimate > target_tokens:
             dropped_items.append(
-                f"Protected P0-P2 context still exceeds target by {final_estimate - target_tokens} tokens"
+                localized(
+                    pack.output_language,
+                    zh=(
+                        "受保护的 P0-P2 上下文仍超出目标 "
+                        f"{final_estimate - target_tokens} tokens"
+                    ),
+                    en=(
+                        "Protected P0-P2 context still exceeds target by "
+                        f"{final_estimate - target_tokens} tokens"
+                    ),
+                )
             )
         return working.model_copy(
             update={

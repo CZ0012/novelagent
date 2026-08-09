@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import Field
 
 from storygraph.models.common import ContractModel, EvidenceItem, ReportStatus, Severity
+from storygraph.models.project import OutputLanguage
 
 
 CheckedDimension = Literal[
@@ -19,6 +20,7 @@ CheckedDimension = Literal[
     "causality",
     "pov",
     "style_constraint",
+    "language_consistency",
 ]
 
 
@@ -32,6 +34,8 @@ IssueType = Literal[
     "causal_gap",
     "pov_leak",
     "style_drift",
+    "wrong_output_language",
+    "mixed_output_language",
     "missing_required_element",
     "unsupported_new_fact",
 ]
@@ -56,6 +60,7 @@ class ContinuityProvenance(ContractModel):
 class ContinuityReport(ContractModel):
     contract_version: Literal["continuity_report_v1"] = "continuity_report_v1"
     project_id: str
+    output_language: OutputLanguage
     scene_id: str
     draft_id: str
     context_pack_id: str
@@ -65,4 +70,3 @@ class ContinuityReport(ContractModel):
     checked_dimensions: list[CheckedDimension] = Field(default_factory=list)
     provenance: ContinuityProvenance
     created_at: str
-

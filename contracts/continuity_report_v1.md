@@ -10,12 +10,14 @@ The report should help revise the smallest necessary part of a draft or plan. It
 
 - Primary producer: QA Agent.
 - Primary consumers: Director, Writing Agent, Canon Agent, author review flow.
-- Related contracts: `context_pack_v1`, `candidate_fact_v1`, `graph_store_v1`.
+- Related contracts: `context_pack_v1`, `candidate_fact_v1`, `graph_store_v1`,
+  `language_policy_v1`.
 
 ## Required Top-Level Fields
 
 - `contract_version`: must be `continuity_report_v1`
 - `project_id`
+- `output_language`: language snapshot of the checked draft or generation run
 - `scene_id`
 - `draft_id`
 - `context_pack_id`
@@ -48,6 +50,7 @@ Common v1 dimensions:
 - `causality`
 - `pov`
 - `style_constraint`
+- `language_consistency`
 
 ## Issue Fields
 
@@ -75,6 +78,8 @@ Common v1 `issue_type` values:
 - `causal_gap`
 - `pov_leak`
 - `style_drift`
+- `wrong_output_language`
+- `mixed_output_language`
 - `missing_required_element`
 - `unsupported_new_fact`
 
@@ -102,6 +107,13 @@ Quotes should be short and review-oriented.
 
 ## Invariants
 
+- `output_language` is frozen from the checked Draft or WorkflowRun rather than
+  the UI locale or current project setting. Generated `summary`, issue
+  `description`, evidence `note`, and `suggestion` fields follow that snapshot;
+  bounded verbatim evidence quotes may retain their source language.
+- Language checks follow `language_policy_v1`. Machine-readable dimensions and
+  issue types remain stable identifiers; selected-source quotations and proper
+  names are not by themselves mixed-language violations.
 - Reports must distinguish canon violations from weak style preferences.
 - Reports must identify the smallest likely fix.
 - Reports must not mutate drafts, candidates, or graph state.
@@ -114,6 +126,7 @@ Quotes should be short and review-oriented.
 {
   "contract_version": "continuity_report_v1",
   "project_id": "project_001",
+  "output_language": "en-US",
   "scene_id": "scene_014",
   "draft_id": "draft_014_v3",
   "context_pack_id": "context_scene_014_v1",

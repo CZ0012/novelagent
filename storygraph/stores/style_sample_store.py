@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from pathlib import Path
@@ -9,6 +10,7 @@ from threading import RLock
 from typing import Protocol
 
 from storygraph.core.errors import ContractError
+from storygraph.models.source import canonicalize_source_language
 from storygraph.models.style import StyleSample, StyleSampleMatch
 
 
@@ -26,6 +28,7 @@ class StyleSampleStore(Protocol):
         self,
         *,
         project_id: str,
+        language: str,
         query: str,
         pov: str | None = None,
         tone: str | None = None,
@@ -51,6 +54,7 @@ class SQLiteStyleSampleStore(StyleSampleStore):
                 CREATE TABLE IF NOT EXISTS style_samples (
                   id TEXT PRIMARY KEY,
                   project_id TEXT NOT NULL,
+                  language TEXT,
                   source_ref TEXT NOT NULL,
                   pov TEXT,
                   tone TEXT,
@@ -60,27 +64,37 @@ class SQLiteStyleSampleStore(StyleSampleStore):
                 )
                 """
             )
+            self._ensure_column("style_samples", "language", "TEXT")
             self._connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_style_samples_project
                 ON style_samples(project_id, created_at, id)
                 """
             )
+            self._connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_style_samples_project_language
+                ON style_samples(project_id, language, created_at, id)
+                """
+            )
             self._connection.commit()
 
     def add(self, sample: StyleSample) -> StyleSample:
+        if sample.language in {None, "und"}:
+            raise ContractError("New StyleSample records require a known language")
         with self._lock:
             if self._exists(sample.id):
                 raise ContractError(f"Duplicate StyleSample id: {sample.id}")
             self._connection.execute(
                 """
                 INSERT INTO style_samples
-                (id, project_id, source_ref, pov, tone, dialogue_style, created_at, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (id, project_id, language, source_ref, pov, tone, dialogue_style, created_at, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sample.id,
                     sample.project_id,
+                    sample.language,
                     sample.source_ref,
                     sample.pov,
                     sample.tone,
@@ -95,17 +109,18 @@ class SQLiteStyleSampleStore(StyleSampleStore):
     def get(self, sample_id: str) -> StyleSample:
         with self._lock:
             row = self._connection.execute(
-                "SELECT payload_json FROM style_samples WHERE id = ?",
+                "SELECT payload_json, language FROM style_samples WHERE id = ?",
                 (sample_id,),
             ).fetchone()
             if row is None:
                 raise ContractError(f"StyleSample not found: {sample_id}")
-            return StyleSample.model_validate_json(row["payload_json"])
+            return self._row_to_sample(row)
 
     def search(
         self,
         *,
         project_id: str,
+        language: str,
         query: str,
         pov: str | None = None,
         tone: str | None = None,
@@ -115,20 +130,23 @@ class SQLiteStyleSampleStore(StyleSampleStore):
     ) -> list[StyleSampleMatch]:
         if limit < 1:
             raise ContractError("style sample search limit must be >= 1")
+        normalized_language = canonicalize_source_language(language)
+        if normalized_language == "und":
+            raise ContractError("Style sample search requires a known language")
         with self._lock:
             rows = self._connection.execute(
                 """
-                SELECT payload_json FROM style_samples
-                WHERE project_id = ?
+                SELECT payload_json, language FROM style_samples
+                WHERE project_id = ? AND language = ?
                 ORDER BY created_at ASC, id ASC
                 """,
-                (project_id,),
+                (project_id, normalized_language),
             ).fetchall()
         query_terms = _tokens(" ".join([query, pov or "", tone or "", dialogue_style or ""]))
         requested_tags = {tag.lower() for tag in tags or []}
         matches: list[StyleSampleMatch] = []
         for row in rows:
-            sample = StyleSample.model_validate_json(row["payload_json"])
+            sample = self._row_to_sample(row)
             score, matched_terms = _score_sample(
                 sample,
                 query_terms=query_terms,
@@ -157,6 +175,22 @@ class SQLiteStyleSampleStore(StyleSampleStore):
             (sample_id,),
         ).fetchone()
         return row is not None
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        columns = {
+            row["name"]
+            for row in self._connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            self._connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    @staticmethod
+    def _row_to_sample(row: sqlite3.Row) -> StyleSample:
+        payload = json.loads(row["payload_json"])
+        if payload.get("language") is None and row["language"] is not None:
+            payload["language"] = row["language"]
+            payload["language_inferred"] = False
+        return StyleSample.model_validate(payload)
 
 
 def _score_sample(
@@ -194,4 +228,3 @@ def _score_sample(
 
 def _tokens(text: str) -> set[str]:
     return {match.group(0).lower() for match in TOKEN_RE.finditer(text)}
-

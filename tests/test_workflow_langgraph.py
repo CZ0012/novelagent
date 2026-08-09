@@ -47,6 +47,9 @@ def test_langgraph_scene_generation_persists_workflow_projection(tmp_path):
 
     stored = workflow_store.get(result.workflow_run.id)
     assert stored.status == "completed"
+    assert stored.output_language == "en-US"
+    assert result.draft.content_language == "en-US"
+    assert result.continuity_report.output_language == "en-US"
     assert stored.current_step == "END"
     assert [step.status for step in stored.steps] == [
         "completed",
@@ -81,6 +84,15 @@ def test_langgraph_review_interrupt_resumes_across_runtime_instances(tmp_path):
     assert result.workflow_run.review_payload.status == "pending"
     assert result.candidates[0].review.status == "pending"
 
+    graph.update_project_language(
+        PROJECT_ID,
+        expected_language="en-US",
+        language="zh-CN",
+        properties={},
+        reviewer="author",
+        rationale="Verify that resume keeps the frozen run language.",
+        source_ref="test:language-change",
+    )
     review_service.reject(result.candidates[0].id, reviewer="author", note="Not canon.")
     second_workflow = _langgraph_workflow(
         graph=graph,
@@ -95,6 +107,7 @@ def test_langgraph_review_interrupt_resumes_across_runtime_instances(tmp_path):
         second_workflow.close()
 
     assert completed.status == "completed"
+    assert completed.output_language == result.workflow_run.output_language == "en-US"
     assert completed.current_step == "END"
     assert completed.review_payload.status == "none"
     assert not any(

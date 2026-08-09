@@ -12,7 +12,13 @@ from storygraph.core.errors import ContractError
 from storygraph.models.context import ContextPack
 from storygraph.models.draft import Draft
 from storygraph.models.proposal import ProposalArtifactType, ProposalBodyFormat, ProposalRef
+from storygraph.models.project import CrossLanguagePolicy, OutputLanguage, localized
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
+from storygraph.services.project_language import (
+    authoritative_language_message,
+    enforce_source_language_policy,
+    validate_generated_output_language,
+)
 
 
 DiscussionMode = str
@@ -24,6 +30,7 @@ class DiscussionSource:
     ref: str
     title: str
     text: str
+    language: str
     note: str | None = None
 
 
@@ -125,6 +132,8 @@ class AgentDiscussionService:
         scene_id: str,
         instruction: str,
         mode: DiscussionMode,
+        output_language: OutputLanguage,
+        cross_language_policy: CrossLanguagePolicy = "project_only",
         selected_text: str | None = None,
         base_text: str | None = None,
         context_pack: ContextPack | None = None,
@@ -138,6 +147,33 @@ class AgentDiscussionService:
             raise ContractError("Agent discussion requires an author instruction.")
         if mode not in {"discuss", "revise_selection", "revise_scene"}:
             raise ContractError("Unknown agent discussion mode.")
+        if context_pack is not None and (
+            context_pack.project_id != project_id
+            or context_pack.scene_id != scene_id
+            or context_pack.output_language != output_language
+        ):
+            raise ContractError(
+                "Context Pack scope or output_language does not match the Agent request."
+            )
+        if latest_draft is not None and (
+            latest_draft.project_id != project_id
+            or latest_draft.scene_id != scene_id
+            or latest_draft.content_language != output_language
+        ):
+            raise ContractError(
+                "Latest Draft scope or content_language does not match the Agent request."
+            )
+        if base_text is not None and (
+            latest_draft is None or base_text != latest_draft.text
+        ):
+            raise ContractError(
+                "Agent revision base_text must exactly match the validated latest Draft."
+            )
+        enforce_source_language_policy(
+            output_language=output_language,
+            source_languages=[source.language for source in local_sources or []],
+            policy=cross_language_policy,
+        )
 
         selected_text = (selected_text or "").strip()
         base_text = base_text if base_text is not None else latest_draft.text if latest_draft else ""
@@ -156,6 +192,8 @@ class AgentDiscussionService:
             scene_id=scene_id,
             instruction=instruction,
             mode=mode,
+            output_language=output_language,
+            cross_language_policy=cross_language_policy,
             selected_text=selected_text,
             base_text=base_text,
             context_pack=context_pack,
@@ -170,6 +208,10 @@ class AgentDiscussionService:
                 max_tokens=4096,
                 messages=[
                     LLMMessage(role="system", content=self.prompt_path.read_text(encoding="utf-8")),
+                    LLMMessage(
+                        role="system",
+                        content=authoritative_language_message(output_language),
+                    ),
                     LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False, indent=2)),
                 ],
             )
@@ -177,6 +219,7 @@ class AgentDiscussionService:
         parsed = _parse_discussion_response(response.content)
         draft = self._draft_from_response(
             mode=mode,
+            output_language=output_language,
             instruction=instruction,
             scene_id=scene_id,
             base_text=base_text,
@@ -186,6 +229,7 @@ class AgentDiscussionService:
         return AgentDiscussionDraft(
             **draft,
             source_refs=self._source_refs(
+                output_language=output_language,
                 latest_draft=latest_draft,
                 context_pack=context_pack,
                 local_sources=local_sources or [],
@@ -204,6 +248,8 @@ class AgentDiscussionService:
         scene_id: str,
         instruction: str,
         mode: DiscussionMode,
+        output_language: OutputLanguage,
+        cross_language_policy: CrossLanguagePolicy,
         selected_text: str,
         base_text: str,
         context_pack: ContextPack | None,
@@ -224,6 +270,7 @@ class AgentDiscussionService:
                     "ref": source.ref,
                     "title": source.title,
                     "note": source.note,
+                    "language": source.language,
                     "text": text,
                 }
             )
@@ -232,6 +279,8 @@ class AgentDiscussionService:
             "project_id": project_id,
             "scene_id": scene_id,
             "mode": mode,
+            "output_language": output_language,
+            "cross_language_policy": cross_language_policy,
             "author_instruction": instruction,
             "selected_text": selected_text,
             "base_text": base_slice,
@@ -264,6 +313,7 @@ class AgentDiscussionService:
         self,
         *,
         mode: DiscussionMode,
+        output_language: OutputLanguage,
         instruction: str,
         scene_id: str,
         base_text: str,
@@ -271,12 +321,26 @@ class AgentDiscussionService:
         parsed: dict[str, Any],
     ) -> dict[str, Any]:
         reply = _required_str(parsed, "reply")
-        proposal_title = _optional_str(parsed.get("proposal_title")) or f"Agent 讨论：{scene_id}"
+        proposal_title = _optional_str(parsed.get("proposal_title")) or localized(
+            output_language,
+            zh=f"Agent 讨论：{scene_id}",
+            en=f"Agent discussion: {scene_id}",
+        )
         proposal_body = _optional_str(parsed.get("proposal_body"))
         replacement_text = _optional_str(parsed.get("replacement_text"))
+        validate_generated_output_language(
+            output_language=output_language,
+            fields={
+                "reply": reply,
+                "proposal_title": proposal_title,
+                "proposal_body": proposal_body,
+                "replacement_text": replacement_text,
+            },
+        )
 
         if mode == "discuss":
             body = proposal_body or _discussion_markdown(
+                output_language=output_language,
                 instruction=instruction,
                 reply=reply,
                 selected_text=selected_text,
@@ -309,11 +373,19 @@ class AgentDiscussionService:
         applied = _replace_unique(base_text, selected_text, replacement_text)
         if applied is None:
             body = _discussion_markdown(
+                output_language=output_language,
                 instruction=instruction,
                 reply=reply,
                 selected_text=selected_text,
                 replacement_text=replacement_text,
-                warning="未能在基础草稿中唯一定位选中段落，因此没有生成完整场景草稿。",
+                warning=localized(
+                    output_language,
+                    zh="未能在基础草稿中唯一定位选中段落，因此没有生成完整场景草稿。",
+                    en=(
+                        "The selected passage was not uniquely located in the base draft, "
+                        "so no complete scene draft was generated."
+                    ),
+                ),
             )
             return {
                 "reply": reply,
@@ -335,6 +407,7 @@ class AgentDiscussionService:
     def _source_refs(
         self,
         *,
+        output_language: OutputLanguage,
         latest_draft: Draft | None,
         context_pack: ContextPack | None,
         local_sources: list[DiscussionSource],
@@ -345,13 +418,27 @@ class AgentDiscussionService:
             ProposalRef(kind="author_instruction", ref="agent_discussion", note=instruction[:200])
         ]
         if latest_draft:
-            refs.append(ProposalRef(kind="draft", ref=latest_draft.id, note="Latest scene draft."))
+            refs.append(
+                ProposalRef(
+                    kind="draft",
+                    ref=latest_draft.id,
+                    note=localized(
+                        output_language,
+                        zh="当前最新场景草稿。",
+                        en="Latest scene draft.",
+                    ),
+                )
+            )
         if context_pack:
             refs.append(
                 ProposalRef(
                     kind="context_pack",
                     ref=f"{context_pack.project_id}:{context_pack.scene_id}",
-                    note="Context Pack used as revision constraints.",
+                    note=localized(
+                        output_language,
+                        zh="作为修订约束使用的上下文包。",
+                        en="Context Pack used as revision constraints.",
+                    ),
                 )
             )
         refs.extend(
@@ -381,6 +468,7 @@ def _parse_discussion_response(content: str) -> dict[str, Any]:
 
 def _discussion_markdown(
     *,
+    output_language: OutputLanguage,
     instruction: str,
     reply: str,
     selected_text: str = "",
@@ -388,20 +476,34 @@ def _discussion_markdown(
     warning: str = "",
 ) -> str:
     sections = [
-        "# Agent 讨论记录",
+        localized(output_language, zh="# Agent 讨论记录", en="# Agent Discussion"),
         "",
-        "## 作者问题",
+        localized(output_language, zh="## 作者问题", en="## Author Request"),
         instruction,
         "",
-        "## Agent 回复",
+        localized(output_language, zh="## Agent 回复", en="## Agent Reply"),
         reply,
     ]
     if selected_text:
-        sections.extend(["", "## 标注片段", selected_text])
+        sections.extend(
+            [
+                "",
+                localized(output_language, zh="## 标注片段", en="## Selected Passage"),
+                selected_text,
+            ]
+        )
     if replacement_text:
-        sections.extend(["", "## 建议替换", replacement_text])
+        sections.extend(
+            [
+                "",
+                localized(output_language, zh="## 建议替换", en="## Suggested Replacement"),
+                replacement_text,
+            ]
+        )
     if warning:
-        sections.extend(["", "## 注意", warning])
+        sections.extend(
+            ["", localized(output_language, zh="## 注意", en="## Note"), warning]
+        )
     return "\n".join(sections).strip()
 
 

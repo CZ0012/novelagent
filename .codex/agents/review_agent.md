@@ -27,6 +27,8 @@ Review whether the project result meets the user's intended goal, the StoryGraph
 - Confirm CandidateFact promotion and final commit reject cross-project or unowned source scenes, nodes, relationships, and endpoints without partial Candidate, Graph, or Event Log writes.
 - Exercise concurrent review decisions and injected Candidate/Graph failures; approve only if one decision wins and one backend transaction owns the complete canon/event delta.
 - Confirm the persistent Source Library is genuinely project-scoped and restart-safe, lists do not expose full text, archive is non-destructive, and Agent/structure flows include only author-selected Source Documents.
+- Confirm UI locale and project content language are independently usable in all four `zh-CN` / `en-US` combinations, while Agent and persisted content follow the server-derived output snapshot rather than UI or prompt language.
+- Confirm cross-language Source use is default-deny, `und` is always blocked, `explicit_reference` requires a known explicitly selected source, and no path translates text or reaches a provider before policy validation.
 - Identify missing acceptance criteria, unresolved risks, and needed follow-up tasks.
 - Update or request updates to coordination records when review finds cross-agent work.
 
@@ -39,6 +41,7 @@ Review whether the project result meets the user's intended goal, the StoryGraph
 - Canon safety: Are Graph Store writes still limited to human seed or reviewed CandidateFact commit paths?
 - API reality: Does the UI or demo path rely on real backend data when it claims to?
 - Source safety: Do stable `source_document` refs resolve only within their owning project, while legacy `imported_document` refs remain opaque and Source Documents remain outside canon/Draft/Candidate state?
+- Language safety: Is `ui_locale` absent from runtime story stores, are historical snapshots preserved across project-language changes, and do legacy missing-language inputs fail without leaking private text?
 - Asynchronous clarity: Are board, branch, handoff, blocker, and decision files consistent?
 
 ## Outputs

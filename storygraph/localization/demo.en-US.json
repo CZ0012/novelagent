@@ -2,7 +2,7 @@
   "project": {
     "title": "Fantasy Demo",
     "genre": "fantasy",
-    "language": "zh-CN",
+    "language": "en-US",
     "target_length": "demo",
     "narrative_pov": "third-person limited"
   },

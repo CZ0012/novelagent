@@ -15,6 +15,8 @@ The implementation follows:
 - `contracts/review_payload_v1.md`
 - `contracts/style_sample_store_v1.md`
 - `contracts/proposal_artifact_v1.md`
+- `contracts/source_document_v1.md`
+- `contracts/language_policy_v1.md`
 
 ## Current MVP Capabilities
 
@@ -33,6 +35,27 @@ The implementation follows:
 - Desktop-target FastAPI entrypoint (`apps.api.desktop_server`) that uses a persistent local workspace and the JSON graph backend.
 - Buildable Tauri desktop package under `apps/desktop`, including npm scripts, a Rust entrypoint, hidden PyInstaller backend sidecar packaging, backend start/stop/status commands, system-tray lifecycle handling, Tauri capabilities, signed-updater configuration, a sci-fi app icon, and NSIS installer configuration.
 - Fantasy demo fixture and regression tests for the canon safety loop.
+
+## UI And Project Language Boundaries
+
+`contracts/language_policy_v1.md` defines the SG-019 target. UI locale and
+project content language are independent:
+
+- local `ui_locale` supports `zh-CN` and `en-US`, defaults to `zh-CN`, and is
+  persisted only as a versioned Web/Tauri client preference;
+- `Project.language` supports `zh-CN` and `en-US` and is authoritative for new
+  project content and Agent output;
+- the backend freezes `output_language` from `Project.language` for Context
+  Packs, generated Drafts/Proposals, and WorkflowRuns;
+- Source Document language is a valid canonical BCP 47 tag or `und`; `und`
+  cannot enter model prompts until the author assigns a known language; and
+- cross-language reference is rejected by default. It requires both an explicit
+  stable source selection and `cross_language_policy = explicit_reference`,
+  never translates the source, and never changes output language.
+
+The workbench remains Chinese-first by default. SG-019 is complete only after
+the `en-US` resource, locale control, backend snapshots, migration paths, and all
+four UI/project language combinations are implemented and verified together.
 
 ## Runtime Status
 
@@ -128,7 +151,7 @@ npm --prefix apps/desktop run build:installer
 The generated installer is:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.9_x64-setup.exe
 ```
 
 Other useful desktop commands:
@@ -148,8 +171,11 @@ Verified local build output from `npm --prefix apps/desktop run build:installer`
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.9_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.9_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.9_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.9_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
 The full installer build regenerates the PyInstaller backend sidecar with `--noconsole`, rebuilds the React/Vite workbench, and runs `tauri build`. The Tauri shell also starts the sidecar with Windows `CREATE_NO_WINDOW`, so the packaged app should not show a stray backend terminal window. Closing the main desktop window hides it to the system tray; use the tray menu item `退出 StoryGraph Agent` to stop the managed backend process tree and exit the app. If port 8000 already has a healthy backend with a different workspace, the desktop settings panel reports the conflict instead of treating that process as the current desktop workspace. The generated installer, `setup.exe.sig` updater signature, backend sidecar, and release executables are local outputs, not checked-in release artifacts.
@@ -158,7 +184,7 @@ The in-app settings panel includes a `Version & Updates` section. In the Tauri d
 
 Version updates must keep `VERSION`, `pyproject.toml`, the FastAPI version in `apps/api/main.py`, both Web/Desktop package manifests and root lockfile entries, `apps/web/src/version.ts`, the desktop package entry in `apps/desktop/src-tauri/Cargo.lock`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, Source Store documents, canon, drafts, project settings, and review state are not synchronized to GitHub.
 
-For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.8_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.9_x64-setup.exe.sig`, plus the no-space GitHub Release copies and `latest.json`. The backend sidecar is built with pinned PyInstaller 6.21.0. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 
@@ -218,14 +244,17 @@ The Source Library is a private reference layer, not a browser-memory tree and n
 - The workbench requests one project-scoped detail only when the author opens or uses that document.
 - Archiving removes a Source Document from normal library views without destructively deleting it or invalidating stable proposal provenance.
 - Import, list, detail, retry, and archive operations do not create Drafts, CandidateFacts, graph nodes, graph relations, or canon events.
+- Source language is independent from project language. `und` remains storable
+  but cannot be sent to an Agent or structure analyzer under any language policy.
+  Authors may correct language metadata without changing source identity or text.
 
-Structure analysis is a separate explicit action. `POST /projects/{project_id}/sources/{source_document_id}/structure-draft` reads one ready Source Document and creates only a non-canon, author-editable `project_structure_draft` Proposal Artifact. It does not create Chapter or Scene nodes until the author accepts the proposal and invokes the existing explicit apply action. New proposal provenance uses stable `source_document` refs; old `imported_document` refs remain legacy opaque records rather than persistent Source Store IDs.
+Structure analysis is a separate explicit action. `POST /projects/{project_id}/sources/{source_document_id}/structure-draft` reads one ready Source Document and creates only a non-canon, author-editable `project_structure_draft` Proposal Artifact. It does not create Chapter or Scene nodes until the author accepts the proposal and invokes the existing explicit apply action. New proposal provenance uses stable `source_document` refs; old `imported_document` refs remain legacy opaque records rather than persistent Source Store IDs. The language policy defaults to `project_only`; an explicit known-language mismatch requires `explicit_reference`, while `und` is always blocked.
 
 The initial Source Library does not support RTF, PDF, OCR, images, or PSD files. Those formats require later importer work and must not be reported as successful text imports today. Import itself never creates another store record. After loading a ready detail, the author may separately and explicitly save that text as a current-scene Draft, a non-canon Proposal, or a Style Sample. This creates the normal target-store boundary; CandidateFacts still require a real Draft Store source and the existing pending human-review path.
 
 ## Agent Discussion And Selected-Text Revision
 
-The Web and desktop-hosted workbench include an `Agent` tab for discussing the current scene with the configured OpenAI-compatible LLM. The author can highlight a draft span, paste a marked passage, ask for a focused discussion, request a selected-span rewrite, or request a full-scene rewrite. Source Library documents are unselected by default. Only stable IDs that the author explicitly checks are sent as `source_document_ids`; the backend resolves those ready documents inside the route project. It never silently sends every library document or cached snippets from a previous request. The current Context Pack, current draft text, and optional web search remain separate explicit controls; disabling current-draft inclusion also prevents the editor text from being sent as `base_text`.
+The Web and desktop-hosted workbench include an `Agent` tab for discussing the current scene with the configured OpenAI-compatible LLM. The author can highlight a draft span, paste a marked passage, ask for a focused discussion, request a selected-span rewrite, or request a full-scene rewrite. Source Library documents are unselected by default. Only stable IDs that the author explicitly checks are sent as `source_document_ids`; the backend resolves those ready documents inside the route project. It never silently sends every library document or cached snippets from a previous request. The current Context Pack, current draft text, and optional web search remain separate explicit controls; disabling current-draft inclusion also prevents the editor text from being sent as `base_text`. Legacy inline sources must carry a valid source language; missing/invalid language is `422`, not a project-language default.
 
 `POST /projects/{project_id}/scenes/{scene_id}/agent-discussion` requires `read_generate` permission and LLM credentials. It creates a non-canon `scene_rebuild` or `scene_draft` proposal in Proposal Store and returns the Agent reply, search snippets, and whether a selected-span replacement was applied to produce a full proposal body. It does not overwrite Draft Store, create CandidateFacts, or write Graph Store canon. Authors still review the proposal in `协作草稿箱`; only an explicit accept/promotion action can turn an accepted `scene_draft` proposal into a Draft Store draft.
 
@@ -269,7 +298,7 @@ $env:STORYGRAPH_LLM_MODEL="deepseek-chat"
 
 In the Web or desktop settings panel, entering an API key only stores the credential reference. It does not enable LLM drafting by itself. The author must choose the OpenAI-compatible LLM writing mode, save settings, have `read_generate` or `full` permission, and run with a valid project, scene, and Context Pack.
 
-The LLM writer reads `storygraph/prompts/scene_writer.md`, asks for JSON output, saves only to Draft Store, and locally rejects drafts that omit `must_include` items or contain literal `must_not_violate` constraints. Desktop sidecar builds package `storygraph/prompts` and `storygraph/localization` as data files. It never receives a Graph Store handle; generated state changes still have to pass through CandidateFact extraction and human review.
+The LLM writer reads `storygraph/prompts/scene_writer.md`, asks for JSON output, saves only to Draft Store, and locally rejects drafts that omit `must_include` items or contain literal `must_not_violate` constraints. Under `language_policy_v1`, its prose, title, summary, self-check, and deterministic fallback output use the server-derived `ContextPack.output_language`; author instructions and source language cannot override that snapshot. Desktop sidecar builds package `storygraph/prompts` and `storygraph/localization` as data files. It never receives a Graph Store handle; generated state changes still have to pass through CandidateFact extraction and human review.
 
 ## Graph Backend
 

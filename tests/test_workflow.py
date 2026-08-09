@@ -29,6 +29,9 @@ def test_scene_generation_workflow_runs_without_canon_pollution():
     result = workflow.run(project_id=PROJECT_ID, scene_id=SCENE_ID)
 
     assert result.context_pack.contract_version == "context_pack_v1"
+    assert result.workflow_run.output_language == "en-US"
+    assert result.draft.content_language == "en-US"
+    assert result.continuity_report.output_language == "en-US"
     assert result.draft.version == 1
     assert result.continuity_report.contract_version == "continuity_report_v1"
     assert result.continuity_report.status == "pass"
@@ -54,6 +57,7 @@ def test_scene_generation_workflow_persists_completed_run_checkpoint():
     stored = workflow_store.get(result.workflow_run.id)
 
     assert stored.contract_version == "workflow_run_v1"
+    assert stored.output_language == "en-US"
     assert stored.status == "completed"
     assert stored.current_step == "END"
     assert stored.review_payload.contract_version == "review_payload_v1"
@@ -93,6 +97,7 @@ def test_scene_generation_workflow_can_write_scene_draft_proposal_without_draft_
     assert result.continuity_report is None
     assert result.candidates == []
     assert result.proposal is not None
+    assert result.proposal.content_language == "en-US"
     assert result.proposal.artifact_type == "scene_draft"
     assert result.proposal.status == "agent_revised"
     assert draft_store.latest_for_scene(PROJECT_ID, SCENE_ID) is None

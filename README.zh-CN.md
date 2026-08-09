@@ -15,6 +15,8 @@ StoryGraph Agent 是一个面向长篇小说创作的本地 MVP。它围绕结�
 - `contracts/review_payload_v1.md`
 - `contracts/style_sample_store_v1.md`
 - `contracts/proposal_artifact_v1.md`
+- `contracts/source_document_v1.md`
+- `contracts/language_policy_v1.md`
 
 ## 当前 MVP 能力
 
@@ -36,11 +38,13 @@ StoryGraph Agent 是一个面向长篇小说创作的本地 MVP。它围绕结�
 
 ## 中文优先与本地化入口
 
-React/Vite 工作台的用户界面文案集中在 `apps/web/src/localization/zh-CN.ts`，并通过 `apps/web/src/localization/index.ts` 导出显示函数和中文资源。界面层只翻译标签、按钮、状态、权限、提案类型、工作流步骤、审阅动作、常见后端消息和技术术语展示；底层 contract 枚举值、API payload、Graph Store / Draft Store / CandidateFact / Proposal Artifact 的协议字段保持原值。
+SG-019 的权威边界见 `contracts/language_policy_v1.md`。`ui_locale` 是本地客户端显示偏好，只支持 `zh-CN` / `en-US`、默认 `zh-CN`，并与 `Project.language` 完全解耦。中文界面可以编辑英文项目，英文界面也可以编辑中文项目；界面切换不得改变 Agent 输出或任何项目数据。
+
+React/Vite 工作台的用户界面文案通过 `apps/web/src/localization/index.ts` 导出。界面层只翻译标签、按钮、状态、权限、提案类型、工作流步骤、审阅动作、常见后端消息和技术术语展示；底层 contract 枚举值、API payload、Graph Store / Draft Store / CandidateFact / Proposal Artifact 的协议字段保持原值。工作台继续默认中文优先；只有 `en-US` 资源、locale 控件、后端语言快照、迁移路径及四组合测试全部通过后，SG-019 才算完成。
 
 内置 demo 数据的本地化资源仍在 `storygraph/localization/demo.zh-CN.json`，用于生成中文 fixture 数据。它和前端 UI localization 是两层资源：demo 数据可以进入后端 fixture，前端本地化文案只属于显示层，不写入 Graph Store、Draft Store、Context Pack 或 CandidateFact。
 
-桌面版复用同一个 React 工作台。Tauri 窗口标题、托盘菜单和更新/后端设置页保持中文优先；`StoryGraph Agent`、`FastAPI`、`Tauri`、`GitHub Release`、`CandidateFact` 等名称在 UI 中作为品牌或协议名保留，并在中文文案中解释其含义。
+桌面版复用同一个 React 工作台。UI locale 保存在版本化 Web/Tauri 客户端偏好中，不放入 `/settings/agent` 或项目数据；需要本地化原生窗口、托盘和 updater 文案时，Tauri 只镜像这项本地偏好。`StoryGraph Agent`、`FastAPI`、`Tauri`、`GitHub Release`、`CandidateFact` 等名称在 UI 中作为品牌或协议名保留。
 
 ## 当前运行状态
 
@@ -136,7 +140,7 @@ npm --prefix apps/desktop run build:installer
 生成的安装器路径是：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.9_x64-setup.exe
 ```
 
 其他常用桌面命令：
@@ -156,8 +160,11 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.9_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.9_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.9_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.9_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
 完整安装器构建会用 `--noconsole` 重新生成 PyInstaller 后端 sidecar，重新构建 React/Vite 工作台，并运行 `tauri build`。Tauri 壳启动 sidecar 时也会使用 Windows `CREATE_NO_WINDOW`，所以打包版不应再出现额外的空后端终端窗口。关闭桌面主窗口会隐藏到系统托盘；使用托盘菜单里的 `退出 StoryGraph Agent` 才会停止受管后端进程树并退出应用。如果 8000 端口上已有健康后端但工作区不同，桌面设置页会提示冲突，不再把该进程当作当前桌面 workspace。这些安装器、`setup.exe.sig` updater 签名、后端 sidecar 和 release exe 是本地输出，不会提交到仓库，也还不是已发布 release。
@@ -166,7 +173,7 @@ apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-set
 
 版本更新必须保持 `VERSION`、`pyproject.toml`、`apps/api/main.py` 的 FastAPI 版本、Web/桌面 package manifest 与根 lockfile 条目、`apps/web/src/version.ts`、`apps/desktop/src-tauri/Cargo.lock` 的桌面 package 条目、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json` 同步。这里的 GitHub 只作为软件发布/更新通道；本地小说 workspace、Source Store 资料、canon、草稿、项目设置和审阅状态不会自动同步到 GitHub。
 
-当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.8_x64-setup.exe.sig`。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
+当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.9_x64-setup.exe.sig`，以及用于 GitHub Release 的无空格副本和 `latest.json`。后端 sidecar 固定使用 PyInstaller 6.21.0 构建。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
 
 仍缺失或未验证：
 
@@ -226,14 +233,15 @@ Source Library 是私有来源资料层，不再只是浏览器内存树，也�
 - 只有作者打开或使用某份资料时，工作台才按需读取同项目详情。
 - 归档只让 Source Document 退出普通资料列表，不会破坏性删除内容，也不会让已有稳定 proposal provenance 失效。
 - 导入、列表、详情、重试和归档都不会创建 Draft、CandidateFact、图节点、图关系或 canon event。
+- Source language 是来源自身的合法 canonical BCP 47 tag，与项目语言无关；`und` 可以存储，但在任何策略下都不能进入 Agent/结构 prompt，必须先由作者明确标注。
 
-结构分析是另一个显式动作。`POST /projects/{project_id}/sources/{source_document_id}/structure-draft` 读取一份 ready Source Document，只创建非 canon、可编辑的 `project_structure_draft` Proposal Artifact。只有作者接受 proposal 并调用现有显式 apply 动作后，系统才会创建 Chapter/Scene 节点。新 proposal 来源统一使用稳定的 `source_document` ref；旧 `imported_document` 只保留为不解析的 legacy provenance，不等于持久 Source Store ID。
+结构分析是另一个显式动作。`POST /projects/{project_id}/sources/{source_document_id}/structure-draft` 读取一份 ready Source Document，只创建非 canon、可编辑的 `project_structure_draft` Proposal Artifact。只有作者接受 proposal 并调用现有显式 apply 动作后，系统才会创建 Chapter/Scene 节点。新 proposal 来源统一使用稳定的 `source_document` ref；旧 `imported_document` 只保留为不解析的 legacy provenance，不等于持久 Source Store ID。默认 `cross_language_policy = project_only`；只有本次显式选择的已知语言来源可通过 `explicit_reference` 跨语言引用，且不翻译、不改变输出语言。
 
 初版 Source Library 不支持 RTF、PDF、OCR、图片或 PSD；这些格式需要后续 importer 工作，目前不得伪装成成功文本导入。导入本身绝不会顺带创建其他 store 记录。作者打开一份 ready 详情后，可以另行显式把正文保存为当前场景 Draft、非 canon Proposal 或 Style Sample；此时走的是对应 store 的正常边界。CandidateFact 仍然必须引用真实 Draft Store 来源，并经过现有 pending 人工审阅路径。
 
 ## Agent 对话与选中文本修订
 
-Web 工作台和桌面宿主工作台提供 `Agent` 标签页，用于和已配置的 OpenAI-compatible LLM 讨论当前场景。作者可以高亮草稿片段、手动粘贴标注段落、提出局部问题，请求 Agent 讨论、改写选中段落，或改写整场草稿。Source Library 资料默认全部不选中；只有作者本次明确勾选的稳定 ID 才会作为 `source_document_ids` 发送，后端再在当前项目内解析 ready 文档。系统不会静默发送整个资料库，也不会沿用上一次请求缓存的资料片段。当前 Context Pack、当前草稿文本和可选联网搜索仍是相互独立的显式开关；关闭当前草稿后，也不得再通过 `base_text` 发送编辑器正文。
+Web 工作台和桌面宿主工作台提供 `Agent` 标签页，用于和已配置的 OpenAI-compatible LLM 讨论当前场景。作者可以高亮草稿片段、手动粘贴标注段落、提出局部问题，请求 Agent 讨论、改写选中段落，或改写整场草稿。Source Library 资料默认全部不选中；只有作者本次明确勾选的稳定 ID 才会作为 `source_document_ids` 发送，后端再在当前项目内解析 ready 文档。系统不会静默发送整个资料库，也不会沿用上一次请求缓存的资料片段。当前 Context Pack、当前草稿文本和可选联网搜索仍是相互独立的显式开关；关闭当前草稿后，也不得再通过 `base_text` 发送编辑器正文。Legacy inline source 和 legacy text structure request 必须提交合法 `source_language`，缺失/非法返回 `422`，不能继承项目语言。
 
 `POST /projects/{project_id}/scenes/{scene_id}/agent-discussion` 需要 `read_generate` 权限和 LLM 凭据。它只会在 Proposal Store 创建非 canon 的 `scene_rebuild` 或 `scene_draft` 协作提案，并返回 Agent 回复、搜索片段和是否成功把选中段落替换为完整提案正文。它不会覆盖 Draft Store，不会创建 CandidateFact，也不会写 Graph Store canon。作者仍需在 `协作草稿箱` 中审阅；只有显式接受并提升后，已接受的 `scene_draft` proposal 才能成为 Draft Store 草稿。
 
@@ -277,7 +285,7 @@ $env:STORYGRAPH_LLM_MODEL="deepseek-chat"
 
 在 Web 或桌面设置面板里，输入 API key 只表示保存了凭据引用，并不等于启用 LLM 写作。作者还需要选择 OpenAI-compatible LLM 写作模式、保存设置、具备 `read_generate` 或 `full` 权限，并且当前项目、场景和 Context Pack 有效。
 
-LLM writer 会读取 `storygraph/prompts/scene_writer.md`，要求模型返回 JSON，只把结果保存到 Draft Store，并在本地拒绝遗漏 `must_include` 或直接包含 `must_not_violate` 字面约束的草稿。桌面 sidecar 构建会把 `storygraph/prompts` 和 `storygraph/localization` 作为数据文件打包。它不会拿到 Graph Store handle；生成内容中的状态变化仍必须经过 CandidateFact 抽取和人工 review。
+LLM writer 会读取 `storygraph/prompts/scene_writer.md`，要求模型返回 JSON，只把结果保存到 Draft Store，并在本地拒绝遗漏 `must_include` 或直接包含 `must_not_violate` 字面约束的草稿。后端在运行开始时从 `Project.language` 派生并冻结 `ContextPack.output_language`；正文、标题、摘要、self-check 与规则式 fallback 都必须使用该语言，作者指令和来源语言不得覆盖。桌面 sidecar 构建会把 `storygraph/prompts` 和 `storygraph/localization` 作为数据文件打包。它不会拿到 Graph Store handle；生成内容中的状态变化仍必须经过 CandidateFact 抽取和人工 review。
 
 ## Graph Backend
 

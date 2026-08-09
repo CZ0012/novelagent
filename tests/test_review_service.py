@@ -43,6 +43,7 @@ def test_candidate_fact_requires_review_before_canon_commit():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             "Lin Jin finds the clue. "
             f"[[fact:fact_type=ItemState;subject={ITEM_ID};relation=LOCATED_AT;"
@@ -81,6 +82,7 @@ def test_duplicate_candidate_id_is_rejected():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             "A clue appears. "
             f"[[fact:id=fact_duplicate;fact_type=ItemState;subject={ITEM_ID};"
@@ -102,6 +104,7 @@ def test_reviewed_candidate_cannot_be_accepted_again():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             "The clue moves. "
             f"[[fact:fact_type=ItemState;subject={ITEM_ID};relation=LOCATED_AT;"
@@ -128,6 +131,7 @@ def test_rejected_candidate_cannot_later_be_accepted():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             "The clue is uncertain. "
             f"[[fact:fact_type=ItemState;subject={ITEM_ID};relation=LOCATED_AT;"
@@ -151,6 +155,7 @@ def test_accept_does_not_persist_review_if_graph_commit_fails(action):
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             "The clue fails to commit. "
             f"[[fact:fact_type=ItemState;subject={ITEM_ID};relation=LOCATED_AT;"
@@ -193,6 +198,7 @@ def test_failed_review_persistence_never_reaches_graph(action):
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             "The clue cannot be reviewed. "
             f"[[fact:fact_type=ItemState;subject={ITEM_ID};relation=HAS_STATE;"
@@ -231,6 +237,7 @@ def test_concurrent_accept_commits_canon_once_and_never_restores_pending():
     draft = SQLiteDraftStore().create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_concurrent_accept;fact_type=ItemState;subject={ITEM_ID};"
             f"relation=LOCATED_AT;object={LOCATION_ID};confidence=0.95]]"
@@ -280,6 +287,7 @@ def test_concurrent_accept_and_reject_have_one_consistent_winner():
     draft = SQLiteDraftStore().create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_concurrent_mixed;fact_type=ItemState;subject={ITEM_ID};"
             f"relation=LOCATED_AT;object={LOCATION_ID};confidence=0.95]]"
@@ -342,6 +350,7 @@ def test_submit_rejects_cross_project_batch_before_any_candidate_write():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_valid_first;fact_type=ItemState;subject={ITEM_ID};"
             "relation=HAS_STATE;value=ready;confidence=0.9]]\n"
@@ -375,6 +384,7 @@ def test_accept_and_edit_accept_recheck_direct_pending_candidate_scope():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_cross_accept;fact_type=ProjectState;subject={other_project_id};"
             "relation=HAS_STATE;value=accept;confidence=0.9]]\n"
@@ -418,6 +428,7 @@ def test_graph_store_commit_rejects_cross_project_candidate_without_review_servi
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_direct_commit;fact_type=ProjectState;subject={other_project_id};"
             "relation=HAS_STATE;value=mutated;confidence=0.9]]"
@@ -471,6 +482,7 @@ def test_update_relation_scope_checks_relationship_owner_and_endpoints():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_update_relation;fact_type=RelationshipState;subject={ITEM_ID};"
             f"relation=KNOWS;object={other_character_id};value=changed;confidence=0.9]]"
@@ -519,6 +531,7 @@ def test_update_relation_scope_requires_candidate_endpoint_semantics():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_wrong_relation_subject;fact_type=RelationshipState;"
             f"subject={ITEM_ID};relation=KNOWS;object={relation.target_id};"
@@ -545,6 +558,7 @@ def test_submit_requires_source_scene_to_be_same_project_scene():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_bad_source_scene;fact_type=ItemState;subject={ITEM_ID};"
             "relation=HAS_STATE;value=ready;confidence=0.9]]"
@@ -571,6 +585,7 @@ def test_create_relation_id_collision_never_accepts_or_mutates_existing_canon():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_relation_collision;fact_type=ItemState;subject={ITEM_ID};"
             f"relation=LOCATED_AT;object={LOCATION_ID};state=replacement;confidence=0.9]]"
@@ -621,6 +636,7 @@ def test_patch_source_ref_must_match_source_draft_for_every_operation():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_source_ref;fact_type=ItemState;subject={ITEM_ID};"
             f"relation=LOCATED_AT;object={LOCATION_ID};confidence=0.9]]"
@@ -683,6 +699,7 @@ def test_update_node_literal_object_is_not_treated_as_graph_node():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_literal_object;fact_type=ItemState;subject={ITEM_ID};"
             "relation=HAS_STATE;object=ordinary literal;operation=update_node;"

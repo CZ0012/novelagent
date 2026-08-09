@@ -226,6 +226,7 @@ def _reviewed_candidate(graph, text):
     draft = SQLiteDraftStore().create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=text,
         summary="Neo4j transaction candidate.",
     )

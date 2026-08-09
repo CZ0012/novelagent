@@ -11,6 +11,7 @@ def test_create_node_candidate_uses_graph_node_type_property():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             "[[fact:fact_type=ItemState;subject=item_new_key;relation=EXISTS;"
             "operation=create_node;node_type=Item;name=New Key;confidence=0.9]]"

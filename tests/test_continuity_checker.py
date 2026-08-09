@@ -11,6 +11,7 @@ def test_knowledge_boundary_violation_is_reported():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language=pack.output_language,
         text=f"bell rings early. half black wax seal. Lin Jin suddenly knows {SECRET_ID}.",
         summary="Bad draft.",
     )
@@ -28,6 +29,7 @@ def test_missing_required_element_is_reported():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language=pack.output_language,
         text="bell rings early, but the physical clue is absent.",
         summary="Incomplete draft.",
     )
@@ -45,6 +47,7 @@ def test_must_not_violate_blocks_report():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language=pack.output_language,
         text="bell rings early. half black wax seal. Lin Jin learns secret_lineage.",
         summary="Blocked draft.",
     )
@@ -65,6 +68,7 @@ def test_banned_style_pattern_is_reported_as_style_drift():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language=pack.output_language,
         text=(
             "bell rings early. half black wax seal. "
             "An omniscient explanation tells the reader everything."
@@ -86,6 +90,7 @@ def test_clean_draft_passes_continuity_check():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language=pack.output_language,
         text="bell rings early. half black wax seal. Lin Jin keeps the truth out of reach.",
         summary="Clean draft.",
     )
@@ -103,6 +108,53 @@ def test_clean_draft_passes_continuity_check():
     }.issubset(set(report.checked_dimensions))
 
 
+def test_continuity_report_uses_frozen_zh_language_for_user_facing_text():
+    graph = build_fantasy_demo_graph()
+    draft_store = SQLiteDraftStore()
+    pack = ContextPackBuilder(graph, draft_store).build(
+        project_id=PROJECT_ID,
+        scene_id=SCENE_ID,
+    ).model_copy(
+        update={
+            "output_language": "zh-CN",
+            "must_include": ["required clue"],
+            "unresolved_foreshadowing": [],
+        }
+    )
+    draft = draft_store.create_draft(
+        project_id=PROJECT_ID,
+        scene_id=SCENE_ID,
+        content_language="zh-CN",
+        text="没有该线索。",
+    )
+
+    report = RuleBasedContinuityChecker().check(context_pack=pack, draft=draft)
+
+    assert report.output_language == "zh-CN"
+    assert report.summary == "发现 1 个问题。"
+    assert report.issues[0].description.startswith("缺少必需的场景元素")
+    assert report.issues[0].evidence[0].note == "该项列于 must_include。"
+    assert "language_consistency" in report.checked_dimensions
+
+
+def test_continuity_report_blocks_mismatched_draft_language_snapshot():
+    graph = build_fantasy_demo_graph()
+    draft_store = SQLiteDraftStore()
+    pack = ContextPackBuilder(graph, draft_store).build(project_id=PROJECT_ID, scene_id=SCENE_ID)
+    draft = draft_store.create_draft(
+        project_id=PROJECT_ID,
+        scene_id=SCENE_ID,
+        content_language="zh-CN",
+        text="bell rings early. half black wax seal.",
+    )
+
+    report = RuleBasedContinuityChecker().check(context_pack=pack, draft=draft)
+
+    assert report.output_language == "en-US"
+    assert report.status == "blocked"
+    assert any(issue.issue_type == "wrong_output_language" for issue in report.issues)
+
+
 def test_phase5_timeline_location_relationship_and_world_rule_conflicts_are_reported():
     graph = build_fantasy_demo_graph()
     draft_store = SQLiteDraftStore()
@@ -110,6 +162,7 @@ def test_phase5_timeline_location_relationship_and_world_rule_conflicts_are_repo
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language=pack.output_language,
         text=(
             "At one day after the capital coup, the scene records location_far_city. "
             "character_linj LOVES character_helianya strength=0.9. "
@@ -151,6 +204,7 @@ def test_phase5_foreshadowing_causality_and_pov_issues_are_reported():
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language=pack.output_language,
         text=(
             "half black wax seal. The rescue works for no reason. "
             "Unbeknownst to character_linj, Helian Ya has resolved foreshadowing_blue_lantern."

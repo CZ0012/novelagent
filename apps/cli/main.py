@@ -18,6 +18,7 @@ from storygraph.core.errors import ContractError
 from storygraph.core.ids import new_id, slug_id
 from storygraph.core.time import utc_now
 from storygraph.demo import ITEM_ID, LOCATION_ID, PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
+from storygraph.models.project import validate_output_language
 from storygraph.models.style import StyleSample
 from storygraph.services import (
     AuthorCanonSeedService,
@@ -29,6 +30,7 @@ from storygraph.services import (
     RuleBasedStateExtractor,
     create_scene_writer,
 )
+from storygraph.services.project_language import resolve_project_output_language
 from storygraph.stores import SQLiteCandidateStore, SQLiteDraftStore, SQLiteStyleSampleStore
 from storygraph.stores.graph_base import GraphStore
 from storygraph.stores.graph_factory import (
@@ -125,6 +127,7 @@ def init_workspace(
     force: bool = False,
     empty: bool = False,
 ) -> dict:
+    output_language = validate_output_language(language)
     settings = StoryGraphSettings(workspace)
     settings.ensure_workspace()
     if settings.graph_path.exists() and not force:
@@ -159,16 +162,16 @@ def init_workspace(
         graph.seed_canon_node(
             node_id=project_id,
             node_type="Project",
-            properties={"title": title, "genre": genre, "language": language},
+            properties={"title": title, "genre": genre, "language": output_language},
             source_ref="cli:init",
             reviewer="author",
             rationale="Author initialized an empty StoryGraph project.",
         )
     else:
-        graph = build_fantasy_demo_graph()
+        graph = build_fantasy_demo_graph(locale=output_language)
         graph.update_node(
             PROJECT_ID,
-            {"title": title, "genre": genre, "language": language},
+            {"title": title, "genre": genre, "language": output_language},
             reviewer="author",
             rationale="Author initialized the local StoryGraph demo workspace.",
             source_ref="cli:init",
@@ -218,6 +221,7 @@ def add_style_sample_command(
         sample = StyleSample(
             id=sample_id or new_id("style_sample"),
             project_id=project_id,
+            language=resolve_project_output_language(runtime.graph, project_id),
             text=sample_text or "",
             source_ref=source_ref,
             pov=pov,
@@ -398,12 +402,20 @@ def write_scene_command(
         raise ContractError("Use either text or text_file, not both")
     runtime = _runtime(workspace)
     try:
+        GraphQueryService(runtime.graph).scene_node(
+            project_id=project_id,
+            scene_id=scene_id,
+        )
         if text_file:
             text = Path(text_file).read_text(encoding="utf-8")
         if text is not None:
             draft = runtime.draft_store.create_draft(
                 project_id=project_id,
                 scene_id=scene_id,
+                content_language=resolve_project_output_language(
+                    runtime.graph,
+                    project_id,
+                ),
                 text=text,
                 summary=summary,
             )
@@ -605,6 +617,7 @@ def run_review_demo(
     draft = draft_store.create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language=resolve_project_output_language(graph, PROJECT_ID),
         text=f"Lin Jin finds the half black wax seal. {marker}",
         summary="CLI review demo draft.",
     )

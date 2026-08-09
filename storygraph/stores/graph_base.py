@@ -5,10 +5,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Iterable
 
-from storygraph.core.errors import GraphStoreError
+from storygraph.core.errors import ContractError, GraphStoreError
 from storygraph.models.candidate import CandidateFact
 from storygraph.models.context import KnowledgeBoundary
 from storygraph.models.graph import EventLogEntry, GraphNode, GraphRelationship
+from storygraph.models.project import DEFAULT_OUTPUT_LANGUAGE, validate_output_language
 
 
 class GraphStore(ABC):
@@ -69,12 +70,23 @@ class GraphStore(ABC):
             self._validate_create_node_scope(candidate)
             properties["project_id"] = project_id
         elif patch.operation == "update_node":
-            self._require_candidate_node_project(
+            subject = self._require_candidate_node_project(
                 candidate,
                 candidate.subject_id,
                 project_id=project_id,
                 role="subject",
             )
+            if subject.type == "Project":
+                self._raise_candidate_scope_error(
+                    candidate,
+                    "fact review cannot update Project configuration",
+                )
+            if subject.type == "Scene":
+                self._validate_scene_patch_references(
+                    candidate,
+                    properties=properties,
+                    project_id=project_id,
+                )
             self._validate_subject_patch_target(candidate)
         elif patch.operation == "create_relation":
             self._validate_create_relation_scope(candidate, project_id=project_id)
@@ -108,10 +120,10 @@ class GraphStore(ABC):
                 "create_node target does not match subject",
             )
         node_type = patch.properties.get("node_type") or patch.properties.get("type")
-        if node_type == "Project":
+        if node_type in {"Project", "Chapter", "Scene"}:
             self._raise_candidate_scope_error(
                 candidate,
-                "fact review cannot create a Project node",
+                f"fact review cannot create a {node_type} node",
             )
         try:
             self.get_node(candidate.subject_id, include_non_canon=True)
@@ -212,6 +224,62 @@ class GraphStore(ABC):
             role="relationship target",
         )
 
+    def _validate_scene_patch_references(
+        self,
+        candidate: CandidateFact,
+        *,
+        properties: dict,
+        project_id: str,
+    ) -> None:
+        singular_refs = {
+            "chapter_id": "Chapter",
+            "pov_character_id": "Character",
+            "location_id": "Location",
+            "previous_scene_id": "Scene",
+        }
+        for field_name, expected_type in singular_refs.items():
+            value = properties.get(field_name)
+            if value is None:
+                continue
+            if not isinstance(value, str) or not value:
+                self._raise_candidate_scope_error(
+                    candidate,
+                    f"Scene {field_name} must be a stable node id",
+                )
+            node = self._require_candidate_node_project(
+                candidate,
+                value,
+                project_id=project_id,
+                role=f"Scene {field_name}",
+            )
+            if node.type != expected_type:
+                self._raise_candidate_scope_error(
+                    candidate,
+                    f"Scene {field_name} must reference a {expected_type}",
+                )
+        required_characters = properties.get("required_characters")
+        if required_characters is None:
+            return
+        if not isinstance(required_characters, list) or not all(
+            isinstance(item, str) and item for item in required_characters
+        ):
+            self._raise_candidate_scope_error(
+                candidate,
+                "Scene required_characters must contain stable Character ids",
+            )
+        for character_id in required_characters:
+            character = self._require_candidate_node_project(
+                candidate,
+                character_id,
+                project_id=project_id,
+                role="Scene required character",
+            )
+            if character.type != "Character":
+                self._raise_candidate_scope_error(
+                    candidate,
+                    "Scene required_characters must reference Character nodes",
+                )
+
     def _validate_subject_patch_target(self, candidate: CandidateFact) -> None:
         target = candidate.proposed_graph_patch.target
         allowed_targets = {candidate.subject_id, self._candidate_subject_target(candidate)}
@@ -301,6 +369,22 @@ class GraphStore(ABC):
             f"CandidateFact {candidate.id} project scope violation: {message}.",
         )
 
+    @staticmethod
+    def _validate_project_language_properties(node_type: str, properties: dict) -> None:
+        if node_type != "Project" or "language" not in properties:
+            return
+        try:
+            validate_output_language(properties["language"])
+        except (ContractError, TypeError) as exc:
+            raise GraphStoreError(
+                "conflict_detected",
+                "Project language must be one of: zh-CN, en-US.",
+            ) from exc
+
+    @staticmethod
+    def _effective_project_language(properties: dict) -> object:
+        return properties.get("language", DEFAULT_OUTPUT_LANGUAGE)
+
     @abstractmethod
     def create_node(self, node: GraphNode, *, allow_canon: bool = False) -> GraphNode:
         raise NotImplementedError
@@ -316,6 +400,22 @@ class GraphStore(ABC):
         source_ref: str,
         event_id: str | None = None,
     ) -> GraphNode:
+        raise NotImplementedError
+
+    @abstractmethod
+    def update_project_language(
+        self,
+        project_id: str,
+        *,
+        expected_language: str,
+        language: str,
+        properties: dict,
+        reviewer: str,
+        rationale: str,
+        source_ref: str,
+    ) -> GraphNode:
+        """Atomically compare and update the authoritative Project language."""
+
         raise NotImplementedError
 
     @abstractmethod

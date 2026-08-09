@@ -338,8 +338,9 @@ def test_api_document_fact_extraction_creates_editable_fact_draft(tmp_path, monk
         json={
             "title": "设定资料.docx",
             "text": "林瑾正在寻找遗失信件。其他段落。",
-            "source_ref": "import:local-doc",
-        },
+                "source_ref": "import:local-doc",
+                "source_language": "zh-CN",
+            },
     )
     payload = response.json()
 

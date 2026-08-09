@@ -52,7 +52,8 @@ Use the existing user-requested branch name if the user asks for one.
 | `codex/sg-014-import-hint-prefill` | SG-015 | Main Agent | current branch | Web-only link-back from newly seeded Character/Location nodes into the current Scene metadata form. | done | project default branch when ready |
 | `codex/sg-014-import-hint-prefill` | SG-016 | Main Agent | current branch | Web-only exact match from imported Scene POV/location hints to existing Character/Location canon nodes. | done | project default branch when ready |
 | `codex/sg-017-agent-discussion-localization` | SG-017 | Main Agent | `codex/sg-014-import-hint-prefill` | Chinese-first localization coverage plus Agent discussion/selected-text revision into non-canon Proposal Store artifacts. | done | `main` / release tag `v0.1.7` |
-| `codex/sg-018-persistent-source-library` | SG-018 | Main Agent | `main` at `643a6bf` | Project-scoped persistent Source Store/API/UI, explicit Agent source selection, atomic fact-draft promotion hardening, and release 0.1.8 validation. | active | `main` / release tag `v0.1.8` when checked and reviewed |
+| `codex/sg-018-persistent-source-library` | SG-018 | Main Agent | `main` at `643a6bf` | Project-scoped persistent Source Store/API/UI, explicit Agent source selection, atomic fact-draft promotion hardening, and release 0.1.8 validation. | done | `main` / release tag `v0.1.8` |
+| `codex/sg-019-language-isolation` | SG-019 | Main Agent | `main` at `5437ad1` | Strict `zh-CN`/`en-US` UI, project output, source-language, Agent prompt, deterministic fallback isolation, and v0.1.9 release hardening. | done | `main` / release tag `v0.1.9` |
 
 ## SG-002 Branch Notes
 

@@ -107,3 +107,42 @@ Browser-memory imports disappear on restart and require clients to resend privat
 Constraints:
 
 Source lists never return `extracted_text`; same-project detail may. Cross-project, failed, or archived Source Documents must not reach Agent/structure prompts. Structure analysis resolves one ready Source Document from the route ID; Agent discussion resolves only the explicitly selected `source_document_ids`. Source import/read/archive cannot create Drafts, proposals, CandidateFacts, graph writes, canon events, style samples, vector records, or workflow checkpoints. A Source Document cannot replace the real Draft Store `source_draft_id` required by `candidate_fact_v1`. Archive is non-destructive and v1 has no delete route.
+
+## ADR-0007: Separate UI Locale, Project Language, And Source Language
+
+Date: 2026-08-09
+
+Status: accepted
+
+Decision:
+
+StoryGraph uses `language_policy_v1`. Local `ui_locale` supports `zh-CN` and
+`en-US`, defaults to `zh-CN`, and remains a versioned Web/Tauri client preference
+outside all story and canon stores. `Project.language` retains its existing field
+name and is the authoritative `zh-CN` or `en-US` language for project content.
+The backend derives and freezes `output_language` from it for each generation or
+workflow operation.
+
+Source Documents carry their own valid canonical BCP 47 language tag or `und`.
+`und` is never eligible for Agent or structure prompts. Cross-language reference
+is rejected by default and requires explicit source selection/input plus
+`cross_language_policy = explicit_reference`; persistent sources use stable IDs,
+while legacy inline/text payloads remain compatibility-only. It never translates
+the source or changes output language. Legacy inline Agent sources and legacy
+text structure requests must supply a valid source language or fail validation
+with `422`.
+
+Rationale:
+
+A localized application must allow Chinese UI with English fiction and English
+UI with Chinese fiction without mixing display labels into persisted project
+data. Immutable output snapshots also keep historical artifacts and resumed
+workflows deterministic when an author changes project language.
+
+Constraints:
+
+Project-language changes are provenance-bearing and future-only. They do not
+translate, rewrite, relabel, or delete existing sources, drafts, proposals, style
+samples, candidates, graph data, or workflow history. Language validation and
+cross-language rejection occur before any private text reaches a model provider,
+and errors or coordination records must not contain private source or draft text.

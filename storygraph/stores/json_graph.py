@@ -8,10 +8,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from storygraph.models.graph import EventLogEntry, GraphNode, GraphRelationship
 from storygraph.stores.event_log import InMemoryEventLog
 from storygraph.stores.memory_graph import InMemoryGraphStore
+
+
+def _serialize_payload(payload: dict) -> str:
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def load_json_graph(path: str | Path) -> InMemoryGraphStore:
@@ -37,17 +42,31 @@ def load_json_graph(path: str | Path) -> InMemoryGraphStore:
 def save_json_graph(graph: InMemoryGraphStore, path: str | Path) -> None:
     graph_path = Path(path)
     graph_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "nodes": [
-            node.model_dump()
-            for node in sorted(graph.nodes.values(), key=lambda item: item.id)
-        ],
-        "relationships": [
-            relation.model_dump()
-            for relation in sorted(graph.relationships.values(), key=lambda item: item.id)
-        ],
-        "event_log": [event.model_dump() for event in graph.event_log.list()],
-    }
-    temp_path = graph_path.with_suffix(f"{graph_path.suffix}.tmp")
-    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(graph_path)
+    with graph.persistence_guard():
+        payload = {
+            "nodes": [
+                node.model_dump()
+                for node in sorted(graph.nodes.values(), key=lambda item: item.id)
+            ],
+            "relationships": [
+                relation.model_dump()
+                for relation in sorted(graph.relationships.values(), key=lambda item: item.id)
+            ],
+            "event_log": [event.model_dump() for event in graph.event_log.list()],
+        }
+        temp_path: Path | None = None
+        try:
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=graph_path.parent,
+                prefix=f".{graph_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temp_file:
+                temp_file.write(_serialize_payload(payload))
+                temp_path = Path(temp_file.name)
+            temp_path.replace(graph_path)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)

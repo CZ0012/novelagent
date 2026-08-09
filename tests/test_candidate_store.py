@@ -13,6 +13,7 @@ def test_sqlite_candidate_store_persists_candidates(tmp_path):
     draft = SQLiteDraftStore().create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             "A fact marker. "
             f"[[fact:id=fact_persisted;fact_type=ItemState;subject={ITEM_ID};"
@@ -36,6 +37,7 @@ def test_sqlite_candidate_store_rejects_duplicate_ids(tmp_path):
     draft = SQLiteDraftStore().create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             "A fact marker. "
             f"[[fact:id=fact_duplicate_sqlite;fact_type=ItemState;subject={ITEM_ID};"
@@ -55,6 +57,7 @@ def test_sqlite_candidate_store_add_many_is_atomic_on_existing_id(tmp_path):
     draft = SQLiteDraftStore().create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_batch_new;fact_type=ItemState;subject={ITEM_ID};"
             f"relation=LOCATED_AT;object={LOCATION_ID};confidence=0.95]]\n"
@@ -81,6 +84,7 @@ def test_sqlite_candidate_review_transition_is_compare_and_set(tmp_path):
     draft = SQLiteDraftStore().create_draft(
         project_id=PROJECT_ID,
         scene_id=SCENE_ID,
+        content_language="en-US",
         text=(
             f"[[fact:id=fact_review_cas;fact_type=ItemState;subject={ITEM_ID};"
             f"relation=LOCATED_AT;object={LOCATION_ID};confidence=0.95]]"

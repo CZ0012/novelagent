@@ -57,3 +57,33 @@ def test_api_graph_query_is_read_only_for_pending_facts():
     assert query.status_code == 200
     assert pending.status_code == 200
     assert pending.json()["facts"] == []
+
+
+def test_api_graph_query_rejects_cross_project_source_without_leaking_properties():
+    client = TestClient(create_app())
+    project_id = client.post(
+        "/projects",
+        json={"title": "Private Graph Project", "language": "zh-CN"},
+    ).json()["project_id"]
+    chapter_id = "chapter_private_graph_scope"
+    chapter = client.post(
+        f"/projects/{project_id}/chapters",
+        json={
+            "id": chapter_id,
+            "title": "Private Chapter",
+            "chapter_index": 1,
+            "summary": "B_PRIVATE_GRAPH_SENTINEL",
+            "reviewer": "author",
+            "rationale": "Synthetic graph-scope regression fixture.",
+            "source_ref": "test:graph_scope",
+        },
+    )
+    assert chapter.status_code == 200
+
+    response = client.get(
+        f"/projects/{PROJECT_ID}/graph/query",
+        params={"source_id": chapter_id},
+    )
+
+    assert response.status_code == 409
+    assert "B_PRIVATE_GRAPH_SENTINEL" not in response.text

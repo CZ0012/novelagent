@@ -54,7 +54,7 @@ StoryGraph Agent 应该帮助作者完成：
 - 文风一致性维护。
 - 草稿事实抽取与人工确认。
 - 多轮修订与版本回滚。
-- 中文优先的本地作者工作台界面。
+- 中文优先、可切换 `zh-CN` / `en-US` 且与项目正文语言解耦的本地作者工作台界面。
 - 清晰区分当前可用的 CLI / API + Web 工作台、源码构建桌面包，以及未来签名发布的桌面安装器。
 - 桌面版应让作者不必理解开发环境即可启动本地后端、打开写作工作台、管理本地项目数据，并通过程序内更新通道获得新版。
 
@@ -201,7 +201,7 @@ MVP 应优先做成一个**本地引擎 + API + CLI + Web UI + 桌面宿主** �
 - `canon_patch`：对 canon 图谱的拟议修改，不能直接写入 Graph Store。
 - `outline_draft`：大纲、章节或场景计划草稿。
 
-Proposal Artifact 使用 `proposal_artifact_v1`，保存 `source_refs`、`target_refs`、`provenance`、`version`、`review_decision` 和 `derived_refs`。作者和 Agent 的每次修改都应产生新版本。
+Proposal Artifact 使用 `proposal_artifact_v1`，保存 `source_refs`、`target_refs`、`provenance`、`version`、`review_decision` 和 `derived_refs`。作者和 Agent 的每次修改都应产生新版本。跨语言内容版本必须原子重写完整 `title` 与 `body`，不能只改 `content_language`；状态、审阅决定与 derived-ref 版本保留前一版本快照。legacy 未知语言提案只有经过完整内容修订才能获得已确认语言，不能通过状态迁移或项目当前语言伪确认。
 
 边界：
 
@@ -229,6 +229,18 @@ Source Store 按 `project_id` 持久保存作者导入的 Source Document，边�
 - Source Store 文档默认不进入任何 Agent 输入；Agent 讨论只解析作者本次显式选择的 `source_document_ids`，结构分析则只解析路由路径中指定的单个 ready Source Document ID。
 - `source_document` 是新持久来源的 ProposalRef kind；旧 `imported_document` 只作为不可解析的 legacy opaque provenance 保留。
 - 归档只使文档退出活动资料库和 Agent 解析，不删除本地内容；初版不提供 delete API。
+
+#### 5.4.1 语言边界
+
+语言权威边界由 `contracts/language_policy_v1.md` 定义：
+
+- `ui_locale` 是 Web/Tauri 客户端本地显示偏好，只支持 `zh-CN` / `en-US`，默认 `zh-CN`；它不属于项目，也不得写入任何 story/canon store。
+- `Project.language` 是项目正文及新 Agent 输出的权威语言，只支持 `zh-CN` / `en-US`。
+- `output_language` 由后端在生成或 workflow 开始时从 `Project.language` 派生并冻结，不是第三个用户偏好，也不能被作者指令或来源资料覆盖。
+- `SourceDocument.language` 是来源自身的 canonical BCP 47 tag；`und` 可保存但在任何跨语言策略下都不得进入模型，必须由作者先明确标注。
+- 默认 `cross_language_policy = project_only`；只有作者在同一请求中显式选择稳定来源 ID 和 `explicit_reference` 才能引用已知、合法、不同语言的资料。该动作不翻译资料，也不改变输出语言。
+- `ContextPack.output_language`、`Draft.content_language`、`ProposalArtifact.content_language`、`WorkflowRun.output_language`、`StyleSample.language` 和 `ContinuityReport.output_language` 保存合同规定的语言快照；项目改语言只影响未来输出，不重写历史数据。
+- legacy Context Pack、Draft、Proposal Artifact、WorkflowRun、StyleSample 或 ContinuityReport 缺少快照时保持可读，projection 必须明确标记推导值；新建 pack、版本、run、sample 或 report 必须持久化快照，不能改写旧文本或旧报告来完成迁移。
 
 ### 5.5 Vector Store：语义检索
 
@@ -279,6 +291,8 @@ MVP 可先使用本地确定性风格样本检索：将作者显式提供的风�
 - target_length
 - narrative_pov
 - style_profile_id
+
+其中 `language` 的语义是 `language_policy_v1` 中的项目内容语言，不是 UI locale 或 Source Document language。新项目只允许 `zh-CN` / `en-US`。
 
 #### Character
 
@@ -698,28 +712,43 @@ Plot Planning Module 生成：
 示例：
 
 ```yaml
+contract_version: context_pack_v1
+project_id: project_001
+output_language: zh-CN
 scene_id: scene_014
-chapter: 第七章
-pov: 林烬
-location: 北境旧钟楼
-timeline: 暴雨夜，王城政变后三日
+chapter_id: chapter_007
+pov_character_id: character_linj
+location_id: location_old_bell_tower
+timeline_position: 暴雨夜，王城政变后三日
 scene_goal: 林烬寻找失踪的密信
 conflict: 钟楼已被银鸦会控制
 required_characters:
-  - 林烬
-  - 赫连鸦
+  - character_linj
+  - character_helianya
 active_relationships:
-  - 林烬 distrusts 赫连鸦
-  - 赫连鸦 secretly protects 林烬
+  - 林烬不信任赫连鸦
+  - 赫连鸦暗中保护林烬
 knowledge_boundaries:
-  林烬:
+  - character_id: character_linj
     knows:
       - 密信可能藏在钟楼
     does_not_know:
       - 赫连鸦是其母亲旧部
-  赫连鸦:
+    falsely_believes: []
+    suspects: []
+    hides: []
+    source_refs:
+      - graph_knowledge_linj_014
+  - character_id: character_helianya
     knows:
       - 密信内容指向王室血统秘密
+    does_not_know: []
+    falsely_believes: []
+    suspects: []
+    hides:
+      - 自己曾效忠林烬的母亲
+    source_refs:
+      - graph_knowledge_helianya_014
 must_include:
   - 钟声异常提前响起
   - 林烬发现半枚黑色火漆
@@ -728,8 +757,28 @@ must_not_violate:
   - 银鸦会不能公开暴露首领身份
 style_constraints:
   pov: 第三人称有限视角
+  tense: null
   tone: 冷峻、克制、带隐约诗性
-  dialogue: 短句，含潜台词
+  sentence_rhythm: 长短句交替
+  diction: 克制、具体
+  dialogue_style: 短句，含潜台词
+  banned_patterns: []
+unresolved_foreshadowing: []
+relevant_world_rules: []
+previous_scene_summary: null
+retrieved_style_samples: []
+missing_context: []
+provenance:
+  graph_query_ids: []
+  draft_refs: []
+  style_sample_refs: []
+  author_instruction_refs: []
+  built_at: "2026-06-17T00:00:00Z"
+budget:
+  target_tokens: 4000
+  estimated_tokens: 600
+  priority_order: [P0, P1, P2, P3, P4, P5, P6, P7]
+  dropped_items: []
 ```
 
 ### 9.5 生成场景草稿
@@ -756,15 +805,39 @@ Continuity Check Module 读取：
 
 ```json
 {
+  "contract_version": "continuity_report_v1",
+  "project_id": "project_001",
+  "output_language": "zh-CN",
+  "scene_id": "scene_014",
+  "draft_id": "draft_014_v3",
+  "context_pack_id": "context_scene_014_v1",
   "status": "needs_revision",
+  "summary": "草稿让视角人物提前得知了受限信息。",
   "issues": [
     {
-      "type": "knowledge_boundary_violation",
+      "id": "issue_001",
+      "issue_type": "knowledge_boundary_violation",
       "severity": "high",
       "description": "林烬在本场景中推断出赫连鸦与其母亲有关，但当前 canon 中他尚无足够线索。",
-      "suggestion": "改为林烬只注意到赫连鸦对旧王徽记反应异常。"
+      "violated_nodes": ["character_linj", "secret_lineage"],
+      "evidence": [
+        {
+          "kind": "draft_text",
+          "ref": "draft_014_v3",
+          "quote": "他终于明白了自己的血脉来源。",
+          "note": "这超出了当前场景允许的人物知识边界。"
+        }
+      ],
+      "suggestion": "改为林烬只注意到赫连鸦对旧王徽记反应异常。",
+      "blocking": false
     }
-  ]
+  ],
+  "checked_dimensions": ["knowledge_boundary", "timeline", "location_state"],
+  "provenance": {
+    "graph_query_ids": [],
+    "context_pack_ref": "context_scene_014_v1"
+  },
+  "created_at": "2026-06-17T00:00:00Z"
 }
 ```
 
@@ -996,6 +1069,7 @@ Neo4j / SQLite / Vector Store 本地连接
 - Timeline View：章节、场景、事件、角色位置和秘密揭示时间线。
 - Style Lab：风格样本、人物口吻样本、文风漂移报告。
 - Settings：模型供应商、API key、本地模型、数据库路径、备份与导出；配置 API key 只表示保存凭据引用，不等于启用 LLM 写作，仍需选择 LLM 写作模式、保存设置、具备权限并拥有有效 context。
+- Language / 语言：UI locale 是本地客户端偏好并独立于项目；项目语言是后端项目设置。中文界面可以编辑英文项目，英文界面也可以编辑中文项目。
 
 桌面进程不直接操作 canon。它通过 FastAPI 调用后端服务，后端服务再经 LangGraph、ReviewService、GraphStore 完成状态变更。
 
@@ -1007,12 +1081,13 @@ Neo4j / SQLite / Vector Store 本地连接
 - 当前可运行入口是 CLI、FastAPI + React/Vite Web 工作台、面向桌面宿主的持久化后端入口 `python -m apps.api.desktop_server`，以及源码构建的 Tauri 桌面应用。
 - `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。持久化或桌面空 workspace 应先显示项目创建；创建项目后，作者可以导入已有小说/资料，由 Agent 生成非正典 `project_structure_draft`，经作者接受并显式应用后才创建正式 Chapter/Scene 节点。需要默认 demo project 时，仍可调用 `POST /demo/seed`，该路径要求 full 权限并记录 reviewer、rationale 和 source_ref。已初始化的内置 demo 可以通过工作台或 `POST /demo/archive` 归档为非当前 canon 项目，以便回到空项目树。
 - 默认 `apps.api.main:app` 开发入口可用于本地 demo；不传入 settings 时它使用 seeded in-memory stores，不应被描述为完整桌面产品或持久化作者项目入口。
-- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe` 及 Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe.sig`。这些产物是本地源码构建输出，不是已发布签名 release channel。当前验证产物不包含 `nsis.zip`。
+- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、使用固定的 PyInstaller 6.21.0 生成 backend sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.9_x64-setup.exe`、Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.9_x64-setup.exe.sig`、用于 GitHub Release 的无空格副本及 `latest.json`。这些产物是本地源码构建输出；只有上传并发布后才构成签名 release channel。当前验证产物不包含 `nsis.zip`。
 - 桌面壳只应复用健康且 `/health.workspace` 与配置工作区一致的本机后端；如果端口被其他工作区的旧后端占用，应在设置页报告冲突，而不是继续加载旧 workspace 的项目树。
 - FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地操作者授权分级，不是身份认证；保存设置页或调用 `/settings/agent` 代表本地操作者显式授权，因此可升降权限并立即生效；CLI 当前不执行同一权限闸门。
 - SG-018 持久资料库路径由 `source_document_v1` 约束：React/Vite 与 Tauri 工作台在本地抽取 `.txt`、`.md`、`.markdown`、`.docx` 文本并把 text + metadata JSON 逐个提交到项目 Source Store；初版后端不保存原文件字节。重启后仍可按稳定 ID 与相对路径读取。导入响应和列表只返回 summary；作者打开同项目详情时才取得 `extracted_text`。v0.1.7 的浏览器内存 `local_sources` / `imported_document` 流程可在迁移期兼容，但不得冒充持久资料，新的 Source Store proposal ref 统一使用 `source_document`。作者可显式让 Agent 从单个来源详情生成 `project_structure_draft`；该草稿只包含章节/场景结构 JSON，且只有作者接受并应用后才创建 Chapter/Scene 节点。Agent 对话只解析本次请求中的 `source_document_ids`、显式选择的当前草稿/Context Pack 和作者开启的联网搜索，并只生成 `scene_rebuild` 或 `scene_draft` proposal，不覆盖当前草稿、不创建候选事实、不写 canon。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
 - Web 工作台的项目树、当前场景选择、Graph 预览和 Timeline 预览必须来自后端项目/章节/场景数据；前端占位数据不得被 Context Pack、Draft Store、CandidateFact 或 Graph Store 当成真实 workspace 来源。
 - 设置页保存 API key、base URL 或模型名称不应自动切换到 LLM writer。LLM 写作只有在 scene writer mode 选择 `llm`、设置已保存、权限至少为 `read_generate`、当前项目/场景有效且 Context Pack 可构建时才应运行。
+- SG-019 语言隔离由 `language_policy_v1` 约束：Web/Tauri 在客户端本地持久化 `ui_locale`，不得放入 `/settings/agent` 或项目数据；后端从 `Project.language` 派生 `output_language`。legacy inline Agent source 与 legacy text structure request 必须提交有效 `source_language`，缺失或非法返回 `422`；`und` 在 `project_only` 和 `explicit_reference` 下都阻断模型使用。
 
 可安装桌面版的目标：
 
@@ -1042,6 +1117,7 @@ Neo4j / SQLite / Vector Store 本地连接
 - 工作台运行 Agent 工作流时清楚呈现 `build_context`、`write_draft`、`check_continuity`、`extract_state`、`human_review`。
 - 接受、编辑接受、拒绝或延后 CandidateFact 后，workflow review pause 状态与 `workflow_run_v1` / `review_payload_v1` 保持一致。
 - 重启软件后，配置为持久化的 workspace 不丢失图谱、Source Documents、协作草稿、草稿、候选事实、工作流运行记录和风格样本；归档 Source Document 仍保留详情但不得进入 Agent 输入。
+- `ui_locale × Project.language` 四种组合均符合 `language_policy_v1` 验收矩阵；来源语言不改变输出语言，默认不跨语言，显式跨语言也不自动翻译。
 
 ---
 
@@ -1147,7 +1223,7 @@ storygraph-agent/
 
 ```python
 from pydantic import BaseModel
-from typing import list, dict, Optional
+from typing import Literal, list, dict, Optional
 
 class KnowledgeBoundary(BaseModel):
     character_id: str
@@ -1166,6 +1242,7 @@ class StyleConstraints(BaseModel):
 
 class ContextPack(BaseModel):
     project_id: str
+    output_language: Literal["zh-CN", "en-US"]
     scene_id: str
     chapter_id: str
     pov_character_id: str
@@ -1223,7 +1300,10 @@ class ContinuityIssue(BaseModel):
 ```http
 POST /projects
 GET /projects/{project_id}
+PATCH /projects/{project_id}
 ```
+
+`Project.language` 只接受 `zh-CN` / `en-US`。创建请求为兼容旧客户端可在省略时默认 `zh-CN`，但响应/UI 必须显式显示解析值，且不得从 `ui_locale` 推导。项目读 projection 返回 `language_status`，兼容推导时另返回 `language_inferred = true`。语言修改必须提供 `expected_language` 与 `language_change_policy = future_outputs_only`，并通过 Graph Store 的专用 `update_project_language` compare-and-set 原子写入；通用 `update_node`、seed 或 CandidateFact patch 不得修改该字段。该修改只影响未来输出；详情与兼容迁移见 `language_policy_v1`。
 
 ### 14.2 Canon Graph
 
@@ -1256,10 +1336,10 @@ POST /projects/{project_id}/scenes/{scene_id}/revise
 POST /projects/{project_id}/scenes/{scene_id}/runs/scene-generation
 POST /projects/{project_id}/scenes/{scene_id}/runs/scene-generation { "output_target": "proposal_workspace" }
 POST /projects/{project_id}/scenes/{scene_id}/extract-document-facts
-POST /projects/{project_id}/scenes/{scene_id}/agent-discussion { "source_document_ids": [] }
+POST /projects/{project_id}/scenes/{scene_id}/agent-discussion { "source_document_ids": [], "cross_language_policy": "project_only" }
 ```
 
-`source_document_ids` 默认为空；后端只解析作者本次显式选择、属于同项目、`ready` 且未归档的 Source Document。任一 ID 无效时整次请求失败，不静默忽略或跨项目读取。
+`source_document_ids` 默认为空；后端只解析作者本次显式选择、属于同项目、`ready` 且未归档的 Source Document。任一 ID 无效时整次请求失败，不静默忽略或跨项目读取。语言默认要求与项目完全一致；显式跨语言必须同时选择 ID 与 `explicit_reference`，`und` 永远阻断，检查失败必须发生在 provider 调用前。
 
 ### 14.5 Source Library
 
@@ -1267,11 +1347,12 @@ POST /projects/{project_id}/scenes/{scene_id}/agent-discussion { "source_documen
 POST /projects/{project_id}/sources
 GET  /projects/{project_id}/sources
 GET  /projects/{project_id}/sources/{source_document_id}
+PATCH /projects/{project_id}/sources/{source_document_id}
 POST /projects/{project_id}/sources/{source_document_id}/archive
 POST /projects/{project_id}/sources/{source_document_id}/structure-draft
 ```
 
-`POST /sources` 接受本地客户端已抽取的 text + import metadata JSON，并要求至少 `read_generate` permission；响应为 `document` summary 加明确的 `created` / `updated` 布尔值。幂等键是项目、规范化相对路径与原文件 `checksum_sha256`：相同 ready 记录为 no-op，失败记录可原 ID 重试，路径相同但 checksum 改变时创建新稳定 ID。列表不返回 `extracted_text`，详情可以返回；archive 同样要求至少 `read_generate` 且不删除内容。单文档 `structure-draft` 与 Agent discussion 都要求 `read_generate`；前者从路径中的 Source Document ID 解析一个 ready 来源，后者只解析请求中显式多选的 `source_document_ids`，两者都只产出非 canon proposal。完整字段和错误/兼容语义见 `contracts/source_document_v1.md`。
+`POST /sources` 接受本地客户端已抽取的 text + import metadata JSON，并要求至少 `read_generate` permission；响应为 `document` summary 加明确的 `created` / `updated` 布尔值。幂等键是项目、规范化相对路径与原文件 `checksum_sha256`：相同 ready 记录为 no-op，失败记录可原 ID 重试，路径相同但 checksum 改变时创建新稳定 ID。列表不返回 `extracted_text`，详情可以返回；archive 同样要求至少 `read_generate` 且不删除内容。Source language 必须是合法 canonical BCP 47 tag 或 `und`，元数据修正 PATCH 只改语言且使用 `expected_updated_at`。单文档 `structure-draft` 与 Agent discussion 都要求 `read_generate`；前者从路径中的 Source Document ID 解析一个 ready 来源，后者只解析请求中显式多选的 `source_document_ids`，两者都只产出非 canon proposal。Legacy inline/structure text 请求缺少有效 `source_language` 必须返回 `422`。完整字段和错误/兼容语义见 `contracts/source_document_v1.md` 与 `contracts/language_policy_v1.md`。
 
 ### 14.6 Proposal Workspace
 
@@ -1321,6 +1402,8 @@ POST /projects/{project_id}/facts/{fact_id}/edit
 - 保持 POV 限制。
 - 保持人物当前知识边界。
 - 使用指定文风。
+- 严格使用 Context Pack 的 `output_language` 输出所有正文、标题、摘要和回退内容；作者指令与来源语言不得覆盖它。
+- 跨语言来源只作为显式参考，不自动翻译，不改变输出语言。
 
 ### 15.2 State Extraction Prompt
 
@@ -1331,6 +1414,8 @@ POST /projects/{project_id}/facts/{fact_id}/edit
 - 区分事实、暗示、推测。
 - 所有输出必须有 source span。
 - 默认状态为 DRAFT_FACT。
+- 在抽取开始前冻结并使用来源 Draft 的 `content_language` 或 WorkflowRun 的 `output_language`；`rationale`、evidence `note` 以及其他由 Agent 生成、面向作者阅读的解释字段必须使用该语言，不能由 UI locale、作者指令或所选来源覆盖。
+- 机器字段、enum、稳定 ID 与 bounded verbatim source quote 保持原始合同语义；短引文可以保留来源语言，但不能据此把其余解释字段切换语言。
 
 ### 15.3 Continuity Check Prompt
 
@@ -1398,7 +1483,7 @@ POST /projects/{project_id}/facts/{fact_id}/edit
 
 验收：
 
-- 输入 scene_id，生成 1000-3000 字中文场景草稿。
+- 输入 scene_id，按 Context Pack 的 `output_language` 生成对应语言的场景草稿；`zh-CN` 可按 1000-3000 字验收，`en-US` 使用合同化长度/token 目标而不是套用“中文字数”。
 
 ### Phase 4：状态抽取与人工确认
 

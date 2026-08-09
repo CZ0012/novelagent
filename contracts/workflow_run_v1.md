@@ -10,7 +10,8 @@ The MVP stores workflow projections locally so scene generation can be inspected
 
 - Primary producer: Director / workflow orchestrator using either the local runtime or optional LangGraph runtime.
 - Primary consumers: API run endpoints, CLI/workbench run panels, Canon Agent review flow, QA Agent.
-- Related contracts: `review_payload_v1`, `context_pack_v1`, `continuity_report_v1`, `candidate_fact_v1`.
+- Related contracts: `review_payload_v1`, `context_pack_v1`,
+  `continuity_report_v1`, `candidate_fact_v1`, `language_policy_v1`.
 
 ## Governed API Routes
 
@@ -26,6 +27,7 @@ The MVP stores workflow projections locally so scene generation can be inspected
 - `id`
 - `workflow_name`
 - `project_id`
+- `output_language`: immutable server-derived `Project.language` snapshot
 - `scene_id`
 - `status`
 - `current_step`
@@ -92,6 +94,9 @@ When a run has `status = awaiting_review`, `review_payload.status` must be `pend
 
 ## Invariants
 
+- `output_language` follows `language_policy_v1`, is frozen before the first
+  workflow step, and remains unchanged across pause, restart, resume, revision,
+  or later project-language changes.
 - Workflow state is operational state, not canon.
 - LangGraph checkpoints, when enabled, are operational checkpoints and must not be treated as graph canon.
 - A workflow run must not directly mutate graph canon.
@@ -109,6 +114,7 @@ When a run has `status = awaiting_review`, `review_payload.status` must be `pend
   "id": "run_001",
   "workflow_name": "scene_generation",
   "project_id": "project_001",
+  "output_language": "en-US",
   "scene_id": "scene_014",
   "status": "awaiting_review",
   "current_step": "human_review",

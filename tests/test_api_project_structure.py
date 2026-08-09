@@ -138,7 +138,8 @@ def test_imported_document_structure_draft_requires_accept_before_project_tree_w
                 "第二章 失落年表\n\n"
                 "众人争夺繁星编年史的残页，城市开始停电。"
             ),
-            "source_ref": "import:local-doc",
+                "source_ref": "import:local-doc",
+                "source_language": "zh-CN",
             "max_chapters": 4,
             "max_scenes_per_chapter": 3,
         },
@@ -190,7 +191,8 @@ def test_project_structure_apply_is_idempotent_for_same_proposal(tmp_path):
         json={
             "title": "重复应用.txt",
             "text": "第一章 起点\n\n林瑾推开门。\n\n第二章 回声\n\n门后的钟声回应她。",
-            "source_ref": "import:repeat-apply",
+                "source_ref": "import:repeat-apply",
+                "source_language": "zh-CN",
             "max_chapters": 4,
             "max_scenes_per_chapter": 2,
         },

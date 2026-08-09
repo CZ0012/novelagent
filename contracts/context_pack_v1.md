@@ -11,12 +11,15 @@ A Context Pack is built from canon graph state, draft metadata, style samples, a
 - Primary producer: Context Agent.
 - Primary consumer: Writing Agent.
 - Secondary consumers: QA Agent and Director.
-- Related contracts: `graph_store_v1`, `style_sample_store_v1`, `continuity_report_v1`.
+- Related contracts: `graph_store_v1`, `style_sample_store_v1`,
+  `continuity_report_v1`, `language_policy_v1`.
 
 ## Required Top-Level Fields
 
 - `contract_version`: must be `context_pack_v1`
 - `project_id`
+- `output_language`: server-derived `zh-CN` or `en-US` snapshot from the owning
+  `Project.language`
 - `scene_id`
 - `chapter_id`
 - `pov_character_id`
@@ -114,6 +117,9 @@ The default priority order is:
 
 ## Invariants
 
+- `output_language` follows `language_policy_v1`. It is frozen when the pack is
+  built, is not a UI locale, and cannot be overridden by an author instruction
+  or selected source.
 - The Context Pack must not contain full chapters.
 - The Context Pack must not promote draft facts to canon.
 - Hard constraints must be explicit in `must_not_violate`.
@@ -129,6 +135,7 @@ The default priority order is:
 {
   "contract_version": "context_pack_v1",
   "project_id": "project_001",
+  "output_language": "en-US",
   "scene_id": "scene_014",
   "chapter_id": "chapter_007",
   "pov_character_id": "character_linj",

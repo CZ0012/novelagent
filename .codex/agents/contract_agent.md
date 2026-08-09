@@ -25,6 +25,7 @@ Own module protocols, versioned contracts, API/schema boundaries, and cross-modu
 - Keep CandidateFact project ownership explicit: sources and existing graph targets/endpoints must match the candidate project, while new graph objects receive that project ID only in the trusted commit path.
 - Keep review compare-and-set, compensation, and same-backend graph/event transaction semantics explicit; do not claim cross-database 2PC where none exists.
 - Own `source_document_v1`, Source Store route/projection semantics, project isolation, checksum/idempotency rules, and the canonical `source_document` ProposalRef kind while preserving legacy opaque `imported_document` refs.
+- Own `language_policy_v1`: keep local `ui_locale`, authoritative `Project.language`, server-derived `output_language`, Source BCP 47 metadata, cross-language policy, persisted snapshots, and compatibility migration explicit and non-conflicting.
 - Record durable contract decisions in `.codex/coordination/decisions.md`.
 
 ## Change Protocol
@@ -50,5 +51,6 @@ Own module protocols, versioned contracts, API/schema boundaries, and cross-modu
 - Do not use coordination Markdown as a runtime contract.
 - Do not encode UI fixture behavior into contracts unless it is an explicit product requirement.
 - Do not let Source Document IDs or extracted text become CandidateFact primary evidence; `candidate_fact_v1` still requires a real Draft Store source.
+- Do not permit `und`, missing legacy source language, author instructions, or selected source metadata to override or bypass project output-language resolution. Legacy inline/structure requests without a valid source language are validation failures.
 - Do not weaken canon safety to simplify API flow.
 - Do not describe GitHub Release/update metadata as story workspace synchronization.

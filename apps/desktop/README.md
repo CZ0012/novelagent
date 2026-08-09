@@ -10,9 +10,9 @@ It can produce a local Windows executable, updater artifacts, and NSIS installer
 
 ## 中文优先与本地化入口
 
-桌面包复用 `apps/web` 构建出的同一个 React 工作台。用户可见 UI 文案的主入口是 `apps/web/src/localization/zh-CN.ts` 和 `apps/web/src/localization/index.ts`；桌面层只保留少量 Tauri 原生可见文案，例如窗口标题、系统托盘菜单和托盘提示。当前窗口标题为 `StoryGraph 写作台`，托盘菜单使用 `显示主界面` / `退出 StoryGraph 写作台`。
+桌面包复用 `apps/web` 构建出的同一个 React 工作台。SG-019 语言边界由 `contracts/language_policy_v1.md` 定义：`ui_locale` 只支持 `zh-CN` / `en-US`、默认 `zh-CN`，以版本化本地 Web/Tauri 偏好持久化；`Project.language` 则是后端项目正文与 Agent 输出语言。两者独立，不能互相覆盖。
 
-本地化文案属于显示层。它不得写入 Graph Store、Draft Store、Context Pack、CandidateFact、Proposal Artifact 或 Event Log；桌面层也不得通过本地化标签绕过 ReviewService。`StoryGraph Agent`、`FastAPI`、`Tauri`、`GitHub Release` 和 contract 名称可作为品牌或协议名保留，但面向作者的说明应中文优先。
+本地化文案属于显示层。它不得写入 Graph Store、Source Store、Draft Store、Context Pack、CandidateFact、Proposal Artifact、Workflow Store 或 Event Log，也不放入 `/settings/agent`。原生窗口、托盘与 updater 文案可以镜像本地 UI locale，但不得改变项目语言。桌面 UI 默认中文优先；英文资源、切换控件和四组合验证必须与后端语言快照一起通过，才能宣告 SG-019 完成。
 
 Use the project through one of these surfaces:
 
@@ -47,6 +47,8 @@ The desktop commands are intentionally narrow: settings load/save, backend statu
 Inside the hosted workbench, the project tree comes from the backend `/projects` response. A fresh persistent desktop workspace should show project creation and explicit demo initialization options; frontend placeholders must not be treated as a real workspace. If the bundled demo has already been initialized, the workbench can archive that built-in demo so the project tree returns to an empty author workspace.
 
 Local document import uses the same project-scoped FastAPI Source Store in browser and Tauri runtimes. The local client extracts supported `.txt`, `.md`, `.markdown`, and `.docx` content and submits each file separately with its metadata. Every Source Document has a stable ID and persists under the desktop workspace across backend/app restarts. Import results remain visible per file, summary lists omit full `extracted_text`, detail is loaded only on demand, and archive is non-destructive. Import/read/archive changes Source Store only; it does not create Drafts, CandidateFacts, graph nodes, graph relations, or canon events.
+
+Source language is independent BCP 47 metadata. `und` is never eligible for Agent or structure prompts. Language mismatches are rejected by default; `explicit_reference` requires a known language plus an explicit stable-source selection, does not translate the source, and does not change the server-derived project output language. Legacy inline/structure text requests without valid source language fail with `422`.
 
 RTF, PDF, OCR, images, and PSD are not supported by the initial Source Store. They are later importer work and must be shown as skipped/failed rather than silently treated as successful text imports. A ready Source Document may be analyzed through the source-backed structure route, but that action creates only a non-canon `project_structure_draft`; Chapter/Scene creation still requires explicit author acceptance and apply.
 
@@ -112,16 +114,16 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.8_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.8_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.9_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.9_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.9_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.9_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
 If `build:with-web` fails before Tauri starts, fix the `apps/web` build first. The desktop package owns Tauri packaging and backend process orchestration; the React/Vite workbench remains owned by `apps/web`.
 
-The backend sidecar is built with PyInstaller from `apps.api.desktop_server` using `--noconsole`, the app icon, and explicit data-file inclusion for `storygraph/prompts` plus `storygraph/localization`. The Rust shell also starts the backend process with Windows `CREATE_NO_WINDOW`. The generated sidecar and PyInstaller work directory are ignored by git.
+The backend sidecar is built with pinned PyInstaller 6.21.0 from `apps.api.desktop_server` using `--noconsole`, the app icon, and explicit data-file inclusion for `storygraph/prompts` plus `storygraph/localization`. The Rust shell also starts the backend process with Windows `CREATE_NO_WINDOW`. The generated sidecar and PyInstaller work directory are ignored by git.
 
 ## Version And Updates
 
@@ -136,7 +138,7 @@ The repository version source is `VERSION`. It must stay synchronized with:
 - the `storygraph-agent-desktop` entry in `apps/desktop/src-tauri/Cargo.lock`
 - `apps/desktop/src-tauri/tauri.conf.json`
 
-The settings panel includes a Chinese-localized `Version & Updates` card. In the Tauri runtime, it uses `@tauri-apps/plugin-updater` and `tauri-plugin-updater` to check the configured signed endpoint:
+The settings panel includes a zh-CN/en-US localized `Version & Updates` card. In the Tauri runtime, it uses `@tauri-apps/plugin-updater` and `tauri-plugin-updater` to check the configured signed endpoint:
 
 ```text
 https://github.com/CZ0012/novelagent/releases/latest/download/latest.json
@@ -186,6 +188,7 @@ Agent settings persist with the backend workspace. Saving the permission level i
 - Agent discussion and selected-text rewrite output may become Proposal Store artifacts only; accepting and promoting an accepted proposal is still the explicit backend path before Draft Store changes.
 - The Agent workflow run button follows `build_context`, `write_draft`, `check_continuity`, `extract_state`, and `human_review`; the review pause is not itself a canon commit.
 - The desktop layer may orchestrate processes, settings, health checks, logs, workspace selection, and windows.
+- UI locale remains a local client preference and never becomes project/runtime story data. The four `ui_locale × Project.language` combinations must preserve independent UI and Agent-output behavior.
 - The desktop layer may orchestrate signed updater checks and installation, but updater metadata must not be treated as story data.
 - The desktop layer must not bypass `ReviewService`, `GraphStore`, or the versioned contracts under `contracts/`.
 

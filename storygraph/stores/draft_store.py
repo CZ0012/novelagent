@@ -9,6 +9,7 @@ from pathlib import Path
 from storygraph.core.ids import new_id
 from storygraph.core.time import utc_now
 from storygraph.models.draft import Draft
+from storygraph.models.project import OutputLanguage
 
 
 class SQLiteDraftStore:
@@ -27,6 +28,7 @@ class SQLiteDraftStore:
                   id TEXT PRIMARY KEY,
                   project_id TEXT NOT NULL,
                   scene_id TEXT NOT NULL,
+                  content_language TEXT,
                   version INTEGER NOT NULL,
                   text TEXT NOT NULL,
                   summary TEXT,
@@ -36,6 +38,7 @@ class SQLiteDraftStore:
                 )
                 """
             )
+            self._ensure_column("drafts", "content_language", "TEXT")
             self._connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_drafts_scene ON drafts(project_id, scene_id, version)"
             )
@@ -46,6 +49,7 @@ class SQLiteDraftStore:
         *,
         project_id: str,
         scene_id: str,
+        content_language: OutputLanguage,
         text: str,
         summary: str | None = None,
         draft_id: str | None = None,
@@ -57,6 +61,7 @@ class SQLiteDraftStore:
                 id=draft_id or new_id("draft"),
                 project_id=project_id,
                 scene_id=scene_id,
+                content_language=content_language,
                 version=version,
                 text=text,
                 summary=summary,
@@ -67,13 +72,14 @@ class SQLiteDraftStore:
             self._connection.execute(
                 """
                 INSERT INTO drafts
-                (id, project_id, scene_id, version, text, summary, discarded, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, project_id, scene_id, content_language, version, text, summary, discarded, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     draft.id,
                     draft.project_id,
                     draft.scene_id,
+                    draft.content_language,
                     draft.version,
                     draft.text,
                     draft.summary,
@@ -149,12 +155,21 @@ class SQLiteDraftStore:
         ).fetchone()
         return int(row["max_version"] or 0) + 1
 
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        columns = {
+            row["name"]
+            for row in self._connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            self._connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
     @staticmethod
     def _row_to_draft(row: sqlite3.Row) -> Draft:
         return Draft(
             id=row["id"],
             project_id=row["project_id"],
             scene_id=row["scene_id"],
+            content_language=row["content_language"],
             version=row["version"],
             text=row["text"],
             summary=row["summary"],

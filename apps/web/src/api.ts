@@ -9,6 +9,7 @@ export type ContextGap = {
 export type ContextPack = {
   contract_version: "context_pack_v1";
   project_id: string;
+  output_language: OutputLanguage;
   scene_id: string;
   chapter_id: string;
   pov_character_id: string;
@@ -55,6 +56,8 @@ export type Draft = {
   project_id: string;
   scene_id: string;
   version: number;
+  content_language?: OutputLanguage | null;
+  language_inferred?: boolean;
   text: string;
   summary?: string | null;
   discarded: boolean;
@@ -68,6 +71,9 @@ export type SourceMediaType =
   | "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export type SourceExtractionStatus = "ready" | "failed" | "archived";
+export type OutputLanguage = "zh-CN" | "en-US";
+export type SourceLanguage = OutputLanguage | "und";
+export type CrossLanguagePolicy = "project_only" | "explicit_reference";
 
 export type SourceImportProvenance = {
   imported_by: string;
@@ -83,7 +89,7 @@ export type SourceDocumentSummary = {
   title: string;
   relative_path: string;
   media_type: SourceMediaType;
-  language: string;
+  language: SourceLanguage;
   byte_size: number;
   checksum_sha256: string;
   extraction_status: SourceExtractionStatus;
@@ -103,7 +109,7 @@ export type SourceDocumentImportRequest = {
   title: string;
   relative_path: string;
   media_type: SourceMediaType;
-  language: string;
+  language: SourceLanguage;
   byte_size: number;
   checksum_sha256: string;
   extraction_status: "ready" | "failed";
@@ -117,6 +123,11 @@ export type SourceDocumentImportResult = {
   document: SourceDocumentSummary;
   created: boolean;
   updated: boolean;
+};
+
+export type SourceDocumentUpdateRequest = {
+  language: SourceLanguage;
+  expected_updated_at: string;
 };
 
 export type ProposalArtifactType =
@@ -156,6 +167,8 @@ export type ProposalArtifact = {
   project_id: string;
   artifact_type: ProposalArtifactType;
   status: ProposalStatus;
+  content_language?: OutputLanguage | null;
+  language_inferred?: boolean;
   title: string;
   body: string;
   body_format: "plain_text" | "markdown" | "structured_json";
@@ -229,6 +242,7 @@ export type AgentDiscussionSource = {
   ref: string;
   title: string;
   text: string;
+  language: SourceLanguage;
   note?: string | null;
 };
 
@@ -243,6 +257,7 @@ export type AgentDiscussionRequest = {
   source_document_ids: string[];
   allow_web_search: boolean;
   web_search_query?: string | null;
+  cross_language_policy: CrossLanguagePolicy;
 };
 
 export type AgentDiscussionResult = {
@@ -304,6 +319,8 @@ export type ProjectOutline = {
   title: string;
   genre?: string | null;
   language?: string | null;
+  language_inferred?: boolean;
+  language_status?: "confirmed" | "inferred" | "needs_review";
   status: string;
   properties: Record<string, unknown>;
   chapters: ChapterOutline[];
@@ -339,6 +356,8 @@ export type WorkflowRun = {
   contract_version: "workflow_run_v1";
   workflow_name: string;
   project_id: string;
+  output_language?: OutputLanguage | null;
+  language_inferred?: boolean;
   scene_id?: string | null;
   status: string;
   current_step?: string | null;
@@ -364,6 +383,7 @@ export type WorkflowStep = {
 
 export type ContinuityReport = {
   contract_version: "continuity_report_v1";
+  output_language?: OutputLanguage | null;
   status: string;
   summary: string;
   issues: Array<{
@@ -375,6 +395,16 @@ export type ContinuityReport = {
     blocking: boolean;
   }>;
   checked_dimensions: string[];
+};
+
+export type StyleSample = {
+  id: string;
+  project_id: string;
+  language?: OutputLanguage | null;
+  language_inferred?: boolean;
+  text: string;
+  summary?: string | null;
+  created_at: string;
 };
 
 export type CandidateFact = {
@@ -511,6 +541,18 @@ export async function apiPatch<T>(
   return parseResponse<T>(response);
 }
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly technicalDetails: string;
+
+  constructor(status: number, technicalDetails: string) {
+    super("API request failed");
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.technicalDetails = technicalDetails;
+  }
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   let payload: any = {};
@@ -518,13 +560,16 @@ async function parseResponse<T>(response: Response): Promise<T> {
     payload = text ? JSON.parse(text) : {};
   } catch {
     if (!response.ok) {
-      throw new Error(text || response.statusText);
+      throw new ApiRequestError(response.status, text || response.statusText);
     }
-    throw new Error("后端返回了无法解析的 JSON。");
+    throw new ApiRequestError(response.status, "Backend returned invalid JSON.");
   }
   if (!response.ok) {
     const detail = payload?.detail?.message ?? payload?.detail ?? response.statusText;
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    throw new ApiRequestError(
+      response.status,
+      typeof detail === "string" ? detail : JSON.stringify(detail)
+    );
   }
   return payload as T;
 }

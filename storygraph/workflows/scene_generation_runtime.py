@@ -12,16 +12,19 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Literal, Protocol, TypedDict
 
+from storygraph.core.errors import ContractError
 from storygraph.core.ids import new_id
 from storygraph.core.time import utc_now
 from storygraph.models.candidate import CandidateFact
 from storygraph.models.context import ContextPack
 from storygraph.models.continuity import ContinuityReport
 from storygraph.models.draft import Draft
+from storygraph.models.project import OutputLanguage, localized
 from storygraph.models.proposal import ProposalArtifact, ProposalProvenance, ProposalRef
 from storygraph.models.workflow import ReviewPayload, WorkflowRun, WorkflowStep
 from storygraph.services.context_pack_builder import ContextPackBuilder
 from storygraph.services.continuity_checker import RuleBasedContinuityChecker
+from storygraph.services.project_language import resolve_project_output_language
 from storygraph.services.review_service import ReviewService
 from storygraph.services.scene_writer import RuleBasedSceneWriter
 from storygraph.services.state_extraction import RuleBasedStateExtractor
@@ -86,6 +89,7 @@ class LocalSceneGenerationRuntime:
         run = self._start_run(project_id=project_id, scene_id=scene_id)
         try:
             context_pack = self.context_builder.build(project_id=project_id, scene_id=scene_id)
+            self._require_context_language(run=run, context_pack=context_pack)
         except Exception as exc:
             self._fail_run(run, current_step="build_context", exc=exc)
             raise
@@ -116,6 +120,7 @@ class LocalSceneGenerationRuntime:
             )
         try:
             draft = self.writer.write_and_save(context_pack)
+            self._require_draft_language(run=run, draft=draft)
         except Exception as exc:
             self._fail_run(run, current_step="write_draft", exc=exc)
             raise
@@ -208,16 +213,28 @@ class LocalSceneGenerationRuntime:
             status="completed",
             current_step="END",
             review_payload=run.review_payload.model_copy(
-                update={"status": "none", "note": "Human review completed."}
+                update={
+                    "status": "none",
+                    "note": self._message(
+                        run.output_language,
+                        zh="人工审核已完成。",
+                        en="Human review completed.",
+                    ),
+                }
             ),
         )
 
     def _start_run(self, *, project_id: str, scene_id: str) -> WorkflowRun:
         now = utc_now()
+        output_language = resolve_project_output_language(
+            self.context_builder.graph_store,
+            project_id,
+        )
         run = WorkflowRun(
             id=new_id("run"),
             workflow_name="scene_generation",
             project_id=project_id,
+            output_language=output_language,
             scene_id=scene_id,
             status="running",
             current_step="build_context",
@@ -241,9 +258,14 @@ class LocalSceneGenerationRuntime:
         proposal = ProposalArtifact(
             id=new_id("proposal"),
             project_id=context_pack.project_id,
+            content_language=context_pack.output_language,
             artifact_type="scene_draft",
             status="agent_revised",
-            title=f"场景草稿提案：{context_pack.scene_id}",
+            title=localized(
+                context_pack.output_language,
+                zh=f"场景草稿提案：{context_pack.scene_id}",
+                en=f"Scene draft proposal: {context_pack.scene_id}",
+            ),
             body=result.text,
             body_format="markdown",
             target_refs=[ProposalRef(kind="scene", ref=context_pack.scene_id)],
@@ -255,7 +277,11 @@ class LocalSceneGenerationRuntime:
                 created_by="agent",
                 created_via="workflow",
                 workflow_run_id=run.id,
-                note="Scene generation wrote to Proposal Workspace instead of Draft Store.",
+                note=localized(
+                    context_pack.output_language,
+                    zh="场景生成结果已写入提案工作区，而非草稿库。",
+                    en="Scene generation wrote to Proposal Workspace instead of Draft Store.",
+                ),
             ),
             version=1,
             created_at=now,
@@ -306,7 +332,11 @@ class LocalSceneGenerationRuntime:
                         update={
                             "status": "skipped",
                             "completed_at": now,
-                            "message": "Skipped because output_target=proposal_workspace.",
+                            "message": self._message(
+                                run.output_language,
+                                zh="因 output_target=proposal_workspace 而跳过。",
+                                en="Skipped because output_target=proposal_workspace.",
+                            ),
                         }
                     )
                 )
@@ -339,7 +369,11 @@ class LocalSceneGenerationRuntime:
                     status="pending",
                     candidate_ids=[candidate.id for candidate in candidates],
                     source_draft_id=draft.id,
-                    note="State extraction produced CandidateFact records awaiting review.",
+                    note=self._message(
+                        run.output_language,
+                        zh="状态提取已生成等待审核的 CandidateFact 记录。",
+                        en="State extraction produced CandidateFact records awaiting review.",
+                    ),
                 ),
             )
         return self._finish_run(run, status="completed", current_step="END")
@@ -380,6 +414,31 @@ class LocalSceneGenerationRuntime:
         if self.workflow_store:
             return self.workflow_store.save(run)
         return run
+
+    @staticmethod
+    def _message(
+        output_language: OutputLanguage | None,
+        *,
+        zh: str,
+        en: str,
+    ) -> str:
+        if output_language is None:
+            return en
+        return localized(output_language, zh=zh, en=en)
+
+    @staticmethod
+    def _require_context_language(*, run: WorkflowRun, context_pack: ContextPack) -> None:
+        if run.output_language != context_pack.output_language:
+            raise ContractError(
+                "ContextPack output_language does not match the WorkflowRun snapshot"
+            )
+
+    @staticmethod
+    def _require_draft_language(*, run: WorkflowRun, draft: Draft) -> None:
+        if run.output_language != draft.content_language:
+            raise ContractError(
+                "Draft content_language does not match the WorkflowRun snapshot"
+            )
 
     def close(self) -> None:
         return None
@@ -547,6 +606,7 @@ class LangGraphSceneGenerationRuntime(LocalSceneGenerationRuntime):
                 project_id=state["project_id"],
                 scene_id=state["scene_id"],
             )
+            self._require_context_language(run=run, context_pack=context_pack)
         except Exception as exc:
             self._fail_run(run, current_step="build_context", exc=exc)
             raise
@@ -562,6 +622,7 @@ class LangGraphSceneGenerationRuntime(LocalSceneGenerationRuntime):
         context_pack = ContextPack.model_validate(state["context_pack"])
         try:
             draft = self.writer.write_and_save(context_pack)
+            self._require_draft_language(run=run, draft=draft)
         except Exception as exc:
             self._fail_run(run, current_step="write_draft", exc=exc)
             raise
@@ -646,7 +707,14 @@ class LangGraphSceneGenerationRuntime(LocalSceneGenerationRuntime):
             status="completed",
             current_step="END",
             review_payload=run.review_payload.model_copy(
-                update={"status": "none", "note": "Human review completed."}
+                update={
+                    "status": "none",
+                    "note": self._message(
+                        run.output_language,
+                        zh="人工审核已完成。",
+                        en="Human review completed.",
+                    ),
+                }
             ),
         )
         return {"run": completed.model_dump()}

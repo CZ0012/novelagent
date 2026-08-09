@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import Field
 
 from storygraph.models.common import ContractModel, Severity
+from storygraph.models.project import OutputLanguage
 
 
 DEFAULT_PRIORITY_ORDER = ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7"]
@@ -60,6 +61,7 @@ class ContextGap(ContractModel):
 class ContextPack(ContractModel):
     contract_version: Literal["context_pack_v1"] = "context_pack_v1"
     project_id: str
+    output_language: OutputLanguage
     scene_id: str
     chapter_id: str
     pov_character_id: str

@@ -32,14 +32,17 @@ def test_cli_workspace_scene_commands_round_trip(tmp_path):
     draft = write_scene_command(workspace=workspace)
     assert draft["project_id"] == PROJECT_ID
     assert draft["scene_id"] == SCENE_ID
+    assert draft["content_language"] == "zh-CN"
     assert draft["version"] == 1
 
     report = check_continuity_command(workspace=workspace)
     assert report["contract_version"] == "continuity_report_v1"
+    assert report["output_language"] == "zh-CN"
     assert report["status"] == "pass"
 
     run = run_scene_command(workspace=workspace)
     assert run["workflow_run"]["contract_version"] == "workflow_run_v1"
+    assert run["workflow_run"]["output_language"] == "zh-CN"
     assert run["workflow_run"]["status"] == "completed"
 
 
@@ -76,18 +79,19 @@ def test_cli_style_sample_ingest_feeds_context_pack(tmp_path):
         workspace=workspace,
         project_id=PROJECT_ID,
         sample_id="style_cli_tower",
-        text="Cold restrained tower prose with short lines and subtext.",
+        text="钟塔段落保持冷峻克制，以短句和潜台词推进。",
         source_ref="author_style:chapter_001",
-        pov="third-person limited",
-        tone="cold and restrained",
-        dialogue_style="short lines with subtext",
-        tags="tower,clue",
+        pov="第三人称有限视角",
+        tone="冷峻克制",
+        dialogue_style="短句与潜台词",
+        tags="钟塔,线索",
     )
     context = build_context_command(workspace=workspace)
 
     assert sample["contract_version"] == "style_sample_v1"
+    assert sample["language"] == "zh-CN"
     assert context["retrieved_style_samples"] == [
-        "style_cli_tower: Cold restrained tower prose with short lines and subtext."
+        "style_cli_tower: 钟塔段落保持冷峻克制，以短句和潜台词推进。"
     ]
     assert context["provenance"]["style_sample_refs"] == ["style_cli_tower"]
 

@@ -11,6 +11,7 @@ $distDir = Join-Path $runDir "dist"
 $exePath = Join-Path $distDir "storygraph-backend.exe"
 $targetPath = Join-Path $sidecarDir "storygraph-backend-x86_64-pc-windows-msvc.exe"
 $iconPath = Join-Path $desktopDir "src-tauri\icons\icon.ico"
+$pyInstallerVersion = "6.21.0"
 
 New-Item -ItemType Directory -Force -Path $sidecarDir | Out-Null
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
@@ -37,11 +38,11 @@ if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
 '@ | Set-Content -LiteralPath $entryPath -Encoding utf8
 
-python -m PyInstaller --version | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    python -m pip install pyinstaller
+$installedPyInstallerVersion = python -m PyInstaller --version 2>$null
+if ($LASTEXITCODE -ne 0 -or $installedPyInstallerVersion.Trim() -ne $pyInstallerVersion) {
+    python -m pip install "pyinstaller==$pyInstallerVersion"
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to install PyInstaller. Install it manually or adjust the desktop backend sidecar build."
+        throw "Failed to install pinned PyInstaller $pyInstallerVersion. Install it manually or adjust the desktop backend sidecar build."
     }
 }
 

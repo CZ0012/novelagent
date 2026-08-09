@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from threading import RLock
@@ -17,6 +18,7 @@ from storygraph.models.proposal import (
     ProposalRef,
     ProposalReviewDecision,
 )
+from storygraph.models.project import OutputLanguage
 
 
 TERMINAL_PROPOSAL_STATUSES = {"accepted", "rejected"}
@@ -47,6 +49,7 @@ class ProposalStore(Protocol):
         *,
         derived_refs: list[ProposalRef],
         actor: str,
+        content_language: OutputLanguage | None = None,
         note: str | None = None,
         expected_version: int | None = None,
     ) -> ProposalArtifact:
@@ -69,6 +72,7 @@ class SQLiteProposalStore(ProposalStore):
                   id TEXT NOT NULL,
                   version INTEGER NOT NULL,
                   project_id TEXT NOT NULL,
+                  content_language TEXT,
                   artifact_type TEXT NOT NULL,
                   status TEXT NOT NULL,
                   created_at TEXT NOT NULL,
@@ -78,6 +82,7 @@ class SQLiteProposalStore(ProposalStore):
                 )
                 """
             )
+            self._ensure_column("proposal_artifacts", "content_language", "TEXT")
             self._connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_proposal_artifacts_project
@@ -89,6 +94,8 @@ class SQLiteProposalStore(ProposalStore):
     def create(self, proposal: ProposalArtifact) -> ProposalArtifact:
         if proposal.version != 1:
             raise ContractError("New ProposalArtifact records must start at version 1")
+        if proposal.content_language is None:
+            raise ContractError("New ProposalArtifact records require content_language")
         with self._lock:
             if self._exists(proposal.id):
                 raise ContractError(f"Duplicate ProposalArtifact id: {proposal.id}")
@@ -101,7 +108,7 @@ class SQLiteProposalStore(ProposalStore):
             if version is None:
                 row = self._connection.execute(
                     """
-                    SELECT payload_json FROM proposal_artifacts
+                    SELECT payload_json, content_language FROM proposal_artifacts
                     WHERE id = ?
                     ORDER BY version DESC
                     LIMIT 1
@@ -111,20 +118,20 @@ class SQLiteProposalStore(ProposalStore):
             else:
                 row = self._connection.execute(
                     """
-                    SELECT payload_json FROM proposal_artifacts
+                    SELECT payload_json, content_language FROM proposal_artifacts
                     WHERE id = ? AND version = ?
                     """,
                     (proposal_id, version),
                 ).fetchone()
             if row is None:
                 raise ContractError(f"ProposalArtifact not found: {proposal_id}")
-            return ProposalArtifact.model_validate_json(row["payload_json"])
+            return self._row_to_proposal(row)
 
     def history(self, proposal_id: str) -> list[ProposalArtifact]:
         with self._lock:
             rows = self._connection.execute(
                 """
-                SELECT payload_json FROM proposal_artifacts
+                SELECT payload_json, content_language FROM proposal_artifacts
                 WHERE id = ?
                 ORDER BY version ASC
                 """,
@@ -132,7 +139,7 @@ class SQLiteProposalStore(ProposalStore):
             ).fetchall()
             if not rows:
                 raise ContractError(f"ProposalArtifact not found: {proposal_id}")
-            return [ProposalArtifact.model_validate_json(row["payload_json"]) for row in rows]
+            return [self._row_to_proposal(row) for row in rows]
 
     def list(
         self,
@@ -142,7 +149,7 @@ class SQLiteProposalStore(ProposalStore):
         artifact_type: str | None = None,
     ) -> list[ProposalArtifact]:
         query = """
-            SELECT p.payload_json FROM proposal_artifacts p
+            SELECT p.payload_json, p.content_language FROM proposal_artifacts p
             INNER JOIN (
               SELECT id, MAX(version) AS latest_version
               FROM proposal_artifacts
@@ -166,7 +173,7 @@ class SQLiteProposalStore(ProposalStore):
         query += " ORDER BY p.updated_at DESC, p.id ASC"
         with self._lock:
             rows = self._connection.execute(query, params).fetchall()
-            return [ProposalArtifact.model_validate_json(row["payload_json"]) for row in rows]
+            return [self._row_to_proposal(row) for row in rows]
 
     def revise(
         self,
@@ -174,6 +181,7 @@ class SQLiteProposalStore(ProposalStore):
         *,
         actor: str,
         created_via: ProposalCreatedVia = "manual",
+        content_language: OutputLanguage | None = None,
         title: str | None = None,
         body: str | None = None,
         body_format: ProposalBodyFormat | None = None,
@@ -186,10 +194,18 @@ class SQLiteProposalStore(ProposalStore):
         with self._lock:
             latest = self.get(proposal_id)
             self._ensure_writable(latest, expected_version=expected_version)
+            frozen_language = self._new_revision_language(
+                latest,
+                content_language,
+                title=title,
+                body=body,
+            )
             now = utc_now()
             proposal = ProposalArtifact.model_validate(
                 {
                     **latest.model_dump(),
+                    "content_language": frozen_language,
+                    "language_inferred": False,
                     "title": title if title is not None else latest.title,
                     "body": body if body is not None else latest.body,
                     "body_format": body_format if body_format is not None else latest.body_format,
@@ -217,16 +233,20 @@ class SQLiteProposalStore(ProposalStore):
         proposal_id: str,
         *,
         actor: str,
+        content_language: OutputLanguage | None = None,
         note: str | None = None,
         expected_version: int | None = None,
     ) -> ProposalArtifact:
         with self._lock:
             latest = self.get(proposal_id)
             self._ensure_writable(latest, expected_version=expected_version)
+            frozen_language = self._preserved_language(latest, content_language)
             now = utc_now()
             proposal = ProposalArtifact.model_validate(
                 {
                     **latest.model_dump(),
+                    "content_language": frozen_language,
+                    "language_inferred": False,
                     "provenance": ProposalProvenance(
                         created_by=actor,
                         created_via="manual",
@@ -250,16 +270,20 @@ class SQLiteProposalStore(ProposalStore):
         *,
         decision: Literal["accepted", "rejected"],
         reviewer: str,
+        content_language: OutputLanguage | None = None,
         note: str | None = None,
         expected_version: int | None = None,
     ) -> ProposalArtifact:
         with self._lock:
             latest = self.get(proposal_id)
             self._ensure_writable(latest, expected_version=expected_version)
+            frozen_language = self._preserved_language(latest, content_language)
             now = utc_now()
             proposal = ProposalArtifact.model_validate(
                 {
                     **latest.model_dump(),
+                    "content_language": frozen_language,
+                    "language_inferred": False,
                     "provenance": ProposalProvenance(
                         created_by=reviewer,
                         created_via="manual",
@@ -288,6 +312,7 @@ class SQLiteProposalStore(ProposalStore):
         *,
         derived_ref: ProposalRef,
         actor: str,
+        content_language: OutputLanguage | None = None,
         note: str | None = None,
         expected_version: int | None = None,
     ) -> ProposalArtifact:
@@ -295,6 +320,7 @@ class SQLiteProposalStore(ProposalStore):
             proposal_id,
             derived_refs=[derived_ref],
             actor=actor,
+            content_language=content_language,
             note=note,
             expected_version=expected_version,
         )
@@ -305,6 +331,7 @@ class SQLiteProposalStore(ProposalStore):
         *,
         derived_refs: list[ProposalRef],
         actor: str,
+        content_language: OutputLanguage | None = None,
         note: str | None = None,
         expected_version: int | None = None,
     ) -> ProposalArtifact:
@@ -325,10 +352,13 @@ class SQLiteProposalStore(ProposalStore):
             ]
             if not new_refs:
                 return latest
+            frozen_language = self._preserved_language(latest, content_language)
             now = utc_now()
             proposal = ProposalArtifact.model_validate(
                 {
                     **latest.model_dump(),
+                    "content_language": frozen_language,
+                    "language_inferred": False,
                     "provenance": ProposalProvenance(
                         created_by=actor,
                         created_via="api",
@@ -369,17 +399,76 @@ class SQLiteProposalStore(ProposalStore):
         ).fetchone()
         return row is not None
 
+    @staticmethod
+    def _new_revision_language(
+        latest: ProposalArtifact,
+        requested: OutputLanguage | None,
+        *,
+        title: str | None,
+        body: str | None,
+    ) -> OutputLanguage:
+        if latest.content_language is None:
+            if requested is None or title is None or body is None:
+                raise ContractError(
+                    "A legacy ProposalArtifact requires content_language plus a complete "
+                    "title and body revision before creating a confirmed-language version"
+                )
+            return requested
+        if (
+            requested is not None
+            and requested != latest.content_language
+            and (title is None or body is None)
+        ):
+            raise ContractError(
+                "Changing ProposalArtifact content_language requires a complete title "
+                "and body revision"
+            )
+        return requested or latest.content_language
+
+    @staticmethod
+    def _preserved_language(
+        latest: ProposalArtifact,
+        requested: OutputLanguage | None,
+    ) -> OutputLanguage:
+        if latest.content_language is None:
+            raise ContractError(
+                "A legacy ProposalArtifact requires a complete title and body revision "
+                "before state transitions or derived records"
+            )
+        if requested is not None and requested != latest.content_language:
+            raise ContractError(
+                "ProposalArtifact state-only transitions must preserve content_language"
+            )
+        return latest.content_language
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        columns = {
+            row["name"]
+            for row in self._connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            self._connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    @staticmethod
+    def _row_to_proposal(row: sqlite3.Row) -> ProposalArtifact:
+        payload = json.loads(row["payload_json"])
+        if payload.get("content_language") is None and row["content_language"] is not None:
+            payload["content_language"] = row["content_language"]
+            payload["language_inferred"] = False
+        return ProposalArtifact.model_validate(payload)
+
     def _insert(self, proposal: ProposalArtifact) -> None:
         self._connection.execute(
             """
             INSERT INTO proposal_artifacts
-            (id, version, project_id, artifact_type, status, created_at, updated_at, payload_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (id, version, project_id, content_language, artifact_type, status, created_at, updated_at, payload_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 proposal.id,
                 proposal.version,
                 proposal.project_id,
+                proposal.content_language,
                 proposal.artifact_type,
                 proposal.status,
                 proposal.created_at,

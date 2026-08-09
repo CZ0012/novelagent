@@ -19,16 +19,60 @@ use std::{
     time::Duration,
 };
 use tauri::{
-    menu::MenuBuilder,
+    menu::{Menu, MenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    AppHandle, Manager, Runtime, WindowEvent,
 };
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const MAIN_WINDOW_LABEL: &str = "main";
+const MAIN_TRAY_ID: &str = "storygraph-main-tray";
 const TRAY_MENU_SHOW: &str = "show-main-window";
 const TRAY_MENU_QUIT: &str = "quit-storygraph-agent";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeLocale {
+    ZhCn,
+    EnUs,
+}
+
+impl NativeLocale {
+    fn parse(locale: &str) -> Result<Self, String> {
+        match locale {
+            "zh-CN" => Ok(Self::ZhCn),
+            "en-US" => Ok(Self::EnUs),
+            _ => Err(format!(
+                "不支持的桌面语言“{locale}”；仅支持 zh-CN 或 en-US。"
+            )),
+        }
+    }
+
+    fn labels(self) -> NativeLabels {
+        match self {
+            Self::ZhCn => NativeLabels {
+                window_title: "StoryGraph 写作台",
+                tray_tooltip: "StoryGraph 写作台正在运行",
+                show_menu: "显示主界面",
+                quit_menu: "退出 StoryGraph 写作台",
+            },
+            Self::EnUs => NativeLabels {
+                window_title: "StoryGraph Writing Desk",
+                tray_tooltip: "StoryGraph Writing Desk is running",
+                show_menu: "Show Main Window",
+                quit_menu: "Quit StoryGraph Writing Desk",
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NativeLabels {
+    window_title: &'static str,
+    tray_tooltip: &'static str,
+    show_menu: &'static str,
+    quit_menu: &'static str,
+}
 
 struct BackendProcess {
     child: Mutex<Option<Child>>,
@@ -263,6 +307,12 @@ fn stop_managed_backend(state: &BackendProcess) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn set_native_locale(app: AppHandle, locale: String) -> Result<(), String> {
+    let locale = NativeLocale::parse(&locale)?;
+    apply_native_locale(&app, locale)
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(BackendProcess::default())
@@ -312,6 +362,7 @@ fn main() {
             desktop_paths,
             load_desktop_settings,
             save_desktop_settings,
+            set_native_locale,
             start_backend,
             stop_backend
         ])
@@ -320,15 +371,12 @@ fn main() {
 }
 
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
-    let menu = MenuBuilder::new(app)
-        .text(TRAY_MENU_SHOW, "显示主界面")
-        .separator()
-        .text(TRAY_MENU_QUIT, "退出 StoryGraph 写作台")
-        .build()?;
-    let mut tray = TrayIconBuilder::with_id("storygraph-main-tray")
+    let labels = NativeLocale::ZhCn.labels();
+    let menu = native_tray_menu(app, labels)?;
+    let mut tray = TrayIconBuilder::with_id(MAIN_TRAY_ID)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("StoryGraph 写作台正在运行");
+        .tooltip(labels.tray_tooltip);
 
     if let Some(icon) = app.default_window_icon().cloned() {
         tray = tray.icon(icon);
@@ -336,6 +384,38 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
 
     tray.build(app)?;
     Ok(())
+}
+
+fn apply_native_locale(app: &AppHandle, locale: NativeLocale) -> Result<(), String> {
+    let labels = locale.labels();
+    let menu =
+        native_tray_menu(app, labels).map_err(|error| format!("无法更新桌面托盘菜单：{error}"))?;
+    let window = app
+        .get_webview_window(MAIN_WINDOW_LABEL)
+        .ok_or_else(|| "找不到 StoryGraph 主窗口。".to_string())?;
+    let tray = app
+        .tray_by_id(MAIN_TRAY_ID)
+        .ok_or_else(|| "找不到 StoryGraph 托盘图标。".to_string())?;
+
+    window
+        .set_title(labels.window_title)
+        .map_err(|error| format!("无法更新桌面窗口标题：{error}"))?;
+    tray.set_tooltip(Some(labels.tray_tooltip))
+        .map_err(|error| format!("无法更新桌面托盘提示：{error}"))?;
+    tray.set_menu(Some(menu))
+        .map_err(|error| format!("无法更新桌面托盘菜单：{error}"))?;
+    Ok(())
+}
+
+fn native_tray_menu<R: Runtime, M: Manager<R>>(
+    manager: &M,
+    labels: NativeLabels,
+) -> tauri::Result<Menu<R>> {
+    MenuBuilder::new(manager)
+        .text(TRAY_MENU_SHOW, labels.show_menu)
+        .separator()
+        .text(TRAY_MENU_QUIT, labels.quit_menu)
+        .build()
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
@@ -636,4 +716,36 @@ fn project_root() -> Option<PathBuf> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NativeLocale, TRAY_MENU_QUIT, TRAY_MENU_SHOW};
+
+    #[test]
+    fn native_locale_accepts_only_supported_exact_tags() {
+        assert_eq!(NativeLocale::parse("zh-CN"), Ok(NativeLocale::ZhCn));
+        assert_eq!(NativeLocale::parse("en-US"), Ok(NativeLocale::EnUs));
+        assert!(NativeLocale::parse("zh_CN").is_err());
+        assert!(NativeLocale::parse("en-GB").is_err());
+        assert!(NativeLocale::parse("und").is_err());
+    }
+
+    #[test]
+    fn native_locale_has_complete_chinese_and_english_labels() {
+        let chinese = NativeLocale::ZhCn.labels();
+        assert_eq!(chinese.window_title, "StoryGraph 写作台");
+        assert_eq!(chinese.tray_tooltip, "StoryGraph 写作台正在运行");
+        assert_eq!(chinese.show_menu, "显示主界面");
+        assert_eq!(chinese.quit_menu, "退出 StoryGraph 写作台");
+
+        let english = NativeLocale::EnUs.labels();
+        assert_eq!(english.window_title, "StoryGraph Writing Desk");
+        assert_eq!(english.tray_tooltip, "StoryGraph Writing Desk is running");
+        assert_eq!(english.show_menu, "Show Main Window");
+        assert_eq!(english.quit_menu, "Quit StoryGraph Writing Desk");
+
+        assert_eq!(TRAY_MENU_SHOW, "show-main-window");
+        assert_eq!(TRAY_MENU_QUIT, "quit-storygraph-agent");
+    }
 }

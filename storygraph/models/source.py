@@ -45,7 +45,7 @@ class SourceDocumentSummary(ContractModel):
     title: str = Field(..., max_length=500)
     relative_path: str = Field(..., max_length=2048)
     media_type: SourceMediaType
-    language: str = Field(..., max_length=35)
+    language: str = Field("und", max_length=35)
     byte_size: int = Field(ge=0)
     checksum_sha256: str
     extraction_status: SourceExtractionStatus
@@ -56,12 +56,20 @@ class SourceDocumentSummary(ContractModel):
     created_at: str
     updated_at: str
 
-    @field_validator("id", "project_id", "title", "language", "created_at", "updated_at")
+    @field_validator("id", "project_id", "title", "created_at", "updated_at")
     @classmethod
     def required_text(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("source document fields cannot be empty")
         return value
+
+    @field_validator("language")
+    @classmethod
+    def canonical_language(cls, value: str) -> str:
+        try:
+            return canonicalize_source_language(value)
+        except ValueError:
+            return "und"
 
     @field_validator("relative_path")
     @classmethod
@@ -148,6 +156,35 @@ _ABSOLUTE_PATH_PATTERN = re.compile(
     r"(?:file://|(?:^|[\s\"'(])(?:[A-Za-z]:[\\/]|\\\\|/(?:[^/\s]+/)+[^/\s]*))",
     re.IGNORECASE,
 )
+_BCP47_PATTERN = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
+
+
+def canonicalize_source_language(value: str) -> str:
+    normalized = value.strip().replace("_", "-")
+    if normalized.casefold() == "und":
+        return "und"
+    if not _BCP47_PATTERN.fullmatch(normalized):
+        raise ValueError("language must be a canonical BCP 47 tag or und")
+    parts = normalized.split("-")
+    canonical = [parts[0].lower()]
+    for part in parts[1:]:
+        if len(part) == 4 and part.isalpha():
+            canonical.append(part.title())
+        elif len(part) == 2 and part.isalpha():
+            canonical.append(part.upper())
+        else:
+            canonical.append(part.lower())
+    return "-".join(canonical)
+
+
+def validate_safe_source_metadata(
+    value: str | None,
+    *,
+    field_name: str,
+) -> str | None:
+    """Reject absolute local paths before metadata can enter durable artifacts."""
+
+    return _safe_metadata_text(value, field_name=field_name)
 
 
 def _safe_metadata_text(value: str | None, *, field_name: str) -> str | None:
