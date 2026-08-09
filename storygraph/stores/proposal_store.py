@@ -371,9 +371,19 @@ class SQLiteProposalStore(ProposalStore):
                     "updated_at": now,
                 }
             )
-            self._insert(proposal)
-            self._connection.commit()
+            try:
+                self._insert(proposal)
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
             return proposal
+
+    def rollback_and_get_confirmed(self, proposal_id: str) -> ProposalArtifact:
+        """Discard this connection's pending write before reading durable state."""
+        with self._lock:
+            self._connection.rollback()
+            return self.get(proposal_id)
 
     def close(self) -> None:
         with self._lock:
@@ -452,6 +462,18 @@ class SQLiteProposalStore(ProposalStore):
     @staticmethod
     def _row_to_proposal(row: sqlite3.Row) -> ProposalArtifact:
         payload = json.loads(row["payload_json"])
+        target_refs = payload.get("target_refs")
+        if isinstance(target_refs, list):
+            payload["target_refs"] = [
+                ref
+                for ref in target_refs
+                if not (
+                    isinstance(ref, dict)
+                    and ref.get("kind") == "scene"
+                    and isinstance(ref.get("ref"), str)
+                    and not ref["ref"].strip()
+                )
+            ]
         if payload.get("content_language") is None and row["content_language"] is not None:
             payload["content_language"] = row["content_language"]
             payload["language_inferred"] = False

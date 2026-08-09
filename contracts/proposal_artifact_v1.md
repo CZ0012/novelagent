@@ -150,6 +150,48 @@ Document, and new Source Store-backed routes must not emit them. This is a ref
 kind clarification only; `proposal_artifact_v1` adds no field and existing
 artifacts require no migration.
 
+### Exact Draft Baselines And Client Diff
+
+Proposal version history and existing refs are sufficient to support a
+review-time Draft comparison; this contract does not add a diff field or change
+the Proposal Artifact shape/version.
+
+For a selected Proposal Artifact version, a client resolves its recorded Draft
+baseline from that version's `source_refs` whose `kind` is `draft`:
+
+- One unique referenced Draft id is an exact recorded baseline. The client MAY
+  fetch it through
+  `GET /projects/{project_id}/scenes/{scene_id}/drafts/{draft_id}` and compute a
+  display diff against that exact proposal version.
+- Zero referenced Draft ids means the proposal has no recorded Draft baseline.
+  The client must say so rather than comparing against the current or latest
+  Draft.
+- More than one unique referenced Draft id is ambiguous. The client must expose
+  that ambiguity and MUST NOT silently choose the current, latest, or first
+  Draft.
+
+The exact Draft read requires local read permission and succeeds only when the
+Draft's stored `project_id` and `scene_id` both match the route. Missing,
+cross-project, and cross-scene ids use the same not-found behavior without
+revealing Draft metadata. Historical and discarded Drafts remain readable by
+this exact id route because stable proposal provenance may refer to them; the
+route never substitutes another or latest version.
+
+When Agent discussion includes a saved Draft, a current client pins that input
+with `included_draft_id`. The backend-resolved Draft sent to the provider and
+the resulting Proposal version's unique `source_refs[kind = draft]` MUST use
+that same id. The visible input manifest is not permission to replace it with a
+newer Draft. Invalid or cross-scope pinned ids fail before provider use or
+Proposal creation; only legacy clients that omit the additive field retain the
+documented latest-Draft compatibility path.
+
+Proposal history, exact Draft responses, and the selected versions are the
+persisted inputs. Diff hunks, comparison mode, expanded rows, and unsaved/dirty
+editor state are client-only transient presentation state. They MUST NOT be
+written into Proposal Store, Draft Store, Source Store, Graph Store, workflow
+state, or another story store. A diff compares stored text verbatim and MUST NOT
+translate or rewrite either side.
+
 ## Provenance
 
 `provenance` records how the current version was created:
@@ -200,8 +242,52 @@ promote it.
 
 - `status` is `accepted`.
 - `review_decision.status` is `accepted`.
-- The target scene is explicit in the request or proposal refs.
+- The request supplies an explicit target `scene_id`.
 - The caller has the local permission level required for author-write actions.
+
+Before creating a Draft or recording any derived ref, the backend MUST resolve
+the target as follows:
+
+- Collect the distinct non-empty `ref` values from proposal `target_refs` whose
+  `kind` is `scene`.
+- If the proposal declares one unique Scene target, it MUST equal the request
+  `scene_id`.
+- If it declares more than one unique Scene target, the proposal is ambiguous
+  and cannot be promoted.
+- If it declares no Scene target, the explicit request `scene_id` MAY be used
+  for compatibility with legacy proposals.
+- The resolved request Scene and proposal MUST belong to the route project.
+
+A target mismatch, ambiguity, or out-of-scope Scene is a `409` conflict.
+Project, proposal version/status/type/language, Scene target, and existing
+derived-ref checks MUST complete before any Draft or derived Proposal version is
+written. A rejected attempt creates no Draft and no derived ref.
+
+Draft promotion is idempotent for a proposal that already has exactly one
+`derived_refs` entry whose `kind` is `draft`. After the same target and scope
+checks, the backend MUST verify that the referenced Draft exists and belongs to
+the same project and resolved Scene, then return that same Draft and current
+Proposal without creating a Draft or Proposal version. More than one derived
+Draft ref is ambiguous; a referenced Draft that is missing, cross-project, or
+cross-scene is a `409` conflict rather than permission to create a replacement.
+Zero derived Draft refs follows the normal explicit promotion path. The
+successful response shape remains `{ "proposal": ..., "draft": ... }`.
+
+For that existing-derived success path, `expected_version` protects only the
+initial write attempt. A retry MAY still carry the original pre-derivation
+version after its first successful response was lost; once the current Proposal
+and its one exact derived Draft pass all status, type, language, target, and
+scope checks, the backend returns them instead of rejecting solely as stale.
+
+The initial Draft write and derived-ref write are separate local stores in the
+MVP. They are serialized within one running API process. If the derived-ref call
+raises synchronously, the backend first checks whether that exact ref was in fact
+committed; if so it returns the completed promotion. Otherwise it MUST remove
+only the exact unchanged Draft created by that attempt before returning failure,
+so the rejected request leaves neither artifact behind. Recovery from a process
+or machine crash between the two stores remains a separate reconciliation task;
+this limitation does not permit ordinary synchronous errors or concurrent
+requests to leave an orphan Draft.
 
 `fact_draft` proposals MAY be promoted to CandidateFact records only when:
 

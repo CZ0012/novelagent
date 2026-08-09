@@ -29,6 +29,11 @@ Maintain code compliance, contract discipline, tests, lint/build health, and saf
 - Verify new persistent proposal refs use `source_document` with stable IDs/checksum provenance, while legacy `imported_document` remains non-resolvable compatibility data.
 - Verify the full `ui_locale × Project.language` matrix, server-derived immutable output snapshots, exact project/language style filtering, future-only project-language changes, and legacy inferred-language projections.
 - Verify language mismatch and `und` rejection happen before provider invocation, `explicit_reference` still preserves `Project.language`, and legacy inline/structure inputs without valid source language return `422` without exposing private text.
+- Verify exact Draft detail requires read permission, returns historical/discarded records only for the matching project and scene, fails closed for missing/cross-scope ids, and never substitutes latest Draft.
+- Verify a current Agent request pins the manifest Draft with `included_draft_id`: captured provider ID/version/text and resulting Proposal Draft ref must all match it. Missing or cross-scope pins must fail with zero provider calls and no Proposal; include-disabled requests reject a supplied id, while legacy include-enabled requests without one retain only the documented latest compatibility.
+- Verify Proposal diff baseline resolution uses one unique stored Draft source ref, while zero/multiple refs remain explicit; client diff/dirty state must not alter any persisted contract shape.
+- Verify `scene_draft` promotion validates unique declared Scene targets before writes and is idempotent only for one valid same-project/same-scene derived Draft ref. Mismatch, ambiguity, missing referenced Draft, and cross-scope refs must return conflict without new Draft or Proposal versions; synchronous derived-ref failure must either confirm the committed ref or compensate the exact unchanged Draft, and lost-response/concurrent retries must not duplicate it.
+- Verify Source-to-Agent handoff carries only a stable ID and navigation state, with no text copy, store/provider side effect, or implicit cross-language-policy change.
 - Check that frontend and desktop code call backend APIs instead of creating independent canon or draft storage paths.
 - Check that release/update documentation distinguishes source-built outputs, updater artifacts, GitHub Release download fallback, published signed release channels, and Windows Authenticode signing.
 - Check that local file-writing and command documentation distinguishes PowerShell from Windows PowerShell where relevant.
@@ -42,6 +47,7 @@ Maintain code compliance, contract discipline, tests, lint/build health, and saf
 - Permission levels: `read_only`, `read_generate`, `full`.
 - Persistence boundaries for CLI, API, Web, desktop, imports, and demo seed flows.
 - Source Store boundaries: at least `read_generate` for import/archive/Agent/structure use, read permission for list/detail, explicit source selection, and no import side effects in Draft/Proposal/Candidate/Graph/Event stores.
+- Reviewable-rewrite boundaries: exact historical Draft reads are project+scene scoped; proposal baselines and targets are unambiguous; repeated promotion does not duplicate Drafts; diff/dirty state remains transient.
 - Language boundaries: `ui_locale` is local display state only; project output is `zh-CN` or `en-US`; Source uses valid BCP 47 metadata; no implicit translation; provider-call count is zero for rejected language inputs.
 - Version synchronization across `VERSION`, Python, Web, and Tauri files when versioning is touched.
 

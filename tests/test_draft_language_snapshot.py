@@ -51,3 +51,23 @@ def test_legacy_draft_is_readable_without_relabeling(tmp_path):
     assert new_version.version == 2
     assert new_version.content_language == "en-US"
     assert store.list_versions("project_001", "scene_001")[0].content_language is None
+
+
+def test_delete_if_unchanged_only_compensates_the_exact_draft(tmp_path):
+    store = SQLiteDraftStore(tmp_path / "compensation-drafts.sqlite")
+    created = store.create_draft(
+        project_id="project_compensation",
+        scene_id="scene_compensation",
+        content_language="zh-CN",
+        text="Original synthetic draft.",
+    )
+    updated = store.update_draft(
+        created.id,
+        text="Updated synthetic draft.",
+    )
+
+    assert store.delete_if_unchanged(created) is False
+    assert store.get_draft(created.id) == updated
+    assert store.delete_if_unchanged(updated) is True
+    assert store.list_versions("project_compensation", "scene_compensation") == []
+    store.close()

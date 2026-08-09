@@ -140,7 +140,7 @@ npm --prefix apps/desktop run build:installer
 生成的安装器路径是：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.10_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe
 ```
 
 其他常用桌面命令：
@@ -160,10 +160,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.10_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.10_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.10_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.10_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.11_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.11_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -173,7 +173,7 @@ apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 
 版本更新必须保持 `VERSION`、`pyproject.toml`、`apps/api/main.py` 的 FastAPI 版本、Web/桌面 package manifest 与根 lockfile 条目、`apps/web/src/version.ts`、`apps/desktop/src-tauri/Cargo.lock` 的桌面 package 条目、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json` 同步。这里的 GitHub 只作为软件发布/更新通道；本地小说 workspace、Source Store 资料、canon、草稿、项目设置和审阅状态不会自动同步到 GitHub。
 
-当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.10_x64-setup.exe.sig`，以及用于 GitHub Release 的无空格副本和 `latest.json`。后端 sidecar 固定使用 PyInstaller 6.21.0 构建。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
+当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.11_x64-setup.exe.sig`，以及用于 GitHub Release 的无空格副本和 `latest.json`。后端 sidecar 固定使用 PyInstaller 6.21.0 构建。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
 
 仍缺失或未验证：
 
@@ -235,6 +235,10 @@ Source Library 是私有来源资料层，不再只是浏览器内存树，也�
 - 导入、列表、详情、重试和归档都不会创建 Draft、CandidateFact、图节点、图关系或 canon event。
 - Source language 是来源自身的合法 canonical BCP 47 tag，与项目语言无关；`und` 可以存储，但在任何策略下都不能进入 Agent/结构 prompt，必须先由作者明确标注。
 
+在桌面宽度下，作者可以拖动资料面板底边调整高度，也可以拖动资料列表与正文阅读区之间的分隔线调整宽度。两个分隔条都支持方向键、Shift 大步长、Home/End 和双击复位。本地浏览器/Tauri 只保存带版本的界面尺寸，不会连带保存资料 ID、路径、正文、项目或场景数据；窄屏会隐藏分隔条并自动恢复上下堆叠。
+
+“交给 Agent”只是选择与导航快捷操作：它只把稳定 Source Document ID 带到 Agent 面板，不复制资料正文、不调用模型、不创建 artifact，也不自动改变 `cross_language_policy`。已知异语资料会继续显示，但在 `project_only` 下阻止发送，必须由作者亲自选择 `explicit_reference`；`und` 始终阻断。
+
 结构分析是另一个显式动作。`POST /projects/{project_id}/sources/{source_document_id}/structure-draft` 读取一份 ready Source Document，只创建非 canon、可编辑的 `project_structure_draft` Proposal Artifact。只有作者接受 proposal 并调用现有显式 apply 动作后，系统才会创建 Chapter/Scene 节点。新 proposal 来源统一使用稳定的 `source_document` ref；旧 `imported_document` 只保留为不解析的 legacy provenance，不等于持久 Source Store ID。默认 `cross_language_policy = project_only`；只有本次显式选择的已知语言来源可通过 `explicit_reference` 跨语言引用，且不翻译、不改变输出语言。
 
 初版 Source Library 不支持 RTF、PDF、OCR、图片或 PSD；这些格式需要后续 importer 工作，目前不得伪装成成功文本导入。导入本身绝不会顺带创建其他 store 记录。作者打开一份 ready 详情后，可以另行显式把正文保存为当前场景 Draft、非 canon Proposal 或 Style Sample；此时走的是对应 store 的正常边界。CandidateFact 仍然必须引用真实 Draft Store 来源，并经过现有 pending 人工审阅路径。
@@ -243,7 +247,11 @@ Source Library 是私有来源资料层，不再只是浏览器内存树，也�
 
 Web 工作台和桌面宿主工作台提供 `Agent` 标签页，用于和已配置的 OpenAI-compatible LLM 讨论当前场景。作者可以高亮草稿片段、手动粘贴标注段落、提出局部问题，请求 Agent 讨论、改写选中段落，或改写整场草稿。Source Library 资料默认全部不选中；只有作者本次明确勾选的稳定 ID 才会作为 `source_document_ids` 发送，后端再在当前项目内解析 ready 文档。系统不会静默发送整个资料库，也不会沿用上一次请求缓存的资料片段。当前 Context Pack、当前草稿文本和可选联网搜索仍是相互独立的显式开关；关闭当前草稿后，也不得再通过 `base_text` 发送编辑器正文。Legacy inline source 和 legacy text structure request 必须提交合法 `source_language`，缺失/非法返回 `422`，不能继承项目语言。
 
+发送前，Agent 面板会列出目标 Scene、项目输出语言、所包含的精确已保存 Draft ID/version（或明确不包含）、Context Pack 重建行为、已选 Source 名称/语言、跨语言策略和联网搜索状态。如果开启“包含当前草稿”但编辑器内容与这份精确已保存 Draft 不同，所有 Agent 模式都会阻止发送，直到作者保存或放弃本地编辑。工作台会提交这个精确 Draft ID；后端向模型发送的 Draft 和新 Proposal 记录的 Draft source ref 必须是同一份，绝不会静默换成较新的草稿。省略 ID 后读取 latest 只为旧 API 客户端保留。
+
 `POST /projects/{project_id}/scenes/{scene_id}/agent-discussion` 需要 `read_generate` 权限和 LLM 凭据。它只会在 Proposal Store 创建非 canon 的 `scene_rebuild` 或 `scene_draft` 协作提案，并返回 Agent 回复、搜索片段和是否成功把选中段落替换为完整提案正文。它不会覆盖 Draft Store，不会创建 CandidateFact，也不会写 Graph Store canon。作者仍需在 `协作草稿箱` 中审阅；只有显式接受并提升后，已接受的 `scene_draft` proposal 才能成为 Draft Store 草稿。
+
+协作草稿箱会展示内容/状态历史，并且只在所选 Proposal 版本记录了唯一 Draft source ref 时，按该精确 Draft 在客户端计算左右 diff。零个 ref 会明确显示“无基线”，多个 ref 会显示“多义”，绝不偷换成最新 Draft。未保存的 Proposal 标题/正文会显示 dirty 状态，并阻止审阅决定、提升以及提案/场景/项目切换，直到保存、放弃或取消。操作随状态出现：可编辑版本提交审阅，待审版本接受/拒绝，已接受版本只显示适用的显式提升。场景草稿提升会校验声明的 Scene 目标，重复请求复用同一份已派生 Draft，永不写 canon。
 
 CLI 文件输入仍然非常窄：
 

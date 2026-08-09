@@ -161,13 +161,13 @@ class AgentDiscussionService:
             or latest_draft.content_language != output_language
         ):
             raise ContractError(
-                "Latest Draft scope or content_language does not match the Agent request."
+                "Included Draft scope or content_language does not match the Agent request."
             )
         if base_text is not None and (
             latest_draft is None or base_text != latest_draft.text
         ):
             raise ContractError(
-                "Agent revision base_text must exactly match the validated latest Draft."
+                "Agent revision base_text must exactly match the validated included Draft."
             )
         enforce_source_language_policy(
             output_language=output_language,
@@ -424,8 +424,8 @@ class AgentDiscussionService:
                     ref=latest_draft.id,
                     note=localized(
                         output_language,
-                        zh="当前最新场景草稿。",
-                        en="Latest scene draft.",
+                        zh="本次请求包含的已保存场景草稿。",
+                        en="Saved scene Draft included in this request.",
                     ),
                 )
             )

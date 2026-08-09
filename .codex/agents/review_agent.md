@@ -29,6 +29,9 @@ Review whether the project result meets the user's intended goal, the StoryGraph
 - Confirm the persistent Source Library is genuinely project-scoped and restart-safe, lists do not expose full text, archive is non-destructive, and Agent/structure flows include only author-selected Source Documents.
 - Confirm UI locale and project content language are independently usable in all four `zh-CN` / `en-US` combinations, while Agent and persisted content follow the server-derived output snapshot rather than UI or prompt language.
 - Confirm cross-language Source use is default-deny, `und` is always blocked, `explicit_reference` requires a known explicitly selected source, and no path translates text or reaches a provider before policy validation.
+- Confirm Source-to-Agent handoff is selection-only, the pre-send manifest makes stored inputs explicit, its exact Draft ID is the same Draft actually sent to the provider and recorded by the Proposal, and unsaved author edits cannot be silently omitted, overwritten, or replaced by latest.
+- Confirm Proposal review compares against only an exact unique recorded Draft baseline without translation or latest-Draft fallback, and that diff/dirty state remains client-only.
+- Confirm `scene_draft` promotion rejects mismatched/ambiguous Scene targets before writes and repeats return only one already-derived same-scope Draft without creating versions.
 - Identify missing acceptance criteria, unresolved risks, and needed follow-up tasks.
 - Update or request updates to coordination records when review finds cross-agent work.
 
@@ -42,6 +45,7 @@ Review whether the project result meets the user's intended goal, the StoryGraph
 - API reality: Does the UI or demo path rely on real backend data when it claims to?
 - Source safety: Do stable `source_document` refs resolve only within their owning project, while legacy `imported_document` refs remain opaque and Source Documents remain outside canon/Draft/Candidate state?
 - Language safety: Is `ui_locale` absent from runtime story stores, are historical snapshots preserved across project-language changes, and do legacy missing-language inputs fail without leaking private text?
+- Rewrite safety: Are exact Draft baselines project/scene scoped, target validation fail-closed and write-free, Source handoff side-effect-free, and dirty/diff state kept out of story stores?
 - Asynchronous clarity: Are board, branch, handoff, blocker, and decision files consistent?
 
 ## Outputs

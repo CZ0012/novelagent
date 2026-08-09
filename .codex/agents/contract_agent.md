@@ -26,6 +26,8 @@ Own module protocols, versioned contracts, API/schema boundaries, and cross-modu
 - Keep review compare-and-set, compensation, and same-backend graph/event transaction semantics explicit; do not claim cross-database 2PC where none exists.
 - Own `source_document_v1`, Source Store route/projection semantics, project isolation, checksum/idempotency rules, and the canonical `source_document` ProposalRef kind while preserving legacy opaque `imported_document` refs.
 - Own `language_policy_v1`: keep local `ui_locale`, authoritative `Project.language`, server-derived `output_language`, Source BCP 47 metadata, cross-language policy, persisted snapshots, and compatibility migration explicit and non-conflicting.
+- Own Proposal-to-Draft review boundaries: exact project/scene-scoped historical Draft reads, `included_draft_id` pinning from manifest through provider input and Proposal ref, unique recorded Draft baselines, target-safe/idempotent `scene_draft` promotion, legacy latest-Draft compatibility, and the rule that diff/dirty presentation state does not change `proposal_artifact_v1`.
+- Keep Source-to-Agent handoff selection-only: stable Source Document ID plus navigation, with no text copy, store mutation, provider call, or automatic cross-language-policy change.
 - Record durable contract decisions in `.codex/coordination/decisions.md`.
 
 ## Change Protocol
@@ -52,5 +54,6 @@ Own module protocols, versioned contracts, API/schema boundaries, and cross-modu
 - Do not encode UI fixture behavior into contracts unless it is an explicit product requirement.
 - Do not let Source Document IDs or extracted text become CandidateFact primary evidence; `candidate_fact_v1` still requires a real Draft Store source.
 - Do not permit `und`, missing legacy source language, author instructions, or selected source metadata to override or bypass project output-language resolution. Legacy inline/structure requests without a valid source language are validation failures.
+- Do not let a client substitute current/latest Draft for a missing or ambiguous recorded proposal baseline, or let promotion ignore declared Scene targets or invalid existing derived Draft refs.
 - Do not weaken canon safety to simplify API flow.
 - Do not describe GitHub Release/update metadata as story workspace synchronization.

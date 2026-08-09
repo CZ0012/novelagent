@@ -1,5 +1,7 @@
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import pytest
 
@@ -134,6 +136,58 @@ def test_sqlite_proposal_store_records_derived_refs_after_acceptance(tmp_path):
     assert updated.status == "accepted"
     assert updated.review_decision.status == "accepted"
     assert updated.derived_refs[-1].ref == "draft_from_proposal"
+
+
+def test_record_derived_refs_rolls_back_before_unlocking_reader(
+    tmp_path,
+    monkeypatch,
+):
+    store = SQLiteProposalStore(tmp_path / "proposal-derived-rollback.sqlite")
+    created = store.create(_proposal("proposal_derived_rollback"))
+    accepted = store.review(created.id, decision="accepted", reviewer="author")
+    original_insert = SQLiteProposalStore._insert
+    inserted = Event()
+    release_insert = Event()
+    reader_started = Event()
+
+    def insert_then_wait_and_raise(self, proposal):
+        original_insert(self, proposal)
+        if proposal.derived_refs:
+            inserted.set()
+            assert release_insert.wait(timeout=5)
+            raise RuntimeError("synthetic failure after uncommitted derived insert")
+
+    def record_ref():
+        return store.record_derived_ref(
+            created.id,
+            derived_ref=ProposalRef(kind="draft", ref="draft_rollback"),
+            actor="author",
+            expected_version=accepted.version,
+        )
+
+    def read_latest():
+        reader_started.set()
+        return store.get(created.id)
+
+    monkeypatch.setattr(SQLiteProposalStore, "_insert", insert_then_wait_and_raise)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        record_future = executor.submit(record_ref)
+        assert inserted.wait(timeout=5)
+        read_future = executor.submit(read_latest)
+        assert reader_started.wait(timeout=5)
+        assert read_future.done() is False
+        release_insert.set()
+        with pytest.raises(
+            RuntimeError,
+            match="synthetic failure after uncommitted derived insert",
+        ):
+            record_future.result(timeout=5)
+        observed = read_future.result(timeout=5)
+
+    assert observed.version == accepted.version
+    assert observed.derived_refs == []
+    assert [proposal.version for proposal in store.history(created.id)] == [1, 2]
+    store.close()
 
 
 def test_sqlite_proposal_store_rejected_proposals_cannot_record_derived_refs(tmp_path):

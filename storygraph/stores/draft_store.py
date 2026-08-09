@@ -144,6 +144,39 @@ class SQLiteDraftStore:
             self._connection.commit()
             return self.get_draft(draft_id)
 
+    def delete_if_unchanged(self, draft: Draft) -> bool:
+        """Delete only the exact persisted Draft supplied by its creating operation."""
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                DELETE FROM drafts
+                WHERE id = ?
+                  AND project_id = ?
+                  AND scene_id = ?
+                  AND content_language IS ?
+                  AND version = ?
+                  AND text = ?
+                  AND summary IS ?
+                  AND discarded = ?
+                  AND created_at = ?
+                  AND updated_at = ?
+                """,
+                (
+                    draft.id,
+                    draft.project_id,
+                    draft.scene_id,
+                    draft.content_language,
+                    draft.version,
+                    draft.text,
+                    draft.summary,
+                    int(draft.discarded),
+                    draft.created_at,
+                    draft.updated_at,
+                ),
+            )
+            self._connection.commit()
+            return cursor.rowcount == 1
+
     def close(self) -> None:
         with self._lock:
             self._connection.close()

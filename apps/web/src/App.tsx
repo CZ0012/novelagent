@@ -108,6 +108,42 @@ import {
   normalizeAppLocale
 } from "./localization";
 import { APP_VERSION, GITHUB_LATEST_RELEASE_API } from "./version";
+import {
+  DEFAULT_SOURCE_PANE_LAYOUT,
+  SOURCE_PANE_STACK_BREAKPOINT_PX,
+  type SourcePaneBounds,
+  type SourcePaneLayout,
+  clampSourcePaneLayout,
+  readSourcePaneLayout,
+  resetSourcePaneLayoutDimension,
+  separatorKeyboardValue,
+  sourcePaneBounds,
+  writeSourcePaneLayout
+} from "./sourcePaneLayout";
+import {
+  type PromotionTargetPolicy,
+  type ReviewDiffRow,
+  type SourceAgentEligibility,
+  type UniqueRefResolution,
+  addStableSourceSelection,
+  agentIncludedDraftPolicy,
+  type ProposalEditorSnapshot,
+  buildReviewDiff,
+  canOpenPromotedDraft,
+  canRestoreSavedDraft,
+  continueAfterSuccessfulSave,
+  draftIsDirty,
+  exactDraftMatchesEditorScene,
+  promotionTargetPolicy,
+  proposalActionPolicy,
+  proposalAutoSelection,
+  proposalIsDirty,
+  projectRequestIsCurrent,
+  resolveUniqueProposalRef,
+  shouldHydrateProposalEditor,
+  sourceCanHandoff,
+  sourceAgentEligibility
+} from "./reviewPolicies";
 import "./styles.css";
 
 type InspectorTab = "context" | "continuity" | "facts" | "settings";
@@ -134,6 +170,17 @@ type SourceImportProgress = {
   failed: number;
   issues: Array<{ name: string; message: string; technicalDetails?: string }>;
 };
+
+type ExactDraftLookup =
+  | { status: "idle" | "none" | "ambiguous" | "missing_target" | "loading"; ref: string | null; draft: null }
+  | { status: "ready"; ref: string; draft: Draft }
+  | { status: "error"; ref: string; draft: null };
+
+type PendingProposalNavigation = {
+  label: string;
+};
+
+type ProposalNavigationAction = () => void;
 
 type ProjectForm = {
   title: string;
@@ -368,12 +415,32 @@ export default function App() {
   const [draftSummary, setDraftSummary] = useState("");
   const [proposals, setProposals] = useState<ProposalArtifact[]>([]);
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
+  const [creatingNewProposal, setCreatingNewProposal] = useState(false);
   const [proposalTitle, setProposalTitle] = useState("");
   const [proposalText, setProposalText] = useState("");
   const [proposalArtifactType, setProposalArtifactType] =
     useState<ProposalArtifactType>("scene_draft");
   const [proposalStatusFilter, setProposalStatusFilter] = useState<ProposalStatus | "all">("all");
   const [proposalSourceDraftId, setProposalSourceDraftId] = useState("");
+  const [proposalVersions, setProposalVersions] = useState<ProposalArtifact[]>([]);
+  const [proposalVersionsLoading, setProposalVersionsLoading] = useState(false);
+  const [reviewProposalVersion, setReviewProposalVersion] = useState<number | null>(null);
+  const reviewProposalOwnerRef = useRef<string | null>(null);
+  const [proposalBaseline, setProposalBaseline] = useState<ExactDraftLookup>({
+    status: "idle",
+    ref: null,
+    draft: null
+  });
+  const [proposalPromotedDraft, setProposalPromotedDraft] = useState<ExactDraftLookup>({
+    status: "idle",
+    ref: null,
+    draft: null
+  });
+  const [pendingProposalNavigation, setPendingProposalNavigation] =
+    useState<PendingProposalNavigation | null>(null);
+  const pendingProposalNavigationRef = useRef<ProposalNavigationAction | null>(null);
+  const proposalEditorSnapshotRef = useRef<ProposalEditorSnapshot | null>(null);
+  const selectedProposalStableRef = useRef<ProposalArtifact | null>(null);
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [runEvents, setRunEvents] = useState<WorkflowStep[]>([]);
   const [continuityReport, setContinuityReport] = useState<ContinuityReport | null>(null);
@@ -419,8 +486,24 @@ export default function App() {
   const [expandedLibraryPaths, setExpandedLibraryPaths] = useState<Set<string>>(
     () => new Set(["library"])
   );
+  const libraryPanelRef = useRef<HTMLElement | null>(null);
+  const libraryGridRef = useRef<HTMLDivElement | null>(null);
+  const [sourcePaneLayout, setSourcePaneLayout] = useState<SourcePaneLayout>(() =>
+    loadSourcePaneLayout()
+  );
+  const [sourcePaneBoundsState, setSourcePaneBoundsState] = useState<SourcePaneBounds>(() =>
+    sourcePaneBounds({
+      viewportHeight: typeof window === "undefined" ? 900 : window.innerHeight,
+      panelTop: 160,
+      containerWidth: typeof window === "undefined" ? 980 : window.innerWidth
+    })
+  );
+  const [sourcePaneStacked, setSourcePaneStacked] = useState(() =>
+    typeof window !== "undefined" && window.innerWidth <= SOURCE_PANE_STACK_BREAKPOINT_PX
+  );
   const sourceListRequestSequenceRef = useRef(0);
   const draftRequestSequenceRef = useRef(0);
+  const proposalListRequestSequenceRef = useRef(0);
   const activeApiBaseRef = useRef(apiBase);
   const activeProjectIdRef = useRef(projectId);
   const activeSceneIdRef = useRef(sceneId);
@@ -456,6 +539,54 @@ export default function App() {
     }
   }, [uiLocale]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia(`(max-width: ${SOURCE_PANE_STACK_BREAKPOINT_PX}px)`);
+    const recompute = () => {
+      const stacked = media.matches;
+      setSourcePaneStacked(stacked);
+      if (stacked || !libraryPanelRef.current || !libraryGridRef.current) return;
+      const bounds = sourcePaneBounds({
+        viewportHeight: window.innerHeight,
+        panelTop: libraryPanelRef.current.getBoundingClientRect().top,
+        containerWidth: libraryGridRef.current.clientWidth
+      });
+      setSourcePaneBoundsState(bounds);
+    };
+    recompute();
+    window.addEventListener("resize", recompute);
+    media.addEventListener("change", recompute);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(recompute);
+    if (libraryGridRef.current) observer?.observe(libraryGridRef.current);
+    return () => {
+      window.removeEventListener("resize", recompute);
+      media.removeEventListener("change", recompute);
+      observer?.disconnect();
+    };
+  }, [workspaceTab]);
+
+  const changeSourcePaneDimension = useCallback(
+    (dimension: keyof SourcePaneLayout, value: number, commit: boolean) => {
+      setSourcePaneLayout((current) => {
+        const next = clampSourcePaneLayout({ ...current, [dimension]: value }, sourcePaneBoundsState);
+        if (commit) persistSourcePaneLayout(next);
+        return next;
+      });
+    },
+    [sourcePaneBoundsState]
+  );
+
+  const resetSourcePaneDimension = useCallback(
+    (dimension: keyof SourcePaneLayout) => {
+      setSourcePaneLayout((current) => {
+        const next = resetSourcePaneLayoutDimension(current, dimension, sourcePaneBoundsState);
+        persistSourcePaneLayout(next);
+        return next;
+      });
+    },
+    [sourcePaneBoundsState]
+  );
+
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === projectId) ?? null,
     [projectId, projects]
@@ -490,7 +621,11 @@ export default function App() {
     [selectedSourceDocumentId, sourceDocuments]
   );
   const selectedProposal = useMemo(
-    () => proposals.find((proposal) => proposal.id === selectedProposalId) ?? null,
+    () => proposals.find((proposal) => proposal.id === selectedProposalId) ?? (
+      selectedProposalStableRef.current?.id === selectedProposalId
+        ? selectedProposalStableRef.current
+        : null
+    ),
     [proposals, selectedProposalId]
   );
   const visibleProposals = useMemo(
@@ -500,6 +635,95 @@ export default function App() {
         : proposals.filter((proposal) => proposal.status === proposalStatusFilter),
     [proposalStatusFilter, proposals]
   );
+  const proposalDirty = useMemo(
+    () => proposalIsDirty(selectedProposal, proposalTitle, proposalText),
+    [proposalText, proposalTitle, selectedProposal]
+  );
+  const draftDirty = useMemo(
+    () => draftIsDirty(draft, draftText, draftSummary),
+    [draft, draftSummary, draftText]
+  );
+  const proposalTarget = useMemo(
+    () => promotionTargetPolicy(selectedProposal?.target_refs ?? [], sceneId),
+    [sceneId, selectedProposal]
+  );
+  const proposalTargetScene = useMemo(() => {
+    const targetId = proposalTarget.targetSceneId;
+    return targetId && selectedProject
+      ? flattenScenes(selectedProject).find((scene) => scene.id === targetId) ?? null
+      : null;
+  }, [proposalTarget, selectedProject]);
+  const proposalTargetRef = useMemo(
+    () => resolveUniqueProposalRef(selectedProposal?.target_refs ?? [], "scene"),
+    [selectedProposal]
+  );
+  const proposalPromotedDraftTargetRef = useMemo<UniqueRefResolution>(
+    () => proposalTargetRef.status === "none" && sceneId
+      ? { status: "unique", ref: sceneId }
+      : proposalTargetRef,
+    [proposalTargetRef, sceneId]
+  );
+  const proposalDerivedDraftRef = useMemo(
+    () => resolveUniqueProposalRef(selectedProposal?.derived_refs ?? [], "draft"),
+    [selectedProposal]
+  );
+  const selectedReviewProposal = useMemo(
+    () =>
+      proposalVersions.find((version) => version.version === reviewProposalVersion) ??
+      selectedProposal,
+    [proposalVersions, reviewProposalVersion, selectedProposal]
+  );
+  const proposalReviewTargetRef = useMemo(
+    () => resolveUniqueProposalRef(selectedReviewProposal?.target_refs ?? [], "scene"),
+    [selectedReviewProposal]
+  );
+  const proposalBaselineRef = useMemo(
+    () => resolveUniqueProposalRef(selectedReviewProposal?.source_refs ?? [], "draft"),
+    [selectedReviewProposal]
+  );
+  const proposalDiffRows = useMemo(
+    () =>
+      proposalBaseline.status === "ready" && selectedReviewProposal
+        ? buildReviewDiff(proposalBaseline.draft.text, selectedReviewProposal.body)
+        : [],
+    [proposalBaseline, selectedReviewProposal]
+  );
+  const effectiveSourcePaneLayout = useMemo(
+    () => clampSourcePaneLayout(sourcePaneLayout, sourcePaneBoundsState),
+    [sourcePaneBoundsState, sourcePaneLayout]
+  );
+
+  const hydrateProposalEditor = useCallback((proposal: ProposalArtifact | null) => {
+    if (!proposal) {
+      proposalEditorSnapshotRef.current = null;
+      selectedProposalStableRef.current = null;
+      setProposalTitle("");
+      setProposalText("");
+      setProposalArtifactType("scene_draft");
+      setProposalSourceDraftId("");
+      return;
+    }
+    proposalEditorSnapshotRef.current = {
+      id: proposal.id,
+      version: proposal.version,
+      title: proposal.title,
+      body: proposal.body
+    };
+    selectedProposalStableRef.current = proposal;
+    setProposalTitle(proposal.title);
+    setProposalText(proposal.body);
+    setProposalArtifactType(proposal.artifact_type);
+    const sourceDraftRef = resolveUniqueProposalRef(proposal.source_refs, "draft");
+    setProposalSourceDraftId(sourceDraftRef.status === "unique" ? sourceDraftRef.ref : "");
+  }, []);
+
+  const resetProposalScope = useCallback(() => {
+    proposalListRequestSequenceRef.current += 1;
+    setProposals([]);
+    setCreatingNewProposal(false);
+    setSelectedProposalId(null);
+    hydrateProposalEditor(null);
+  }, [hydrateProposalEditor]);
 
   const runAction = useCallback(async (label: string, action: () => Promise<void>) => {
     if (actionInFlightRef.current) return;
@@ -724,16 +948,13 @@ export default function App() {
       setWorkspaceLoaded(true);
 
       if (!nextProjects.length) {
+        resetProposalScope();
         setProjectId("");
         setSceneId("");
         setContextPack(null);
         setDraft(null);
         setDraftText("");
         setDraftSummary("");
-        setProposals([]);
-        setSelectedProposalId(null);
-        setProposalTitle("");
-        setProposalText("");
         setRun(null);
         setRunEvents([]);
         setContinuityReport(null);
@@ -746,11 +967,12 @@ export default function App() {
       const availableScenes = flattenScenes(nextProject);
       const nextScene =
         availableScenes.find((scene) => scene.id === preferredSceneId) ?? availableScenes[0] ?? null;
+      if (activeProjectIdRef.current !== nextProject.id) resetProposalScope();
       setProjectId(nextProject.id);
       setSceneId(nextScene?.id ?? "");
       return { projectId: nextProject.id, sceneId: nextScene?.id ?? "" };
     },
-    [apiBase]
+    [apiBase, resetProposalScope]
   );
 
   const refreshGraphPreview = useCallback(
@@ -828,21 +1050,32 @@ export default function App() {
 
   const refreshProposals = useCallback(
     async (targetProjectId = projectId) => {
+      const requestSequence = ++proposalListRequestSequenceRef.current;
+      const requestApiBase = apiBase;
+      const requestIsCurrent = () => projectRequestIsCurrent(
+        requestSequence,
+        proposalListRequestSequenceRef.current,
+        requestApiBase,
+        activeApiBaseRef.current,
+        targetProjectId,
+        activeProjectIdRef.current
+      );
       if (!targetProjectId) {
-        setProposals([]);
-        setSelectedProposalId(null);
+        if (requestIsCurrent()) setProposals([]);
         return [];
       }
-      const payload = await apiGet<{ proposals: ProposalArtifact[] }>(
-        apiBase,
-        `/projects/${targetProjectId}/proposals`
-      );
-      setProposals(payload.proposals);
-      if (!payload.proposals.length) {
-        setSelectedProposalId(null);
-        setProposalTitle("");
-        setProposalText("");
+      let payload: { proposals: ProposalArtifact[] };
+      try {
+        payload = await apiGet<{ proposals: ProposalArtifact[] }>(
+          requestApiBase,
+          `/projects/${targetProjectId}/proposals`
+        );
+      } catch (exc) {
+        if (!requestIsCurrent()) return [];
+        throw exc;
       }
+      if (!requestIsCurrent()) return [];
+      setProposals(payload.proposals);
       return payload.proposals;
     },
     [apiBase, projectId]
@@ -1379,19 +1612,26 @@ export default function App() {
         }
       );
       await refreshProposals(projectId);
-      setSelectedProposalId(result.proposal.id);
-      setWorkspaceTab("proposals");
+      if (!proposalDirty) {
+        setCreatingNewProposal(false);
+        setSelectedProposalId(result.proposal.id);
+        setWorkspaceTab("proposals");
+      }
       const sceneCount = result.outline.chapters.reduce(
         (total, chapter) => total + chapter.scenes.length,
         0
       );
-      setNotice(uiText.notices.sourceStructureCreated(
-        result.outline.chapters.length,
-        sceneCount,
-        result.truncated
-      ));
+      setNotice(
+        proposalDirty
+          ? uiText.notices.proposalCreatedNotOpened(result.proposal.id)
+          : uiText.notices.sourceStructureCreated(
+            result.outline.chapters.length,
+            sceneCount,
+            result.truncated
+          )
+      );
     },
-    [apiBase, crossLanguagePolicy, projectId, refreshProposals, selectedProject]
+    [apiBase, crossLanguagePolicy, projectId, proposalDirty, refreshProposals, selectedProject]
   );
 
   const saveDocumentAsProposal = useCallback(
@@ -1414,11 +1654,18 @@ export default function App() {
         }
       );
       await refreshProposals(projectId);
-      setSelectedProposalId(proposal.id);
-      setWorkspaceTab("proposals");
-      setNotice(uiText.notices.sourceSavedAsProposal(document.title));
+      if (!proposalDirty) {
+        setCreatingNewProposal(false);
+        setSelectedProposalId(proposal.id);
+        setWorkspaceTab("proposals");
+      }
+      setNotice(
+        proposalDirty
+          ? uiText.notices.proposalCreatedNotOpened(proposal.id)
+          : uiText.notices.sourceSavedAsProposal(document.title)
+      );
     },
-    [apiBase, projectId, refreshProposals, sceneId, selectedProject]
+    [apiBase, projectId, proposalDirty, refreshProposals, sceneId, selectedProject]
   );
 
   const archiveSourceDocument = useCallback(
@@ -1456,20 +1703,10 @@ export default function App() {
         request
       );
       setSelectedSourceDocument(updated);
-      if (
-        crossLanguagePolicy === "project_only" &&
-        updated.language !== outputLanguageOrNull(selectedProject?.language)
-      ) {
-        setSelectedAgentSourceIds((current) => {
-          const next = new Set(current);
-          next.delete(updated.id);
-          return next;
-        });
-      }
       await refreshSources(projectId);
       setSelectedSourceDocumentId(updated.id);
     },
-    [apiBase, crossLanguagePolicy, projectId, refreshSources, selectedProject]
+    [apiBase, projectId, refreshSources]
   );
 
   const archiveDemo = useCallback(async () => {
@@ -1502,6 +1739,8 @@ export default function App() {
       summary: draftSummary
     });
     setDraft(saved);
+    setDraftText(saved.text);
+    setDraftSummary(saved.summary ?? "");
     setNotice(uiText.runtime.draftSaved(saved.version));
     setWorkspaceTab("write");
   }, [apiBase, draftSummary, draftText, endpoint]);
@@ -1533,6 +1772,14 @@ export default function App() {
     setDraftSummary(event.target.value);
   }, []);
 
+  const restoreSavedDraft = useCallback(() => {
+    if (!draft || !window.confirm(uiText.agentDiscussion.restoreDraftConfirm)) return;
+    setDraftText(draft.text);
+    setDraftSummary(draft.summary ?? "");
+    setDraftSelection("");
+    setNotice(uiText.notices.savedDraftRestored(draft.id, draft.version));
+  }, [draft]);
+
   const useDraftSelectionForAgent = useCallback(() => {
     const selection = draftSelection || refreshDraftSelection();
     if (!selection) {
@@ -1556,11 +1803,40 @@ export default function App() {
     if (agentDiscussionForm.mode === "revise_selection" && !selectedText) {
       throw new Error(uiText.errors.agentSelectionRequired);
     }
+    const includedDraft = agentIncludedDraftPolicy(
+      draft,
+      agentDiscussionForm.includeLatestDraft,
+      draftDirty,
+      projectId,
+      sceneId
+    );
+    if (agentDiscussionForm.includeLatestDraft && includedDraft.status !== "ready") {
+      throw new Error(
+        includedDraft.status === "blocked_scope"
+          ? uiText.errors.agentDraftScopeMismatch
+          : uiText.errors.agentIncludedDraftMustBeSaved
+      );
+    }
     if (
       agentDiscussionForm.mode !== "discuss" &&
-      (!agentDiscussionForm.includeLatestDraft || !draft || draftText !== draft.text)
+      !agentDiscussionForm.includeLatestDraft
     ) {
       throw new Error(uiText.errors.agentRevisionRequiresSavedDraft);
+    }
+    const projectLanguage = outputLanguageOrNull(selectedProject?.language);
+    const selectedSourceList = Array.from(selectedAgentSourceIds).map((sourceId) =>
+      sourceDocuments.find((source) => source.id === sourceId)
+    );
+    if (
+      selectedSourceList.some(
+        (source) => !source || sourceAgentEligibility(
+          source,
+          projectLanguage,
+          crossLanguagePolicy
+        ) !== "eligible"
+      )
+    ) {
+      throw new Error(uiText.errors.agentSourcesBlockedByPolicy);
     }
     const payload: AgentDiscussionRequest = {
       mode: agentDiscussionForm.mode,
@@ -1569,6 +1845,7 @@ export default function App() {
       base_text: null,
       include_context_pack: agentDiscussionForm.includeContextPack,
       include_latest_draft: agentDiscussionForm.includeLatestDraft,
+      included_draft_id: includedDraft.status === "ready" ? includedDraft.draftId : null,
       local_sources: [],
       source_document_ids: Array.from(selectedAgentSourceIds),
       allow_web_search: agentDiscussionForm.allowWebSearch,
@@ -1583,25 +1860,30 @@ export default function App() {
     setAgentDiscussionResult(result);
     const refreshed = await refreshProposals(projectId);
     const created = refreshed.find((proposal) => proposal.id === result.proposal.id);
-    setSelectedProposalId(created?.id ?? result.proposal.id);
-    setProposalTitle(result.proposal.title);
-    setProposalText(result.proposal.body);
-    setProposalArtifactType(result.proposal.artifact_type);
+    if (!proposalDirty) {
+      setCreatingNewProposal(false);
+      setSelectedProposalId(created?.id ?? result.proposal.id);
+    }
     setWorkspaceTab("agent");
     setNotice(
-      result.replacement_applied
-        ? uiText.notices.agentSceneDraftCreated
-        : uiText.notices.agentDiscussionCreated
+      proposalDirty
+        ? uiText.notices.proposalCreatedNotOpened(result.proposal.id)
+        : result.replacement_applied
+          ? uiText.notices.agentSceneDraftCreated
+          : uiText.notices.agentDiscussionCreated
     );
   }, [
     agentDiscussionForm,
     apiBase,
     draft,
-    draftText,
+    draftDirty,
     endpoint,
     projectId,
+    proposalDirty,
     refreshProposals,
+    selectedProject,
     selectedAgentSourceIds,
+    sourceDocuments,
     crossLanguagePolicy
   ]);
 
@@ -1645,6 +1927,9 @@ export default function App() {
 
   const startNewProposal = useCallback(() => {
     const contentLanguage = outputLanguageOrNull(selectedProject?.language);
+    proposalEditorSnapshotRef.current = null;
+    selectedProposalStableRef.current = null;
+    setCreatingNewProposal(true);
     setSelectedProposalId(null);
     setProposalArtifactType("scene_draft");
     setProposalTitle(
@@ -1665,6 +1950,11 @@ export default function App() {
       getLocaleCatalog(contentLanguage).contentDefaults.untitledProposal;
     const body = proposalText;
     if (selectedProposal) {
+      if (!proposalActionPolicy(
+        selectedProposal.status,
+        proposalDirty,
+        selectedProposal.artifact_type
+      ).editable) throw new Error(uiText.errors.proposalActionUnavailable);
       const saved = await apiPatch<ProposalArtifact>(
         apiBase,
         `/projects/${projectId}/proposals/${selectedProposal.id}`,
@@ -1674,7 +1964,15 @@ export default function App() {
           expected_version: selectedProposal.version
         }
       );
+      proposalEditorSnapshotRef.current = {
+        id: saved.id,
+        version: saved.version,
+        title: saved.title,
+        body: saved.body
+      };
+      selectedProposalStableRef.current = saved;
       await refreshProposals(projectId);
+      setCreatingNewProposal(false);
       setSelectedProposalId(saved.id);
       setNotice(uiText.runtime.proposalSaved(saved.version));
       return;
@@ -1699,6 +1997,14 @@ export default function App() {
         provenance_note: auditText.createProposal
       }
     );
+    proposalEditorSnapshotRef.current = {
+      id: saved.id,
+      version: saved.version,
+      title: saved.title,
+      body: saved.body
+    };
+    selectedProposalStableRef.current = saved;
+    setCreatingNewProposal(false);
     await refreshProposals(projectId);
     setSelectedProposalId(saved.id);
     setNotice(uiText.runtime.proposalCreated(saved.version));
@@ -1709,115 +2015,157 @@ export default function App() {
     proposalSourceDraftId,
     proposalText,
     proposalTitle,
+    proposalDirty,
     refreshProposals,
     sceneId,
     selectedProject,
     selectedProposal
   ]);
 
-  const requestAgentProposal = useCallback(async () => {
-    if (!endpoint) throw new Error(uiText.errors.selectScene);
-    if (
-      selectedProposal &&
-      selectedProposal.status !== "accepted" &&
-      selectedProposal.status !== "rejected"
-    ) {
-      const revised = await apiPost<ProposalArtifact>(
-        apiBase,
-        `/projects/${projectId}/proposals/${selectedProposal.id}/revise`,
-        {
-          actor: "agent",
-          created_via: "workflow",
-          expected_version: selectedProposal.version,
-          note: auditText.reviseProposal
-        }
-      );
-      await refreshProposals(projectId);
-      setSelectedProposalId(revised.id);
-      setWorkspaceTab("proposals");
-      setNotice(uiText.runtime.proposalRevised(revised.version));
-      return;
-    }
-    const result = await apiPost<SceneRunResult>(
-      apiBase,
-      `${endpoint}/runs/scene-generation`,
-      { output_target: "proposal_workspace" }
-    );
-    setContextPack(result.context_pack);
-    setRun(result.workflow_run);
-    setContinuityReport(result.continuity_report);
-    const events = await apiGet<{ events: WorkflowStep[] }>(
-      apiBase,
-      `/runs/${result.workflow_run.id}/events`
-    );
-    setRunEvents(events.events);
-    const refreshed = await refreshProposals(projectId);
-    if (result.proposal) {
-      setSelectedProposalId(result.proposal.id);
-    } else if (refreshed[0]) {
-      setSelectedProposalId(refreshed[0].id);
-    }
-    setWorkspaceTab("proposals");
-    setNotice(uiText.notices.agentSceneDraftCreated);
-  }, [apiBase, endpoint, projectId, refreshProposals, selectedProposal]);
+  const requestProposalNavigation = useCallback(
+    (label: string, action: () => void) => {
+      if (!proposalDirty) {
+        action();
+        return;
+      }
+      pendingProposalNavigationRef.current = action;
+      setPendingProposalNavigation({ label });
+    },
+    [proposalDirty]
+  );
 
-  const extractStateToProposal = useCallback(async () => {
-    if (!endpoint) throw new Error(uiText.errors.selectScene);
-    const result = await apiPost<{
-      proposal: ProposalArtifact;
-      candidate_previews: CandidateFact[];
-      candidates: CandidateFact[];
-    }>(apiBase, `${endpoint}/extract-state`, { output_target: "proposal_workspace" });
-    await refreshProposals(projectId);
-    setSelectedProposalId(result.proposal.id);
-    setWorkspaceTab("proposals");
-    setNotice(uiText.runtime.factDraftCreated(result.candidate_previews.length));
-  }, [apiBase, endpoint, projectId, refreshProposals]);
+  const cancelProposalNavigation = useCallback(() => {
+    pendingProposalNavigationRef.current = null;
+    setPendingProposalNavigation(null);
+  }, []);
+
+  const discardProposalAndNavigate = useCallback(() => {
+    const action = pendingProposalNavigationRef.current;
+    pendingProposalNavigationRef.current = null;
+    setPendingProposalNavigation(null);
+    hydrateProposalEditor(selectedProposal);
+    setCreatingNewProposal(false);
+    action?.();
+  }, [hydrateProposalEditor, selectedProposal]);
+
+  const saveProposalAndNavigate = useCallback(async () => {
+    const action = pendingProposalNavigationRef.current;
+    await continueAfterSuccessfulSave(
+      async () => {
+        let saved = false;
+        await runAction("proposal-save-navigation", async () => {
+          await saveProposal();
+          saved = true;
+        });
+        return saved;
+      },
+      () => {
+        pendingProposalNavigationRef.current = null;
+        setPendingProposalNavigation(null);
+        action?.();
+      }
+    );
+  }, [runAction, saveProposal]);
 
   const submitProposalReview = useCallback(async () => {
     if (!selectedProposal || !projectId) throw new Error(uiText.errors.selectProposal);
+    if (!proposalActionPolicy(
+      selectedProposal.status,
+      proposalDirty,
+      selectedProposal.artifact_type
+    ).canSubmit) throw new Error(uiText.errors.proposalActionUnavailable);
     const saved = await apiPost<ProposalArtifact>(
       apiBase,
       `/projects/${projectId}/proposals/${selectedProposal.id}/submit-review`,
       { expected_version: selectedProposal.version }
     );
     await refreshProposals(projectId);
+    setCreatingNewProposal(false);
     setSelectedProposalId(saved.id);
     setNotice(uiText.runtime.proposalSubmitted(saved.id));
-  }, [apiBase, projectId, refreshProposals, selectedProposal]);
+  }, [apiBase, projectId, proposalDirty, refreshProposals, selectedProposal]);
 
   const reviewProposal = useCallback(
     async (decision: "accept" | "reject") => {
       if (!selectedProposal || !projectId) throw new Error(uiText.errors.selectProposal);
+      if (!proposalActionPolicy(
+        selectedProposal.status,
+        proposalDirty,
+        selectedProposal.artifact_type
+      ).canDecide) throw new Error(uiText.errors.proposalActionUnavailable);
       const saved = await apiPost<ProposalArtifact>(
         apiBase,
         `/projects/${projectId}/proposals/${selectedProposal.id}/${decision}`,
         { reviewer: "author", expected_version: selectedProposal.version }
       );
       await refreshProposals(projectId);
+      setCreatingNewProposal(false);
       setSelectedProposalId(saved.id);
       setNotice(uiText.runtime.proposalDecided(decision === "accept"));
     },
-    [apiBase, projectId, refreshProposals, selectedProposal]
+    [apiBase, projectId, proposalDirty, refreshProposals, selectedProposal]
   );
 
   const promoteProposalToDraft = useCallback(async () => {
     if (!selectedProposal || !projectId || !sceneId) throw new Error(uiText.errors.selectSceneAndProposal);
+    if (!proposalActionPolicy(
+      selectedProposal.status,
+      proposalDirty,
+      selectedProposal.artifact_type
+    ).canPromote || selectedProposal.artifact_type !== "scene_draft") {
+      throw new Error(uiText.errors.proposalActionUnavailable);
+    }
+    if (proposalDerivedDraftRef.status !== "none") {
+      throw new Error(
+        proposalDerivedDraftRef.status === "ambiguous"
+          ? uiText.errors.proposalDerivedDraftAmbiguous
+          : uiText.errors.proposalAlreadyPromoted
+      );
+    }
+    if (proposalTarget.status !== "ready") {
+      throw new Error(
+        proposalTarget.status === "ambiguous"
+          ? uiText.errors.proposalTargetAmbiguous
+          : proposalTarget.status === "missing_scene"
+            ? uiText.errors.proposalTargetMissing
+            : uiText.errors.proposalTargetMismatch
+      );
+    }
     const result = await apiPost<ProposalDraftPromotionResult>(
       apiBase,
       `/projects/${projectId}/proposals/${selectedProposal.id}/promote/draft`,
       { scene_id: sceneId, expected_version: selectedProposal.version }
     );
+    draftRequestSequenceRef.current += 1;
     setDraft(result.draft);
     setDraftText(result.draft.text);
     setDraftSummary(result.draft.summary ?? "");
+    setDraftSelection("");
+    setAgentDiscussionForm((current) => ({ ...current, selectedText: "" }));
     await refreshProposals(projectId);
+    setCreatingNewProposal(false);
     setSelectedProposalId(result.proposal.id);
     setNotice(uiText.runtime.proposalPromoted(result.draft.version));
-  }, [apiBase, projectId, refreshProposals, sceneId, selectedProposal]);
+  }, [
+    apiBase,
+    projectId,
+    proposalDerivedDraftRef,
+    proposalDirty,
+    proposalTarget,
+    refreshProposals,
+    sceneId,
+    selectedProposal
+  ]);
 
   const applyProjectStructureProposal = useCallback(async () => {
     if (!selectedProposal || !projectId) throw new Error(uiText.errors.selectProjectStructureProposal);
+    if (!proposalActionPolicy(
+      selectedProposal.status,
+      proposalDirty,
+      selectedProposal.artifact_type
+    ).canPromote || selectedProposal.artifact_type !== "project_structure_draft") {
+      throw new Error(uiText.errors.proposalActionUnavailable);
+    }
     const result = await apiPost<ProjectStructureApplyResult>(
       apiBase,
       `/projects/${projectId}/proposals/${selectedProposal.id}/apply/project-structure`,
@@ -1830,6 +2178,7 @@ export default function App() {
     await refreshWorkspace(projectId, result.scenes[0]?.id ?? sceneId);
     await refreshGraphPreview(projectId);
     await refreshProposals(projectId);
+    setCreatingNewProposal(false);
     setSelectedProposalId(result.proposal.id);
     if (result.scenes[0]?.id) {
       setSceneId(result.scenes[0].id);
@@ -1845,6 +2194,7 @@ export default function App() {
   }, [
     apiBase,
     projectId,
+    proposalDirty,
     refreshGraphPreview,
     refreshProposals,
     refreshWorkspace,
@@ -1854,6 +2204,13 @@ export default function App() {
 
   const promoteProposalToCandidates = useCallback(async () => {
     if (!selectedProposal || !projectId) throw new Error(uiText.errors.selectProposal);
+    if (!proposalActionPolicy(
+      selectedProposal.status,
+      proposalDirty,
+      selectedProposal.artifact_type
+    ).canPromote || selectedProposal.artifact_type !== "fact_draft") {
+      throw new Error(uiText.errors.proposalActionUnavailable);
+    }
     const sourceDraftId =
       proposalSourceDraftId.trim() || findProposalRef(selectedProposal, "draft") || draft?.id || "";
     if (!sourceDraftId) throw new Error(uiText.errors.sourceDraftRequired);
@@ -1867,6 +2224,7 @@ export default function App() {
     );
     await refreshProposals(projectId);
     await refreshFacts();
+    setCreatingNewProposal(false);
     setSelectedProposalId(result.proposal.id);
     setActiveTab("facts");
     setNotice(uiText.runtime.candidatesSubmitted(result.candidates.length));
@@ -1874,6 +2232,7 @@ export default function App() {
     apiBase,
     draft,
     projectId,
+    proposalDirty,
     proposalSourceDraftId,
     refreshFacts,
     refreshProposals,
@@ -1956,6 +2315,10 @@ export default function App() {
   }, [refreshLatestDraft]);
 
   useEffect(() => {
+    resetProposalScope();
+  }, [apiBase, projectId, resetProposalScope]);
+
+  useEffect(() => {
     refreshProposals().catch(() => undefined);
   }, [refreshProposals]);
 
@@ -2017,22 +2380,140 @@ export default function App() {
   }, [apiBase, projectId, selectedSourceDocumentId, sourceDetailRevision]);
 
   useEffect(() => {
-    if (!proposals.length) {
-      setSelectedProposalId(null);
-      return;
+    const nextProposalId = proposalAutoSelection(
+      proposals.map((proposal) => proposal.id),
+      selectedProposalId,
+      creatingNewProposal,
+      proposalDirty
+    );
+    if (nextProposalId !== selectedProposalId) {
+      setSelectedProposalId(nextProposalId);
     }
-    if (!selectedProposalId || !proposals.some((proposal) => proposal.id === selectedProposalId)) {
-      setSelectedProposalId(proposals[0].id);
-    }
-  }, [proposals, selectedProposalId]);
+  }, [creatingNewProposal, proposalDirty, proposals, selectedProposalId]);
 
   useEffect(() => {
     if (!selectedProposal) return;
-    setProposalTitle(selectedProposal.title);
-    setProposalText(selectedProposal.body);
-    setProposalArtifactType(selectedProposal.artifact_type);
-    setProposalSourceDraftId(findProposalRef(selectedProposal, "draft") ?? draft?.id ?? "");
-  }, [draft, selectedProposal]);
+    selectedProposalStableRef.current = selectedProposal;
+    if (
+      !shouldHydrateProposalEditor(
+        proposalEditorSnapshotRef.current,
+        selectedProposal,
+        proposalTitle,
+        proposalText
+      )
+    ) return;
+    hydrateProposalEditor(selectedProposal);
+  }, [hydrateProposalEditor, proposalText, proposalTitle, selectedProposal]);
+
+  useEffect(() => {
+    if (!projectId || !selectedProposal) {
+      reviewProposalOwnerRef.current = null;
+      setProposalVersions([]);
+      setProposalVersionsLoading(false);
+      setReviewProposalVersion(null);
+      return;
+    }
+    let cancelled = false;
+    setProposalVersionsLoading(true);
+    apiGet<{ versions: ProposalArtifact[] }>(
+      apiBase,
+      `/projects/${projectId}/proposals/${selectedProposal.id}/versions`
+    )
+      .then((payload) => {
+        if (cancelled) return;
+        const proposalChanged = reviewProposalOwnerRef.current !== selectedProposal.id;
+        reviewProposalOwnerRef.current = selectedProposal.id;
+        setProposalVersions(payload.versions);
+        setReviewProposalVersion((current) =>
+          !proposalChanged && current !== null && payload.versions.some(
+            (version) => version.version === current
+          )
+            ? current
+            : selectedProposal.version
+        );
+      })
+      .catch((exc) => {
+        if (cancelled) return;
+        setProposalVersions([]);
+        setError(uiText.errors.requestFailed);
+        setTechnicalError(technicalErrorMessage(exc));
+      })
+      .finally(() => {
+        if (!cancelled) setProposalVersionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, projectId, selectedProposal]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadExactDraft = async (
+      resolution: UniqueRefResolution,
+      targetResolution: UniqueRefResolution,
+      setLookup: React.Dispatch<React.SetStateAction<ExactDraftLookup>>
+    ) => {
+      if (resolution.status === "none") {
+        setLookup({ status: "none", ref: null, draft: null });
+        return;
+      }
+      if (resolution.status === "ambiguous") {
+        setLookup({ status: "ambiguous", ref: null, draft: null });
+        return;
+      }
+      if (targetResolution.status !== "unique" || !projectId) {
+        setLookup({ status: "missing_target", ref: resolution.ref, draft: null });
+        return;
+      }
+      setLookup({ status: "loading", ref: resolution.ref, draft: null });
+      try {
+        const exact = await apiGet<Draft>(
+          apiBase,
+          `/projects/${projectId}/scenes/${targetResolution.ref}/drafts/${resolution.ref}`
+        );
+        if (cancelled) return;
+        if (
+          exact.id !== resolution.ref ||
+          exact.project_id !== projectId ||
+          exact.scene_id !== targetResolution.ref
+        ) {
+          setLookup({ status: "error", ref: resolution.ref, draft: null });
+          return;
+        }
+        setLookup({ status: "ready", ref: resolution.ref, draft: exact });
+      } catch {
+        if (!cancelled) setLookup({ status: "error", ref: resolution.ref, draft: null });
+      }
+    };
+
+    void loadExactDraft(proposalBaselineRef, proposalReviewTargetRef, setProposalBaseline);
+    void loadExactDraft(
+      proposalDerivedDraftRef,
+      proposalPromotedDraftTargetRef,
+      setProposalPromotedDraft
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    apiBase,
+    projectId,
+    proposalBaselineRef,
+    proposalDerivedDraftRef,
+    proposalPromotedDraftTargetRef,
+    proposalReviewTargetRef,
+    proposalTargetRef
+  ]);
+
+  useEffect(() => {
+    if (!proposalDirty) return;
+    const preventUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", preventUnload);
+    return () => window.removeEventListener("beforeunload", preventUnload);
+  }, [proposalDirty]);
 
   useEffect(() => {
     const firstChapterId = selectedProject?.chapters[0]?.id ?? "";
@@ -2064,45 +2545,78 @@ export default function App() {
   const canRunScene = hasScene && canGenerate && !writerNeedsKey && projectLanguageReady;
   const canDiscussWithAgent = hasScene && canGenerate && llmConfigured && projectLanguageReady;
   const toggleAgentSource = useCallback((sourceId: string) => {
-    const source = sourceDocuments.find((item) => item.id === sourceId);
-    if (!source || source.language === "und") {
-      setNotice(uiText.language.sourceUnknownDisabled);
+    if (selectedAgentSourceIds.has(sourceId)) {
+      setSelectedAgentSourceIds((current) => {
+        const next = new Set(current);
+        next.delete(sourceId);
+        return next;
+      });
       return;
     }
-    if (
-      source.language !== outputLanguageOrNull(selectedProject?.language) &&
-      crossLanguagePolicy !== "explicit_reference"
-    ) {
-      setNotice(uiText.language.sourceMismatchDisabled);
+    const source = sourceDocuments.find((item) => item.id === sourceId);
+    if (!source) return;
+    const eligibility = sourceAgentEligibility(
+      source,
+      outputLanguageOrNull(selectedProject?.language),
+      crossLanguagePolicy
+    );
+    if (eligibility !== "eligible") {
+      setNotice(formatSourceAgentEligibility(eligibility));
       return;
     }
     setSelectedAgentSourceIds((current) => {
       const next = new Set(current);
-      if (next.has(sourceId)) {
-        next.delete(sourceId);
-      } else if (next.size < 32) {
+      if (next.size < 32) {
         next.add(sourceId);
       } else {
         setNotice(uiText.notices.agentSourceLimit);
       }
       return next;
     });
-  }, [crossLanguagePolicy, selectedProject, sourceDocuments]);
+  }, [crossLanguagePolicy, selectedAgentSourceIds, selectedProject, sourceDocuments]);
+  const useSourceWithAgent = useCallback(
+    (source: SourceDocumentSummary) => {
+      if (!hasScene) {
+        setNotice(uiText.errors.selectScene);
+        return;
+      }
+      if (!sourceCanHandoff(source)) {
+        setNotice(formatSourceAgentEligibility(
+          source.extraction_status === "ready" ? "unknown_language" : "not_ready"
+        ));
+        return;
+      }
+      if (!outputLanguageOrNull(selectedProject?.language)) {
+        setNotice(uiText.errors.projectLanguageRequired);
+        return;
+      }
+      if (!selectedAgentSourceIds.has(source.id) && selectedAgentSourceIds.size >= 32) {
+        setNotice(uiText.notices.agentSourceLimit);
+        return;
+      }
+      setSelectedAgentSourceIds((current) => {
+        if (current.has(source.id)) return current;
+        return addStableSourceSelection(current, source.id);
+      });
+      setWorkspaceTab("agent");
+      const sendEligibility = sourceAgentEligibility(
+        source,
+        outputLanguageOrNull(selectedProject?.language),
+        crossLanguagePolicy
+      );
+      setNotice(
+        sendEligibility === "eligible"
+          ? uiText.notices.sourceAddedToAgent(source.title)
+          : uiText.notices.sourceAddedToAgentBlocked(source.title)
+      );
+    },
+    [crossLanguagePolicy, hasScene, selectedAgentSourceIds, selectedProject]
+  );
   const changeCrossLanguagePolicy = useCallback(
     (policy: CrossLanguagePolicy) => {
       setCrossLanguagePolicy(policy);
-      if (policy !== "project_only") return;
-      const projectLanguage = outputLanguageOrNull(selectedProject?.language);
-      const allowedIds = new Set(
-        sourceDocuments
-          .filter((source) => source.language === projectLanguage)
-          .map((source) => source.id)
-      );
-      setSelectedAgentSourceIds(
-        (current) => new Set(Array.from(current).filter((id) => allowedIds.has(id)))
-      );
     },
-    [selectedProject, sourceDocuments]
+    []
   );
   const runEditCommand = useCallback((command: "undo" | "redo") => {
     const active = document.activeElement;
@@ -2143,11 +2657,14 @@ export default function App() {
           </button>
           <button
             type="button"
-            onClick={() =>
-              runAction("workspace", async () => {
-                await refreshWorkspace(projectId, sceneId);
-              })
-            }
+            onClick={() => requestProposalNavigation(
+              uiText.proposals.navigateRefresh,
+              () => {
+                void runAction("workspace", async () => {
+                  await refreshWorkspace(projectId, sceneId);
+                });
+              }
+            )}
             disabled={busy !== null}
             title={uiText.commandBar.refreshTitle}
           >
@@ -2177,6 +2694,8 @@ export default function App() {
             value={apiBase}
             onChange={(event) => setApiBase(event.target.value)}
             aria-label={uiText.runtime.apiAddressAria}
+            disabled={proposalDirty}
+            title={proposalDirty ? uiText.proposals.dirtyActionHelp : undefined}
           />
         </label>
         <div className="top-actions">
@@ -2204,35 +2723,66 @@ export default function App() {
             onCreateChapter={() => runAction("create-chapter", createChapter)}
             onCreateCharacter={() => runAction("create-character", createCharacter)}
             onCreateLocation={() => runAction("create-location", createLocation)}
-            onCreateProject={() => runAction("create-project", createProject)}
-            onCreateScene={() => runAction("create-scene", createScene)}
+            onCreateProject={() => requestProposalNavigation(
+              uiText.proposals.navigateCreateProject,
+              () => { void runAction("create-project", createProject); }
+            )}
+            onCreateScene={() => requestProposalNavigation(
+              uiText.proposals.navigateCreateScene,
+              () => { void runAction("create-scene", createScene); }
+            )}
             onCreateWorldRule={() => runAction("create-world-rule", createWorldRule)}
-            onArchiveDemo={() => runAction("archive-demo", archiveDemo)}
+            onArchiveDemo={() => requestProposalNavigation(
+              uiText.proposals.navigateArchiveDemo,
+              () => { void runAction("archive-demo", archiveDemo); }
+            )}
             onLocationFormChange={setLocationForm}
             onProjectFormChange={setProjectForm}
             onUpdateProject={() => runAction("update-project", updateProject)}
             onRefresh={() =>
-              runAction("workspace", async () => {
-                await refreshWorkspace(projectId, sceneId);
-              })
+              requestProposalNavigation(
+                uiText.proposals.navigateRefresh,
+                () => {
+                  void runAction("workspace", async () => {
+                    await refreshWorkspace(projectId, sceneId);
+                  });
+                }
+              )
             }
             onSceneFormChange={setSceneForm}
             onSelectProject={(nextProjectId) => {
+              if (nextProjectId === projectId) return;
               const nextProject = projects.find((project) => project.id === nextProjectId);
               const firstScene = nextProject ? flattenScenes(nextProject)[0] : null;
-              setProjectId(nextProjectId);
-              setSceneId(firstScene?.id ?? "");
-              setContextPack(null);
-              setRun(null);
-              setRunEvents([]);
-              setContinuityReport(null);
+              requestProposalNavigation(
+                uiText.proposals.navigateProject(nextProject?.title ?? nextProjectId),
+                () => {
+                  setCreatingNewProposal(false);
+                  setProposals([]);
+                  setSelectedProposalId(null);
+                  hydrateProposalEditor(null);
+                  setProjectId(nextProjectId);
+                  setSceneId(firstScene?.id ?? "");
+                  setContextPack(null);
+                  setRun(null);
+                  setRunEvents([]);
+                  setContinuityReport(null);
+                }
+              );
             }}
             onSelectScene={(nextSceneId) => {
-              setSceneId(nextSceneId);
-              setContextPack(null);
-              setRun(null);
-              setRunEvents([]);
-              setContinuityReport(null);
+              if (nextSceneId === sceneId) return;
+              const nextScene = findScene(projects, projectId, nextSceneId);
+              requestProposalNavigation(
+                uiText.proposals.navigateScene(nextScene?.title ?? nextSceneId),
+                () => {
+                  setSceneId(nextSceneId);
+                  setContextPack(null);
+                  setRun(null);
+                  setRunEvents([]);
+                  setContinuityReport(null);
+                }
+              );
             }}
             onUpdateChapter={() => runAction("update-chapter", updateChapter)}
             onUpdateScene={() => runAction("update-scene", updateScene)}
@@ -2364,8 +2914,17 @@ export default function App() {
 
           {workspaceTab === "sources" && (
           <section
+            ref={libraryPanelRef}
             className={`library-panel ${sourceImportProgress ? "has-import-progress" : ""}`}
             aria-label={uiText.library.ariaLabel}
+            style={
+              sourcePaneStacked
+                ? undefined
+                : ({
+                    "--source-panel-height": `${effectiveSourcePaneLayout.panelHeight}px`,
+                    "--source-tree-width": `${effectiveSourcePaneLayout.treeWidth}px`
+                  } as React.CSSProperties)
+            }
           >
             <div className="library-header">
               <div>
@@ -2411,7 +2970,7 @@ export default function App() {
             {sourceImportProgress && (
               <SourceImportStatus progress={sourceImportProgress} />
             )}
-            <div className="library-grid">
+            <div className="library-grid" ref={libraryGridRef}>
               <div className="library-tree-panel">
                 {sourceDocuments.length ? (
                   <LibraryTree
@@ -2429,6 +2988,20 @@ export default function App() {
                   />
                 )}
               </div>
+              {!sourcePaneStacked && (
+                <PaneResizeHandle
+                  ariaLabel={uiText.library.resizeWidthAria}
+                  help={uiText.library.resizeHelp}
+                  max={sourcePaneBoundsState.maxTreeWidth}
+                  min={sourcePaneBoundsState.minTreeWidth}
+                  onChange={(value, commit) =>
+                    changeSourcePaneDimension("treeWidth", value, commit)
+                  }
+                  onReset={() => resetSourcePaneDimension("treeWidth")}
+                  orientation="vertical"
+                  value={effectiveSourcePaneLayout.treeWidth}
+                />
+              )}
               <DocumentReader
                 busy={busy}
                 canGenerate={canGenerate}
@@ -2461,12 +3034,27 @@ export default function App() {
                     updateSourceDocumentLanguage(document, language)
                   )
                 }
+                onUseWithAgent={useSourceWithAgent}
                 onPolicyChange={changeCrossLanguagePolicy}
                 crossLanguagePolicy={crossLanguagePolicy}
                 projectLanguage={outputLanguageOrNull(selectedProject?.language)}
                 summary={selectedSourceSummary}
               />
             </div>
+            {!sourcePaneStacked && (
+              <PaneResizeHandle
+                ariaLabel={uiText.library.resizeHeightAria}
+                help={uiText.library.resizeHelp}
+                max={sourcePaneBoundsState.maxPanelHeight}
+                min={sourcePaneBoundsState.minPanelHeight}
+                onChange={(value, commit) =>
+                  changeSourcePaneDimension("panelHeight", value, commit)
+                }
+                onReset={() => resetSourcePaneDimension("panelHeight")}
+                orientation="horizontal"
+                value={effectiveSourcePaneLayout.panelHeight}
+              />
+            )}
           </section>
           )}
 
@@ -2474,14 +3062,18 @@ export default function App() {
           <AgentDiscussionPanel
             busy={busy}
             canDiscuss={canDiscussWithAgent}
+            draft={draft}
+            draftDirty={draftDirty}
             draftSelection={draftSelection}
             form={agentDiscussionForm}
             hasScene={hasScene}
             llmConfigured={llmConfigured}
             onFormChange={setAgentDiscussionForm}
+            onOpenWriting={() => setWorkspaceTab("write")}
             onOpenProposal={() => setWorkspaceTab("proposals")}
             onPolicyChange={changeCrossLanguagePolicy}
             onSubmit={() => runAction("agent-discussion", requestAgentDiscussion)}
+            onRestoreDraft={restoreSavedDraft}
             onToggleSource={toggleAgentSource}
             onUseDraftSelection={useDraftSelectionForAgent}
             result={agentDiscussionResult}
@@ -2490,40 +3082,94 @@ export default function App() {
             sources={sourceDocuments}
             crossLanguagePolicy={crossLanguagePolicy}
             projectLanguage={outputLanguageOrNull(selectedProject?.language)}
+            projectId={projectId}
+            sceneId={sceneId}
+            sceneTitle={selectedScene?.title ?? ""}
           />
           )}
 
           {workspaceTab === "proposals" && (
           <ProposalInbox
+            baseline={proposalBaseline}
             busy={busy}
             canGenerate={canGenerate}
             canReview={canReview}
             currentDraftId={draft?.id ?? ""}
+            currentSceneId={sceneId}
+            derivedDraftRef={proposalDerivedDraftRef}
+            diffRows={proposalDiffRows}
+            dirty={proposalDirty}
             filter={proposalStatusFilter}
             hasScene={hasScene}
             onAccept={() => runAction("proposal-accept", () => reviewProposal("accept"))}
             onApplyProjectStructure={() =>
               runAction("proposal-structure", applyProjectStructureProposal)
             }
-            onCreateNew={startNewProposal}
+            onCreateNew={() =>
+              requestProposalNavigation(uiText.proposals.navigateNewProposal, startNewProposal)
+            }
             onExtractCandidates={() =>
               runAction("proposal-candidates", promoteProposalToCandidates)
-            }
-            onExtractFactDraft={() =>
-              runAction("proposal-fact-draft", extractStateToProposal)
             }
             onFilterChange={setProposalStatusFilter}
             onOpenCanonReview={() => {
               setActiveTab("facts");
             setNotice(uiText.notices.openedFactReview);
             }}
+            onOpenPromotedDraft={() => {
+              if (!canOpenPromotedDraft(
+                proposalDerivedDraftRef,
+                proposalPromotedDraft.status === "ready"
+              ) || proposalPromotedDraft.status !== "ready") return;
+              if (!exactDraftMatchesEditorScene(
+                proposalPromotedDraft.draft.scene_id,
+                sceneId
+              )) {
+                setNotice(uiText.proposals.openDraftSwitchFirst);
+                return;
+              }
+              draftRequestSequenceRef.current += 1;
+              setDraft(proposalPromotedDraft.draft);
+              setDraftText(proposalPromotedDraft.draft.text);
+              setDraftSummary(proposalPromotedDraft.draft.summary ?? "");
+              setDraftSelection("");
+              setAgentDiscussionForm((current) => ({ ...current, selectedText: "" }));
+              setWorkspaceTab("write");
+              setNotice(uiText.notices.promotedDraftOpened(
+                proposalPromotedDraft.draft.id,
+                proposalPromotedDraft.draft.version
+              ));
+            }}
             onPromoteDraft={() => runAction("proposal-draft", promoteProposalToDraft)}
             onReject={() => runAction("proposal-reject", () => reviewProposal("reject"))}
-            onRequestAgent={() => runAction("proposal-agent", requestAgentProposal)}
+            onReviewVersion={setReviewProposalVersion}
             onSave={() => runAction("proposal-save", saveProposal)}
-            onSelect={setSelectedProposalId}
+            onSelect={(nextProposalId) => {
+              if (nextProposalId === selectedProposalId) return;
+              const nextProposal = proposals.find((proposal) => proposal.id === nextProposalId);
+              requestProposalNavigation(
+                uiText.proposals.navigateProposal(nextProposal?.title ?? nextProposalId),
+                () => {
+                  setCreatingNewProposal(false);
+                  setSelectedProposalId(nextProposalId);
+                }
+              );
+            }}
             onSourceDraftChange={setProposalSourceDraftId}
             onSubmitReview={() => runAction("proposal-submit", submitProposalReview)}
+            onSwitchTarget={() => {
+              if (!proposalTargetScene) return;
+              requestProposalNavigation(
+                uiText.proposals.navigateScene(proposalTargetScene.title),
+                () => {
+                  setSceneId(proposalTargetScene.id);
+                  setContextPack(null);
+                  setRun(null);
+                  setRunEvents([]);
+                  setContinuityReport(null);
+                }
+              );
+            }}
             onTextChange={setProposalText}
             onTitleChange={setProposalTitle}
             onTypeChange={setProposalArtifactType}
@@ -2532,7 +3178,14 @@ export default function App() {
             proposalTitle={proposalTitle}
             proposalType={proposalArtifactType}
             proposals={visibleProposals}
+            promotedDraft={proposalPromotedDraft}
+            reviewProposal={selectedReviewProposal}
+            reviewVersion={reviewProposalVersion}
             selectedProposal={selectedProposal}
+            targetPolicy={proposalTarget}
+            targetScene={proposalTargetScene}
+            versions={proposalVersions}
+            versionsLoading={proposalVersionsLoading}
           />
           )}
 
@@ -2640,6 +3293,57 @@ export default function App() {
           <GraphPreview preview={graphPreview} selectedSceneId={sceneId} />
         </aside>
       </div>
+      {pendingProposalNavigation && (
+        <UnsavedProposalDialog
+          busy={busy !== null}
+          destination={pendingProposalNavigation.label}
+          onCancel={cancelProposalNavigation}
+          onDiscard={discardProposalAndNavigate}
+          onSave={saveProposalAndNavigate}
+        />
+      )}
+    </div>
+  );
+}
+
+function UnsavedProposalDialog({
+  busy,
+  destination,
+  onCancel,
+  onDiscard,
+  onSave
+}: {
+  busy: boolean;
+  destination: string;
+  onCancel: () => void;
+  onDiscard: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        aria-describedby="proposal-navigation-description"
+        aria-labelledby="proposal-navigation-title"
+        aria-modal="true"
+        className="unsaved-proposal-dialog"
+        role="dialog"
+      >
+        <h2 id="proposal-navigation-title">{uiText.proposals.unsavedDialogTitle}</h2>
+        <p id="proposal-navigation-description">
+          {uiText.proposals.unsavedDialogText(destination)}
+        </p>
+        <div className="dialog-actions">
+          <button className="primary" disabled={busy} onClick={onSave} type="button">
+            <Save size={14} /> {uiText.proposals.saveAndContinue}
+          </button>
+          <button className="danger" disabled={busy} onClick={onDiscard} type="button">
+            {uiText.proposals.discardAndContinue}
+          </button>
+          <button disabled={busy} onClick={onCancel} type="button">
+            {uiText.common.cancel}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -2648,13 +3352,17 @@ function AgentDiscussionPanel({
   busy,
   canDiscuss,
   crossLanguagePolicy,
+  draft,
+  draftDirty,
   draftSelection,
   form,
   hasScene,
   llmConfigured,
   onFormChange,
+  onOpenWriting,
   onOpenProposal,
   onPolicyChange,
+  onRestoreDraft,
   onSubmit,
   onToggleSource,
   onUseDraftSelection,
@@ -2662,18 +3370,25 @@ function AgentDiscussionPanel({
   selectedProposal,
   selectedSourceIds,
   sources,
-  projectLanguage
+  projectLanguage,
+  projectId,
+  sceneId,
+  sceneTitle
 }: {
   busy: string | null;
   canDiscuss: boolean;
   crossLanguagePolicy: CrossLanguagePolicy;
+  draft: Draft | null;
+  draftDirty: boolean;
   draftSelection: string;
   form: AgentDiscussionForm;
   hasScene: boolean;
   llmConfigured: boolean;
   onFormChange: React.Dispatch<React.SetStateAction<AgentDiscussionForm>>;
+  onOpenWriting: () => void;
   onOpenProposal: () => void;
   onPolicyChange: (policy: CrossLanguagePolicy) => void;
+  onRestoreDraft: () => void;
   onSubmit: () => void;
   onToggleSource: (sourceId: string) => void;
   onUseDraftSelection: () => void;
@@ -2682,15 +3397,56 @@ function AgentDiscussionPanel({
   selectedSourceIds: Set<string>;
   sources: SourceDocumentSummary[];
   projectLanguage: AppLocale | null;
+  projectId: string;
+  sceneId: string;
+  sceneTitle: string;
 }) {
   const selectedRequired = form.mode === "revise_selection";
   const draftRequired = form.mode !== "discuss";
+  const includedDraft = agentIncludedDraftPolicy(
+    draft,
+    form.includeLatestDraft,
+    draftDirty,
+    projectId,
+    sceneId
+  );
+  const selectedSources = sources.filter((source) => selectedSourceIds.has(source.id));
+  const missingSourceIds = Array.from(selectedSourceIds).filter(
+    (sourceId) => !sources.some((source) => source.id === sourceId)
+  );
+  const blockedSourceIds = Array.from(selectedSourceIds).filter((sourceId) => {
+    const source = sources.find((item) => item.id === sourceId);
+    return !source || sourceAgentEligibility(
+      source,
+      projectLanguage,
+      crossLanguagePolicy
+    ) !== "eligible";
+  });
   const canSubmit =
     canDiscuss &&
     busy === null &&
+    blockedSourceIds.length === 0 &&
     form.instruction.trim().length > 0 &&
+    (!form.includeLatestDraft || includedDraft.status === "ready") &&
     (!draftRequired || form.includeLatestDraft) &&
     (!selectedRequired || form.selectedText.trim().length > 0);
+  const savedDraftManifest = includedDraft.status === "excluded"
+    ? uiText.agentDiscussion.manifestExcluded
+    : draft
+      ? `${draft.id} / v${draft.version}`
+      : uiText.agentDiscussion.manifestNoSavedDraft;
+  const localDraftState = draftDirty
+    ? uiText.agentDiscussion.manifestDraftDirty
+    : includedDraft.status === "blocked_scope"
+      ? uiText.agentDiscussion.manifestDraftScopeMismatch
+    : draft
+      ? uiText.agentDiscussion.manifestDraftSynced
+      : uiText.agentDiscussion.manifestNoSavedDraft;
+  const webState = form.allowWebSearch
+    ? form.webSearchQuery.trim()
+      ? uiText.agentDiscussion.manifestWebQuery(form.webSearchQuery.trim())
+      : uiText.agentDiscussion.manifestWebEnabled
+    : uiText.agentDiscussion.manifestWebDisabled;
   return (
     <section className="agent-panel" aria-label={uiText.agentDiscussion.ariaLabel}>
       <div className="agent-compose">
@@ -2756,6 +3512,61 @@ function AgentDiscussionPanel({
         </div>
       </div>
       <div className="agent-context">
+        <section className="agent-input-manifest" aria-label={uiText.agentDiscussion.manifestTitle}>
+          <div className="agent-source-head">
+            <div>
+              <strong>{uiText.agentDiscussion.manifestTitle}</strong>
+              <span>{uiText.agentDiscussion.manifestDescription}</span>
+            </div>
+          </div>
+          <MetricRow
+            label={uiText.agentDiscussion.manifestTargetScene}
+            value={sceneId ? `${sceneTitle || uiText.common.notSet} / ${sceneId}` : uiText.common.none}
+          />
+          <MetricRow
+            label={uiText.agentDiscussion.manifestOutputLanguage}
+            value={projectLanguage ? formatArtifactLanguage(projectLanguage, false) : uiText.language.projectLanguageNeedsReview}
+          />
+          <MetricRow label={uiText.agentDiscussion.manifestSavedDraft} value={savedDraftManifest} />
+          <MetricRow label={uiText.agentDiscussion.manifestLocalDraftState} value={localDraftState} />
+          <MetricRow
+            label={uiText.agentDiscussion.manifestContextPack}
+            value={
+              form.includeContextPack
+                ? uiText.agentDiscussion.manifestContextRebuilt
+                : uiText.agentDiscussion.manifestExcluded
+            }
+          />
+          <MetricRow
+            label={uiText.agentDiscussion.manifestPolicy}
+            value={
+              crossLanguagePolicy === "explicit_reference"
+                ? uiText.language.explicitReference
+                : uiText.language.projectOnly
+            }
+          />
+          <MetricRow label={uiText.agentDiscussion.manifestWebSearch} value={webState} />
+          <ListBlock
+            title={uiText.agentDiscussion.manifestSources}
+            items={[
+              ...selectedSources.map((source) => {
+                const eligibility = sourceAgentEligibility(
+                  source,
+                  projectLanguage,
+                  crossLanguagePolicy
+                );
+                return `${source.title} · ${formatSourceLanguage(source.language)} · ${source.id}${
+                  eligibility === "eligible"
+                    ? ""
+                    : ` · ${uiText.agentDiscussion.manifestSourceBlocked}`
+                }`;
+              }),
+              ...missingSourceIds.map(
+                (sourceId) => `${uiText.agentDiscussion.sourceMissing} · ${formatSourceLanguage("und")} · ${sourceId} · ${uiText.agentDiscussion.manifestSourceBlocked}`
+              )
+            ]}
+          />
+        </section>
         <div className="agent-options">
           <label>
             <input
@@ -2828,6 +3639,34 @@ function AgentDiscussionPanel({
             <span>{uiText.agentDiscussion.revisionNeedsDraft}</span>
           </div>
         )}
+        {form.includeLatestDraft && includedDraft.status !== "ready" && (
+          <div className="agent-context-note warning agent-draft-recovery">
+            <div>
+              <AlertTriangle size={14} />
+              <span>
+                {includedDraft.status === "blocked_scope"
+                  ? uiText.errors.agentDraftScopeMismatch
+                  : uiText.errors.agentIncludedDraftMustBeSaved}
+              </span>
+            </div>
+            <div>
+              <button type="button" onClick={onOpenWriting} disabled={busy !== null}>
+                <FileText size={13} /> {uiText.agentDiscussion.openWriting}
+              </button>
+              {canRestoreSavedDraft(draft, draftDirty) && (
+                <button className="danger" type="button" onClick={onRestoreDraft} disabled={busy !== null}>
+                  {uiText.agentDiscussion.restoreSavedDraft}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {blockedSourceIds.length > 0 && (
+          <div className="agent-context-note warning">
+            <AlertTriangle size={14} />
+            <span>{uiText.errors.agentSourcesBlockedByPolicy}</span>
+          </div>
+        )}
         <div className="agent-source-picker">
           <div className="agent-source-head">
             <div>
@@ -2836,7 +3675,7 @@ function AgentDiscussionPanel({
             </div>
             <small>{uiText.agentDiscussion.sourcePickerDefault}</small>
           </div>
-          {sources.length ? (
+          {sources.length || missingSourceIds.length ? (
             <div className="agent-source-list" aria-label={uiText.agentDiscussion.sourcePickerAria}>
               {sources.map((source) => {
                 const ready = source.extraction_status === "ready";
@@ -2846,16 +3685,17 @@ function AgentDiscussionPanel({
                   (source.language === projectLanguage ||
                     crossLanguagePolicy === "explicit_reference");
                 const selectable = ready && languageKnown && languageAllowed;
+                const selected = selectedSourceIds.has(source.id);
                 const languageTitle = !languageKnown
                   ? uiText.language.sourceUnknownDisabled
                   : !languageAllowed
                     ? uiText.language.sourceMismatchDisabled
                     : undefined;
                 return (
-                  <label className={!selectable ? "disabled" : ""} key={source.id} title={languageTitle}>
+                  <label className={!selectable && !selected ? "disabled" : ""} key={source.id} title={languageTitle}>
                     <input
-                      checked={selectedSourceIds.has(source.id)}
-                      disabled={!selectable || busy !== null}
+                      checked={selected}
+                      disabled={(!selectable && !selected) || busy !== null}
                       onChange={() => onToggleSource(source.id)}
                       type="checkbox"
                     />
@@ -2868,6 +3708,20 @@ function AgentDiscussionPanel({
                   </label>
                 );
               })}
+              {missingSourceIds.map((sourceId) => (
+                <label className="warning" key={sourceId} title={uiText.agentDiscussion.sourceMissingHelp}>
+                  <input
+                    checked
+                    disabled={busy !== null}
+                    onChange={() => onToggleSource(sourceId)}
+                    type="checkbox"
+                  />
+                  <span>
+                    <strong>{uiText.agentDiscussion.sourceMissing}</strong>
+                    <small>{sourceId}</small>
+                  </span>
+                </label>
+              ))}
             </div>
           ) : (
             <p className="agent-source-empty">{uiText.agentDiscussion.sourcePickerEmpty}</p>
@@ -2906,26 +3760,32 @@ function AgentDiscussionPanel({
 }
 
 function ProposalInbox({
+  baseline,
   busy,
   canGenerate,
   canReview,
   currentDraftId,
+  currentSceneId,
+  derivedDraftRef,
+  diffRows,
+  dirty,
   filter,
   hasScene,
   onAccept,
   onApplyProjectStructure,
   onCreateNew,
   onExtractCandidates,
-  onExtractFactDraft,
   onFilterChange,
   onOpenCanonReview,
+  onOpenPromotedDraft,
   onPromoteDraft,
   onReject,
-  onRequestAgent,
+  onReviewVersion,
   onSave,
   onSelect,
   onSourceDraftChange,
   onSubmitReview,
+  onSwitchTarget,
   onTextChange,
   onTitleChange,
   onTypeChange,
@@ -2934,28 +3794,41 @@ function ProposalInbox({
   proposalTitle,
   proposalType,
   proposals,
-  selectedProposal
+  promotedDraft,
+  reviewProposal,
+  reviewVersion,
+  selectedProposal,
+  targetPolicy,
+  targetScene,
+  versions,
+  versionsLoading
 }: {
+  baseline: ExactDraftLookup;
   busy: string | null;
   canGenerate: boolean;
   canReview: boolean;
   currentDraftId: string;
+  currentSceneId: string;
+  derivedDraftRef: UniqueRefResolution;
+  diffRows: ReviewDiffRow[];
+  dirty: boolean;
   filter: ProposalStatus | "all";
   hasScene: boolean;
   onAccept: () => void;
   onApplyProjectStructure: () => void;
   onCreateNew: () => void;
   onExtractCandidates: () => void;
-  onExtractFactDraft: () => void;
   onFilterChange: (filter: ProposalStatus | "all") => void;
   onOpenCanonReview: () => void;
+  onOpenPromotedDraft: () => void;
   onPromoteDraft: () => void;
   onReject: () => void;
-  onRequestAgent: () => void;
+  onReviewVersion: (version: number) => void;
   onSave: () => void;
   onSelect: (proposalId: string) => void;
   onSourceDraftChange: (draftId: string) => void;
   onSubmitReview: () => void;
+  onSwitchTarget: () => void;
   onTextChange: (text: string) => void;
   onTitleChange: (title: string) => void;
   onTypeChange: (artifactType: ProposalArtifactType) => void;
@@ -2964,37 +3837,55 @@ function ProposalInbox({
   proposalTitle: string;
   proposalType: ProposalArtifactType;
   proposals: ProposalArtifact[];
+  promotedDraft: ExactDraftLookup;
+  reviewProposal: ProposalArtifact | null;
+  reviewVersion: number | null;
   selectedProposal: ProposalArtifact | null;
+  targetPolicy: PromotionTargetPolicy;
+  targetScene: SceneOutline | null;
+  versions: ProposalArtifact[];
+  versionsLoading: boolean;
 }) {
-  const locked = selectedProposal?.status === "accepted" || selectedProposal?.status === "rejected";
-  const canSave = canGenerate && busy === null && (!selectedProposal || !locked);
-  const canSubmit = canGenerate && busy === null && Boolean(selectedProposal) && !locked;
-  const canDecide = canReview && busy === null && Boolean(selectedProposal) && !locked;
+  const actionPolicy = selectedProposal
+    ? proposalActionPolicy(selectedProposal.status, dirty, selectedProposal.artifact_type)
+    : null;
+  const locked = Boolean(selectedProposal && actionPolicy?.readonly);
+  const canSave = canGenerate && busy === null && dirty && (
+    !selectedProposal || Boolean(actionPolicy?.canSave)
+  );
+  const canSubmit = canGenerate && busy === null && Boolean(actionPolicy?.canSubmit);
+  const canDecide = canReview && busy === null && Boolean(actionPolicy?.canDecide);
   const canPromoteDraft =
     canReview &&
     busy === null &&
     hasScene &&
-    selectedProposal?.status === "accepted" &&
-    selectedProposal.artifact_type === "scene_draft";
+    Boolean(actionPolicy?.canPromote) &&
+    selectedProposal?.artifact_type === "scene_draft" &&
+    targetPolicy.status === "ready" &&
+    derivedDraftRef.status === "none";
   const effectiveSourceDraftId = proposalSourceDraftId || currentDraftId;
   const canPromoteCandidates =
     canReview &&
     busy === null &&
-    selectedProposal?.status === "accepted" &&
-    selectedProposal.artifact_type === "fact_draft" &&
+    Boolean(actionPolicy?.canPromote) &&
+    selectedProposal?.artifact_type === "fact_draft" &&
     Boolean(effectiveSourceDraftId.trim());
   const canApplyProjectStructure =
     canReview &&
     busy === null &&
-    selectedProposal?.status === "accepted" &&
-    selectedProposal.artifact_type === "project_structure_draft";
+    Boolean(actionPolicy?.canPromote) &&
+    selectedProposal?.artifact_type === "project_structure_draft";
+  const sortedVersions = [...versions].sort((left, right) => right.version - left.version);
 
   return (
     <section className="proposal-panel" aria-label={uiText.proposals.ariaLabel}>
       <div className="proposal-header">
         <div>
           <span><SplitSquareVertical size={15} /> {uiText.proposals.title}</span>
-          <small>{proposals.length} {uiText.proposals.countSuffix}</small>
+          <small>
+            {proposals.length} {uiText.proposals.countSuffix}
+            {dirty && <mark className="unsaved-badge">{uiText.proposals.unsavedBadge}</mark>}
+          </small>
         </div>
         <div className="proposal-header-actions">
           <select
@@ -3064,31 +3955,73 @@ function ProposalInbox({
             disabled={locked}
           />
           <div className="proposal-actions">
-            <button type="button" onClick={onSave} disabled={!canSave}>
-              <Save size={14} /> {uiText.proposals.save}
-            </button>
-            <button type="button" onClick={onRequestAgent} disabled={!canGenerate || busy !== null || !hasScene}>
-              <Wand2 size={14} /> {uiText.proposals.requestAgent}
-            </button>
-            <button type="button" onClick={onExtractFactDraft} disabled={!canGenerate || busy !== null || !hasScene}>
-              <ShieldCheck size={14} /> {uiText.proposals.extractFactDraft}
-            </button>
-            <button type="button" onClick={onSubmitReview} disabled={!canSubmit}>
-              <Clock3 size={14} /> {uiText.proposals.submitReview}
-            </button>
-            <button type="button" onClick={onAccept} disabled={!canDecide}>
-              <Check size={14} /> {uiText.proposals.accept}
-            </button>
-            <button type="button" onClick={onReject} disabled={!canDecide}>
-              <X size={14} /> {uiText.proposals.reject}
-            </button>
-            <button type="button" onClick={onPromoteDraft} disabled={!canPromoteDraft}>
-              <FileText size={14} /> {uiText.proposals.promoteDraft}
-            </button>
-            <button type="button" onClick={onApplyProjectStructure} disabled={!canApplyProjectStructure}>
-              <BookOpen size={14} /> {uiText.proposals.applyStructure}
-            </button>
+            {(!selectedProposal || actionPolicy?.editable) && (
+              <button type="button" onClick={onSave} disabled={!canSave}>
+                <Save size={14} /> {uiText.proposals.save}
+              </button>
+            )}
+            {actionPolicy?.showSubmit && (
+              <button type="button" onClick={onSubmitReview} disabled={!canSubmit}>
+                <Clock3 size={14} /> {uiText.proposals.submitReview}
+              </button>
+            )}
+            {actionPolicy?.showDecision && (
+              <>
+                <button type="button" onClick={onAccept} disabled={!canDecide}>
+                  <Check size={14} /> {uiText.proposals.accept}
+                </button>
+                <button type="button" onClick={onReject} disabled={!canDecide}>
+                  <X size={14} /> {uiText.proposals.reject}
+                </button>
+              </>
+            )}
+            {actionPolicy?.showPromotion && selectedProposal?.artifact_type === "project_structure_draft" && (
+              <button type="button" onClick={onApplyProjectStructure} disabled={!canApplyProjectStructure}>
+                <BookOpen size={14} /> {uiText.proposals.applyStructure}
+              </button>
+            )}
           </div>
+          {dirty && selectedProposal && (
+            <p className="proposal-inline-warning">{uiText.proposals.dirtyActionHelp}</p>
+          )}
+          {actionPolicy?.showPromotion && selectedProposal?.artifact_type === "scene_draft" && (
+            <div className="proposal-promotion-state">
+              {derivedDraftRef.status === "ambiguous" ? (
+                <p className="proposal-inline-warning">{uiText.proposals.derivedDraftAmbiguous}</p>
+              ) : derivedDraftRef.status === "unique" ? (
+                <PromotedDraftSummary
+                  canSwitchScene={Boolean(targetScene)}
+                  currentSceneId={currentSceneId}
+                  lookup={promotedDraft}
+                  onOpen={onOpenPromotedDraft}
+                  onSwitchScene={onSwitchTarget}
+                />
+              ) : (
+                <>
+                  {targetPolicy.status !== "ready" && (
+                    <p className="proposal-inline-warning">
+                      {targetPolicy.status === "ambiguous"
+                        ? uiText.proposals.targetAmbiguous
+                        : targetPolicy.status === "mismatch"
+                          ? uiText.proposals.targetMismatch(targetScene?.title ?? targetPolicy.targetSceneId)
+                          : uiText.proposals.targetMissing}
+                    </p>
+                  )}
+                  {targetPolicy.status === "ready" && targetPolicy.targetSceneId === null && (
+                    <p className="proposal-inline-note">{uiText.proposals.legacyCurrentTarget}</p>
+                  )}
+                  {(targetPolicy.status === "mismatch" || targetPolicy.status === "missing_scene") && targetScene && (
+                    <button type="button" onClick={onSwitchTarget} disabled={busy !== null}>
+                      <MapPin size={14} /> {uiText.proposals.switchTarget(targetScene.title)}
+                    </button>
+                  )}
+                  <button type="button" onClick={onPromoteDraft} disabled={!canPromoteDraft}>
+                    <FileText size={14} /> {uiText.proposals.promoteDraft}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
         <div className="proposal-meta">
           <MetricRow label={uiText.proposals.metadataStatus} value={selectedProposal ? proposalStatusLabels[selectedProposal.status] : uiText.proposals.unselected} />
@@ -3103,22 +4036,27 @@ function ProposalInbox({
             }
           />
           <MetricRow label={uiText.proposals.metadataCreatedVia} value={formatProvenanceMethod(selectedProposal?.provenance.created_via)} />
-          <label>
-            <span>{uiText.proposals.sourceDraft}</span>
-            <input
-              value={effectiveSourceDraftId}
-              onChange={(event) => onSourceDraftChange(event.target.value)}
-              placeholder={uiText.proposals.sourceDraftPlaceholder}
-            />
-          </label>
-          <div className="proposal-side-actions">
-            <button type="button" onClick={onExtractCandidates} disabled={!canPromoteCandidates}>
-              <ShieldCheck size={14} /> {uiText.proposals.extractCandidates}
-            </button>
-            <button type="button" onClick={onOpenCanonReview} disabled={busy !== null}>
-              <ShieldCheck size={14} /> {uiText.proposals.openCanonReview}
-            </button>
-          </div>
+          {proposalType === "fact_draft" && (
+            <label>
+              <span>{uiText.proposals.sourceDraft}</span>
+              <input
+                disabled={Boolean(selectedProposal && !actionPolicy?.editable && !actionPolicy?.showPromotion)}
+                value={effectiveSourceDraftId}
+                onChange={(event) => onSourceDraftChange(event.target.value)}
+                placeholder={uiText.proposals.sourceDraftPlaceholder}
+              />
+            </label>
+          )}
+          {selectedProposal?.artifact_type === "fact_draft" && actionPolicy?.showPromotion && (
+              <div className="proposal-side-actions">
+                <button type="button" onClick={onExtractCandidates} disabled={!canPromoteCandidates}>
+                  <ShieldCheck size={14} /> {uiText.proposals.extractCandidates}
+                </button>
+                <button type="button" onClick={onOpenCanonReview} disabled={busy !== null}>
+                  <ShieldCheck size={14} /> {uiText.proposals.openCanonReview}
+                </button>
+              </div>
+          )}
           <ListBlock
             title={uiText.proposals.refsSource}
             items={formatProposalRefs(selectedProposal?.source_refs ?? [])}
@@ -3133,6 +4071,152 @@ function ProposalInbox({
           />
         </div>
       </div>
+      {selectedProposal && reviewProposal && (
+        <section className="proposal-review" aria-label={uiText.proposals.reviewAria}>
+          <div className="proposal-review-head">
+            <div>
+              <strong>{uiText.proposals.reviewTitle}</strong>
+              <span>{uiText.proposals.reviewHelp}</span>
+            </div>
+            {versionsLoading && <RefreshCw className="spin" size={15} />}
+          </div>
+          <div className="proposal-history">
+            <span>{uiText.proposals.historyTitle}</span>
+            <div>
+              {sortedVersions.map((version) => (
+                <button
+                  className={version.version === reviewVersion ? "selected" : ""}
+                  key={version.version}
+                  onClick={() => onReviewVersion(version.version)}
+                  type="button"
+                >
+                  v{version.version} · {proposalStatusLabels[version.status]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="proposal-review-metadata">
+            <MetricRow label={uiText.proposals.metadataVersion} value={`v${reviewProposal.version}`} />
+            <MetricRow label={uiText.proposals.metadataStatus} value={proposalStatusLabels[reviewProposal.status]} />
+            <MetricRow
+              label={uiText.language.artifactLanguageLabel}
+              value={formatArtifactLanguage(reviewProposal.content_language, reviewProposal.language_inferred)}
+            />
+            <ListBlock title={uiText.proposals.refsTarget} items={formatProposalRefs(reviewProposal.target_refs)} />
+            <ListBlock title={uiText.proposals.refsSource} items={formatProposalRefs(reviewProposal.source_refs)} />
+          </div>
+          <details className="proposal-version-content">
+            <summary>{uiText.proposals.versionContent}</summary>
+            <span>{uiText.proposals.historicalTitle}</span>
+            <strong>{reviewProposal.title}</strong>
+            <pre>{reviewProposal.body}</pre>
+          </details>
+          <ProposalReviewDiff baseline={baseline} rows={diffRows} />
+        </section>
+      )}
+    </section>
+  );
+}
+
+function PromotedDraftSummary({
+  canSwitchScene,
+  currentSceneId,
+  lookup,
+  onOpen,
+  onSwitchScene
+}: {
+  canSwitchScene: boolean;
+  currentSceneId: string;
+  lookup: ExactDraftLookup;
+  onOpen: () => void;
+  onSwitchScene: () => void;
+}) {
+  if (lookup.status === "loading") {
+    return <p><RefreshCw className="spin" size={14} /> {uiText.proposals.promotedDraftLoading}</p>;
+  }
+  if (lookup.status !== "ready") {
+    return <p className="proposal-inline-warning">{uiText.proposals.promotedDraftUnavailable}</p>;
+  }
+  const scopeMatches = exactDraftMatchesEditorScene(lookup.draft.scene_id, currentSceneId);
+  return (
+    <details className="promoted-draft-summary">
+      <summary>{uiText.proposals.alreadyPromoted(lookup.draft.id, lookup.draft.version)}</summary>
+      <MetricRow label={uiText.proposals.metadataStatus} value={lookup.draft.discarded ? uiText.proposals.draftDiscarded : uiText.proposals.draftAvailable} />
+      <MetricRow label={uiText.language.artifactLanguageLabel} value={formatArtifactLanguage(lookup.draft.content_language, lookup.draft.language_inferred)} />
+      <MetricRow label={uiText.proposals.targetScene} value={lookup.draft.scene_id} />
+      {scopeMatches ? (
+        <button type="button" onClick={onOpen}>
+          <FileText size={14} /> {uiText.proposals.openPromotedDraft}
+        </button>
+      ) : (
+        <div className="promoted-draft-scope-warning">
+          <p className="proposal-inline-warning">{uiText.proposals.openDraftSwitchFirst}</p>
+          <button type="button" onClick={onSwitchScene} disabled={!canSwitchScene}>
+            <MapPin size={14} /> {uiText.proposals.switchToDraftScene}
+          </button>
+        </div>
+      )}
+      <pre>{lookup.draft.text}</pre>
+    </details>
+  );
+}
+
+function ProposalReviewDiff({ baseline, rows }: { baseline: ExactDraftLookup; rows: ReviewDiffRow[] }) {
+  const statusText = baseline.status === "none"
+    ? uiText.proposals.baselineNone
+    : baseline.status === "ambiguous"
+      ? uiText.proposals.baselineAmbiguous
+      : baseline.status === "missing_target"
+        ? uiText.proposals.baselineTargetMissing
+        : baseline.status === "loading" || baseline.status === "idle"
+          ? uiText.proposals.baselineLoading
+          : baseline.status === "error"
+            ? uiText.proposals.baselineUnavailable
+            : null;
+  return (
+    <section className="proposal-diff" aria-label={uiText.proposals.diffAria}>
+      <div className="proposal-review-head">
+        <div>
+          <strong>{uiText.proposals.diffTitle}</strong>
+          <span>{uiText.proposals.diffHelp}</span>
+        </div>
+      </div>
+      {statusText ? (
+        <p className={baseline.status === "loading" || baseline.status === "idle" ? "" : "proposal-inline-warning"}>
+          {statusText}
+        </p>
+      ) : baseline.status === "ready" ? (
+        <>
+          <div className="proposal-baseline-meta">
+            <span>{uiText.proposals.baselineExact(baseline.draft.id, baseline.draft.version)}</span>
+            <span>{formatArtifactLanguage(baseline.draft.content_language, baseline.draft.language_inferred)}</span>
+            <span>{baseline.draft.discarded ? uiText.proposals.draftDiscarded : uiText.proposals.draftAvailable}</span>
+          </div>
+          <div className="proposal-diff-side-by-side">
+            <div className="proposal-diff-columns" aria-hidden="true">
+              <strong>{uiText.proposals.baselineColumn}</strong>
+              <strong>{uiText.proposals.proposalColumn}</strong>
+            </div>
+            {rows.map((row, index) => (
+              <div className={`proposal-diff-row ${row.kind}`} key={`${index}-${row.leftLine}-${row.rightLine}`}>
+                <span>{row.leftLine ?? ""}</span><code>{row.left ?? ""}</code>
+                <span>{row.rightLine ?? ""}</span><code>{row.right ?? ""}</code>
+              </div>
+            ))}
+          </div>
+          <div className="proposal-diff-unified">
+            {rows.flatMap((row, index) => {
+              if (row.kind === "equal") {
+                return [<div className="equal" key={`${index}-equal`}><span> </span><code>{row.right ?? ""}</code></div>];
+              }
+              const lines: React.ReactElement[] = [];
+              if (row.left !== null) lines.push(<div className="removed" key={`${index}-removed`}><span>-</span><code>{row.left}</code></div>);
+              if (row.right !== null) lines.push(<div className="added" key={`${index}-added`}><span>+</span><code>{row.right}</code></div>);
+              return lines;
+            })}
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -4061,6 +5145,94 @@ function SourceImportStatus({ progress }: { progress: SourceImportProgress }) {
   );
 }
 
+function PaneResizeHandle({
+  ariaLabel,
+  help,
+  max,
+  min,
+  onChange,
+  onReset,
+  orientation,
+  value
+}: {
+  ariaLabel: string;
+  help: string;
+  max: number;
+  min: number;
+  onChange: (value: number, commit: boolean) => void;
+  onReset: () => void;
+  orientation: "horizontal" | "vertical";
+  value: number;
+}) {
+  const dragRef = useRef<{
+    pointerId: number;
+    startPosition: number;
+    startValue: number;
+    lastValue: number;
+  } | null>(null);
+  const pointerPosition = (event: React.PointerEvent<HTMLDivElement>) =>
+    orientation === "horizontal" ? event.clientY : event.clientX;
+  const finishDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    onChange(drag.lastValue, true);
+  };
+
+  return (
+    <div
+      aria-label={ariaLabel}
+      aria-orientation={orientation}
+      aria-valuemax={Math.round(max)}
+      aria-valuemin={Math.round(min)}
+      aria-valuenow={Math.round(value)}
+      className={`pane-resize-handle ${orientation}`}
+      onDoubleClick={onReset}
+      onKeyDown={(event) => {
+        const next = separatorKeyboardValue({
+          key: event.key,
+          value,
+          min,
+          max,
+          orientation,
+          largeStep: event.shiftKey
+        });
+        if (next === null) return;
+        event.preventDefault();
+        onChange(next, true);
+      }}
+      onPointerCancel={finishDrag}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        dragRef.current = {
+          pointerId: event.pointerId,
+          startPosition: pointerPosition(event),
+          startValue: value,
+          lastValue: value
+        };
+      }}
+      onPointerMove={(event) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        const next = Math.min(
+          max,
+          Math.max(min, drag.startValue + pointerPosition(event) - drag.startPosition)
+        );
+        drag.lastValue = next;
+        onChange(next, false);
+      }}
+      onPointerUp={finishDrag}
+      role="separator"
+      tabIndex={0}
+      title={help}
+    >
+      <span aria-hidden="true" />
+    </div>
+  );
+}
+
 function LibraryTree({
   expandedPaths,
   node,
@@ -4182,6 +5354,7 @@ function DocumentReader({
   onSaveProposal,
   onSaveStyle,
   onUpdateLanguage,
+  onUseWithAgent,
   projectLanguage,
   summary
 }: {
@@ -4200,12 +5373,13 @@ function DocumentReader({
   onSaveProposal: (document: SourceDocument) => void;
   onSaveStyle: (document: SourceDocument) => void;
   onUpdateLanguage: (document: SourceDocumentSummary, language: "zh-CN" | "en-US") => void;
+  onUseWithAgent: (document: SourceDocumentSummary) => void;
   projectLanguage: AppLocale | null;
   summary: SourceDocumentSummary | null;
 }) {
-  const [languageDraft, setLanguageDraft] = useState<"zh-CN" | "en-US">("zh-CN");
+  const [languageDraft, setLanguageDraft] = useState<SourceLanguage>("zh-CN");
   useEffect(() => {
-    if (summary?.language === "zh-CN" || summary?.language === "en-US") {
+    if (summary?.language && summary.language !== "und") {
       setLanguageDraft(summary.language);
     } else {
       setLanguageDraft(projectLanguage ?? "zh-CN");
@@ -4236,6 +5410,7 @@ function DocumentReader({
   }
 
   const ready = doc.extraction_status === "ready";
+  const editableLanguage = languageDraft === "zh-CN" || languageDraft === "en-US";
   const sameLanguage = doc.language === projectLanguage;
   const canManageSource = canGenerate && hasProject && busy === null;
   const canSceneBridge = ready && sameLanguage && canGenerate && hasScene && busy === null;
@@ -4246,6 +5421,9 @@ function DocumentReader({
     doc.language !== "und" &&
     (doc.language === projectLanguage || crossLanguagePolicy === "explicit_reference");
   const canArchive = hasProject && canGenerate && busy === null;
+  const agentEligibility = sourceAgentEligibility(doc, projectLanguage, crossLanguagePolicy);
+  const canUseWithAgent =
+    canGenerate && hasScene && projectLanguage !== null && busy === null && sourceCanHandoff(doc);
   const contentBridgeLanguageTitle = doc.language === "und"
     ? uiText.language.sourceUnknownDisabled
     : !sameLanguage
@@ -4277,17 +5455,22 @@ function DocumentReader({
           <span>{uiText.language.sourceLanguageLabel}</span>
           <select
             value={languageDraft}
-            onChange={(event) => setLanguageDraft(normalizeAppLocale(event.target.value))}
+            onChange={(event) => setLanguageDraft(event.target.value)}
             disabled={!canManageSource}
           >
+            {languageDraft !== "zh-CN" && languageDraft !== "en-US" && (
+              <option value={languageDraft}>{formatSourceLanguage(languageDraft)}</option>
+            )}
             <option value="zh-CN">{uiText.language.chinese}</option>
             <option value="en-US">{uiText.language.english}</option>
           </select>
         </label>
         <button
           type="button"
-          disabled={!canManageSource || languageDraft === doc.language}
-          onClick={() => onUpdateLanguage(summary, languageDraft)}
+          disabled={!canManageSource || !editableLanguage || languageDraft === doc.language}
+          onClick={() => {
+            if (editableLanguage) onUpdateLanguage(summary, languageDraft);
+          }}
         >
           {uiText.language.saveSourceLanguage}
         </button>
@@ -4315,6 +5498,22 @@ function DocumentReader({
         <div>
           <button
             className="primary"
+            disabled={!canUseWithAgent}
+            onClick={() => onUseWithAgent(summary)}
+            title={
+              !hasScene
+                ? uiText.errors.selectScene
+                : agentEligibility === "language_mismatch"
+                  ? uiText.library.useWithAgentMismatchTitle
+                  : agentEligibility === "eligible"
+                  ? uiText.library.useWithAgentTitle
+                  : formatSourceAgentEligibility(agentEligibility)
+            }
+            type="button"
+          >
+            <MessageSquare size={14} /> {uiText.library.useWithAgent}
+          </button>
+          <button
             disabled={!canAnalyzeStructure}
             onClick={() => onAnalyzeStructure(summary)}
             title={
@@ -5189,7 +6388,16 @@ function formatProjectLanguage(project: ProjectOutline): string {
 function formatSourceLanguage(language: SourceLanguage): string {
   if (language === "zh-CN") return uiText.language.chinese;
   if (language === "en-US") return uiText.language.english;
-  return uiText.language.undetermined;
+  if (language === "und") return uiText.language.undetermined;
+  return language;
+}
+
+function formatSourceAgentEligibility(eligibility: SourceAgentEligibility): string {
+  if (eligibility === "not_ready") return uiText.library.useWithAgentNotReady;
+  if (eligibility === "unknown_language") return uiText.language.sourceUnknownDisabled;
+  if (eligibility === "project_language_unavailable") return uiText.errors.projectLanguageRequired;
+  if (eligibility === "language_mismatch") return uiText.language.sourceMismatchDisabled;
+  return uiText.library.useWithAgentTitle;
 }
 
 function formatArtifactLanguage(
@@ -5453,6 +6661,24 @@ function loadUiLocale(): AppLocale {
     return normalizeAppLocale(window.localStorage.getItem(UI_LOCALE_STORAGE_KEY));
   } catch {
     return "zh-CN";
+  }
+}
+
+function loadSourcePaneLayout(): SourcePaneLayout {
+  if (typeof window === "undefined") return { ...DEFAULT_SOURCE_PANE_LAYOUT };
+  try {
+    return readSourcePaneLayout(window.localStorage);
+  } catch {
+    return { ...DEFAULT_SOURCE_PANE_LAYOUT };
+  }
+}
+
+function persistSourcePaneLayout(layout: SourcePaneLayout): void {
+  if (typeof window === "undefined") return;
+  try {
+    writeSourcePaneLayout(window.localStorage, layout);
+  } catch {
+    // Resizing remains available for this session if local storage is unavailable.
   }
 }
 

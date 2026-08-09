@@ -29,6 +29,9 @@ Own frontend UI design and interaction flow for the React/Vite workbench and Tau
 - Persist `ui_locale` only as a versioned local Web/Tauri client preference, default it to `zh-CN`, update document/native display language where applicable, and never send it as `Project.language`, `output_language`, story metadata, or `/settings/agent` state.
 - Treat Source Store conversion as a separate action: importing or reading a Source Document must not silently create Drafts, Style Samples, proposals, CandidateFacts, or graph writes.
 - Keep Agent discussion and selected-text revision output in Proposal Store until explicit author accept/promotion actions move accepted proposals into Draft Store.
+- Make Source-to-Agent handoff select only the stable Source Document ID and navigate; do not copy extracted text, persist a second source payload, call an Agent, or change cross-language policy until the author acts explicitly in the Agent panel.
+- Show an Agent input manifest before send and submit its exact saved Draft ID as `included_draft_id`; the displayed ID, backend/provider input, and resulting Proposal Draft ref must match. Resolve Proposal review baselines only from one unique recorded Draft source ref through the exact scoped Draft route. Treat zero/multiple refs as unavailable/ambiguous, never as permission to use latest Draft.
+- Keep diff, expanded-history, and dirty editor state client-only. Block Agent sends that would omit or replace unsaved Draft text; while Proposal title/body edits are dirty, visibly guard Proposal lifecycle actions and proposal/scene/project navigation until save, discard, or cancel.
 - Treat the selected project in the UI as presentation context only; CandidateFact and graph ownership are always enforced by the backend and cross-project failures must remain visible to the author.
 - Keep Tauri desktop behavior as a host for the same FastAPI backend and React workbench, not a separate canon-writing path.
 - Escalate backend, contract, store, or permission gaps through `.codex/coordination/handoffs.md`.
@@ -59,3 +62,4 @@ Own frontend UI design and interaction flow for the React/Vite workbench and Tau
 - Do not send cached Source Document text back as authority for a stable ID; Source Store-backed Agent calls send `source_document_ids` and let the backend resolve same-project ready content. Keep legacy `imported_document` display support separate from persistent `source_document` refs.
 - Do not infer Source language solely from the project, silently translate cross-language material, or let an author prompt override server-derived output language. Legacy inline/structure inputs must include valid source language or display the backend `422` failure.
 - Do not invent contract fields in TypeScript without Contract Agent involvement.
+- Do not persist diff hunks or dirty flags into Proposal/Draft/Source records, and do not offer promotion to a Scene that conflicts with a proposal's unique declared target.

@@ -48,13 +48,36 @@ Inside the hosted workbench, the project tree comes from the backend `/projects`
 
 Local document import uses the same project-scoped FastAPI Source Store in browser and Tauri runtimes. The local client extracts supported `.txt`, `.md`, `.markdown`, and `.docx` content and submits each file separately with its metadata. Every Source Document has a stable ID and persists under the desktop workspace across backend/app restarts. Import results remain visible per file, summary lists omit full `extracted_text`, detail is loaded only on demand, and archive is non-destructive. Import/read/archive changes Source Store only; it does not create Drafts, CandidateFacts, graph nodes, graph relations, or canon events.
 
+At desktop widths the Source panel bottom edge and Source-list/detail divider are
+pointer- and keyboard-resizable, resettable, clamped, and remembered as local
+UI-only dimensions. They return to an automatic stacked layout on narrow
+screens. `Use with Agent` selects only the stable Source ID and navigates; it
+does not copy text, invoke a provider, create an artifact, or alter the language
+policy.
+
 Source language is independent BCP 47 metadata. `und` is never eligible for Agent or structure prompts. Language mismatches are rejected by default; `explicit_reference` requires a known language plus an explicit stable-source selection, does not translate the source, and does not change the server-derived project output language. Legacy inline/structure text requests without valid source language fail with `422`.
 
 RTF, PDF, OCR, images, and PSD are not supported by the initial Source Store. They are later importer work and must be shown as skipped/failed rather than silently treated as successful text imports. A ready Source Document may be analyzed through the source-backed structure route, but that action creates only a non-canon `project_structure_draft`; Chapter/Scene creation still requires explicit author acceptance and apply.
 
 The hosted workbench includes `协作草稿箱`, backed by the same FastAPI Proposal Store routes used in the browser. Proposal artifacts are non-canon project data: accepting one does not write canon, and promotion to Draft Store or pending CandidateFacts still goes through backend permission and review boundaries.
 
+The Proposal Workspace exposes version history and an exact-Draft diff when the
+selected version has one unique Draft source ref; it never compares against a
+guessed latest Draft. Unsaved Proposal edits block lifecycle decisions and
+proposal/scene/project switching until explicitly saved, discarded, or
+cancelled. Scene-draft promotion is target-checked and repeat-safe, returning the
+same valid derived Draft rather than creating duplicates.
+
 The hosted workbench also includes the `Agent` discussion tab. Source Store documents are unselected by default. Only documents the author explicitly selects are sent as stable `source_document_ids`; the backend resolves ready text inside the same project. It must not automatically send the whole library or cached snippets, and disabling current-draft inclusion must also omit editor text from `base_text`. Optional web search remains a separate explicit choice. The result is saved only as a Proposal Store `scene_rebuild` or `scene_draft` artifact; it does not overwrite Draft Store, create CandidateFacts, or write Graph Store canon.
+
+Before an Agent request, the workbench shows the target, project output
+language, exact saved Draft ID/version or omission, Context Pack behavior,
+selected Source summaries/languages, cross-language policy, and web-search
+state. If included Draft text has unsaved local edits, sending is blocked until
+the author saves or discards them. The desktop-hosted workbench submits the
+displayed exact Draft ID; the backend uses that same scoped Draft for provider
+input and Proposal provenance instead of silently replacing it with latest.
+The no-ID latest fallback is legacy API compatibility only.
 
 ## Build Commands
 
@@ -114,10 +137,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.10_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.10_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.10_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.10_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.11_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.11_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 

@@ -186,6 +186,8 @@ migration.
 ```json
 {
   "source_document_ids": ["source_001"],
+  "include_latest_draft": true,
+  "included_draft_id": "draft_001",
   "cross_language_policy": "project_only"
 }
 ```
@@ -199,8 +201,17 @@ migration.
 - A language rejection occurs before any model provider call and never includes
   source text in the error.
 - The client must show which documents are selected before sending the request.
+- A current workbench client that enables saved-Draft inclusion MUST also send
+  the exact displayed Draft id as `included_draft_id`. The backend resolves that
+  id only inside the route project and Scene and uses that same Draft as the
+  provider input and Proposal `source_refs[kind = draft]`; it MUST NOT silently
+  substitute the latest Draft. Missing or cross-scope ids fail before a provider
+  call. Legacy clients that enable inclusion without this additive field may
+  retain latest-Draft compatibility, but that fallback is not current workbench
+  behavior.
 - If the author disables current-draft inclusion, the client must not send the
-  editor text as `base_text` or through another field.
+  editor text as `base_text` or through another field, and
+  `included_draft_id` must be absent or null.
 - Existing inline `local_sources` requests may remain temporarily for API
   compatibility, but every item MUST include a valid `language` and obey the
   same cross-language policy. Missing/invalid language is `422`; it is never
@@ -210,6 +221,29 @@ migration.
 Agent output remains a non-canon `scene_rebuild` or `scene_draft` Proposal
 Artifact. It must not overwrite Draft Store, create CandidateFacts, or write
 Graph Store canon.
+
+### Source-To-Agent Client Handoff
+
+A Source Library action that carries a document to the Agent panel is a
+selection-and-navigation convenience only. It MUST place only the stable
+`SourceDocument.id` in transient client selection state and navigate to the
+Agent panel. The handoff itself:
+
+- MUST NOT copy `extracted_text` into an author instruction, `base_text`, a
+  legacy `local_sources` payload, Proposal ref, browser persistence, or another
+  client/story store;
+- MUST NOT call the model provider, create a Proposal or Draft, archive or patch
+  the Source Document, or mutate Candidate, Graph, Event, or workflow state;
+- MUST NOT enable `explicit_reference` or otherwise change
+  `cross_language_policy` automatically; and
+- MAY reuse already loaded summary metadata for display, but the eventual
+  author-submitted Agent request must send the stable id in
+  `source_document_ids` and let the backend resolve and validate the text.
+
+A selected source with a different language remains visibly blocked under
+`project_only` until the author explicitly changes the policy in the Agent
+panel. Navigating to the panel is not that consent. Removing the selection
+before send transmits no source id and no source text.
 
 ## Proposal References
 

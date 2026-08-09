@@ -56,6 +56,33 @@ Status values: `planned`, `active`, `blocked`, `ready-for-check`, `ready-for-rev
 | SG-019G | done | Review Agent | `codex/sg-019-language-isolation` | Judge whether language switching and generated content are genuinely isolated without silently changing existing work. | Main Agent, Check Agent | Final independent review found no remaining P0/P1 and approved the v0.1.9 release gate. |
 | SG-020 | planned | Main Agent | future branch | Add RTF and text-layer PDF import plus long-document chunking, progress, cancellation, and stable source spans. | Contract Agent, Backend/API Creation Agent, Front Agent, Check Agent | Start after Source Store provenance/chunk contracts are defined; OCR remains separate. |
 | SG-021 | planned | Main Agent | future branch | Add crash recovery and editor lifecycle hardening around Candidate/Graph reconciliation, dirty-draft guards, and Store shutdown. | Backend/API Creation Agent, Front Agent, Check Agent | Reconcile cross-store hard-crash windows without weakening canon provenance or overwriting unsaved text. |
+| SG-022 | done | Main Agent | `codex/sg-022-reviewable-rewrite` | Turn Source-to-Agent scene rewriting into a resizable, explicit, target-safe, dirty-aware diff review flow before Draft promotion. | Contract Agent, Backend/API Creation Agent, Front Agent, Check Agent, Review Agent | Completed adjustable Source panes, exact scoped Draft reads and Agent pinning, promotion target/idempotency/compensation, selection-only Source handoff, input manifest, proposal history/diff review, lifecycle guards, independent P0/P1 review, and signed v0.1.11 release preparation. |
+
+## SG-022 Acceptance Criteria
+
+- A Source Document can be explicitly carried to Agent selection without copying its text, creating an artifact, changing cross-language policy, or writing any store.
+- The Source panel height and Source-list/detail split are author-adjustable with pointer and keyboard controls, clamped to usable bounds, locally remembered without story data, resettable to defaults, and responsive-stacked on narrow screens.
+- Before sending, the Agent panel shows the target scene, project output language, exact saved Draft id/version when included, Context Pack behavior, selected Source summaries/languages, cross-language policy, and web-search state; that exact id is pinned through backend/provider input and the resulting Proposal Draft ref, with no silent latest substitution.
+- Unsaved Draft text cannot be silently replaced or omitted from an Agent request; an operation that includes the saved Draft is blocked until local edits are saved or discarded.
+- A `scene_draft` Proposal review resolves the exact Draft ref used as its baseline, shows a bilingual-safe diff without translating author text, and exposes content/status version history.
+- Unsaved Proposal title/body edits are visibly dirty and block submit, accept, reject, promotion, proposal switching, scene switching, and project switching until the author saves, discards, or cancels navigation.
+- Proposal actions are state-specific: drafting/revised content submits for review, ready content can be accepted/rejected, and only accepted content can be promoted.
+- If a Proposal declares a unique Scene target, both UI and backend reject promotion to a different Scene; a failed attempt creates no Draft and no derived ref.
+- Promotion remains explicit, creates only a new Draft Store version, and never writes CandidateFact, Graph Store, canon Event Log, Source Store, or workflow state.
+
+## SG-022 Non-Goals
+
+- No automatic accept or promotion, multi-user editing, per-hunk merge, canon write, translation, or Source-to-Draft shortcut.
+- No RTF/PDF/OCR or long-document chunk migration; those remain SG-020.
+- No Candidate/Graph crash reconciliation or Store shutdown work; those remain SG-021.
+
+## SG-022 Verification
+
+- Focused API tests for project/scene-scoped Draft detail, exact Agent Draft pinning (including provider-call-zero invalid scope), and target-mismatch atomic rejection.
+- Frontend tests for dirty guards, Source-to-Agent selection-only handoff, state-specific actions, exact baseline selection, bilingual diff, and target mismatch.
+- `python -m pytest -q`, `python -m ruff check .`, Web typecheck/build, responsive 390px static/browser-free checks where possible, and `git diff --check`.
+- Manual desktop screenshots are author-run only; Codex does not use Computer Use for this task.
+- Final evidence: Python `245 passed, 1 skipped`; Web `28 passed` plus typecheck and production build; Rust `cargo fmt --check`, locked check, and `2 passed`; runtime npm audit `0`; independent backend/frontend/release reviews reported P0=0/P1=0. The v0.1.11 installer and updater signature were built from the release tree with matching spaced/no-space SHA-256, exact `latest.json` signature, GUI subsystems, and no Authenticode claim.
 
 ## SG-005 Acceptance Criteria
 

@@ -42,7 +42,7 @@ class ProposalRef(ContractModel):
     quote: str | None = Field(default=None, max_length=500)
     source_span: JsonDict | None = None
 
-    @field_validator("ref")
+    @field_validator("ref", mode="before")
     @classmethod
     def ref_has_no_absolute_local_path(cls, value: str) -> str:
         return validate_safe_source_metadata(value, field_name="proposal ref") or ""

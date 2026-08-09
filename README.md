@@ -151,7 +151,7 @@ npm --prefix apps/desktop run build:installer
 The generated installer is:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.10_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe
 ```
 
 Other useful desktop commands:
@@ -171,10 +171,10 @@ Verified local build output from `npm --prefix apps/desktop run build:installer`
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.10_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.10_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.10_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.10_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.11_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.11_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -184,7 +184,7 @@ The in-app settings panel includes a `Version & Updates` section. In the Tauri d
 
 Version updates must keep `VERSION`, `pyproject.toml`, the FastAPI version in `apps/api/main.py`, both Web/Desktop package manifests and root lockfile entries, `apps/web/src/version.ts`, the desktop package entry in `apps/desktop/src-tauri/Cargo.lock`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, Source Store documents, canon, drafts, project settings, and review state are not synchronized to GitHub.
 
-For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.10_x64-setup.exe.sig`, plus the no-space GitHub Release copies and `latest.json`. The backend sidecar is built with pinned PyInstaller 6.21.0. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.11_x64-setup.exe.sig`, plus the no-space GitHub Release copies and `latest.json`. The backend sidecar is built with pinned PyInstaller 6.21.0. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 
@@ -248,6 +248,20 @@ The Source Library is a private reference layer, not a browser-memory tree and n
   but cannot be sent to an Agent or structure analyzer under any language policy.
   Authors may correct language metadata without changing source identity or text.
 
+On desktop-width layouts, the author can drag the Source panel's bottom edge and
+the divider between the Source list and detail reader. Both separators also
+support arrow keys, Shift for larger steps, Home/End, and double-click reset.
+Only versioned UI dimensions are kept in local browser/Tauri storage; no source
+ID, path, text, project, or scene data is stored with that preference. At narrow
+widths the handles disappear and the list/reader return to an automatic stacked
+layout.
+
+`Use with Agent` is a selection-and-navigation shortcut. It carries only the
+stable Source Document ID into the Agent panel and does not copy source text,
+call a provider, create an artifact, or change `cross_language_policy`. A known
+other-language source remains visible but blocks sending under `project_only`
+until the author explicitly chooses `explicit_reference`; `und` remains blocked.
+
 Structure analysis is a separate explicit action. `POST /projects/{project_id}/sources/{source_document_id}/structure-draft` reads one ready Source Document and creates only a non-canon, author-editable `project_structure_draft` Proposal Artifact. It does not create Chapter or Scene nodes until the author accepts the proposal and invokes the existing explicit apply action. New proposal provenance uses stable `source_document` refs; old `imported_document` refs remain legacy opaque records rather than persistent Source Store IDs. The language policy defaults to `project_only`; an explicit known-language mismatch requires `explicit_reference`, while `und` is always blocked.
 
 The initial Source Library does not support RTF, PDF, OCR, images, or PSD files. Those formats require later importer work and must not be reported as successful text imports today. Import itself never creates another store record. After loading a ready detail, the author may separately and explicitly save that text as a current-scene Draft, a non-canon Proposal, or a Style Sample. This creates the normal target-store boundary; CandidateFacts still require a real Draft Store source and the existing pending human-review path.
@@ -256,7 +270,28 @@ The initial Source Library does not support RTF, PDF, OCR, images, or PSD files.
 
 The Web and desktop-hosted workbench include an `Agent` tab for discussing the current scene with the configured OpenAI-compatible LLM. The author can highlight a draft span, paste a marked passage, ask for a focused discussion, request a selected-span rewrite, or request a full-scene rewrite. Source Library documents are unselected by default. Only stable IDs that the author explicitly checks are sent as `source_document_ids`; the backend resolves those ready documents inside the route project. It never silently sends every library document or cached snippets from a previous request. The current Context Pack, current draft text, and optional web search remain separate explicit controls; disabling current-draft inclusion also prevents the editor text from being sent as `base_text`. Legacy inline sources must carry a valid source language; missing/invalid language is `422`, not a project-language default.
 
+Before sending, the Agent panel shows an input manifest with the target Scene,
+project output language, exact saved Draft ID/version or explicit omission,
+Context Pack rebuild behavior, selected Source names/languages, cross-language
+policy, and web-search state. If current-draft inclusion is enabled while the
+editor differs from that exact saved Draft, every Agent mode is blocked until
+the author saves or discards the local edit. The workbench submits that exact
+Draft ID, and the backend uses the same scoped Draft for the provider input and
+the resulting Proposal source ref; it never silently substitutes a newer
+Draft. The no-ID latest-Draft fallback exists only for legacy API clients.
+
 `POST /projects/{project_id}/scenes/{scene_id}/agent-discussion` requires `read_generate` permission and LLM credentials. It creates a non-canon `scene_rebuild` or `scene_draft` proposal in Proposal Store and returns the Agent reply, search snippets, and whether a selected-span replacement was applied to produce a full proposal body. It does not overwrite Draft Store, create CandidateFacts, or write Graph Store canon. Authors still review the proposal in `协作草稿箱`; only an explicit accept/promotion action can turn an accepted `scene_draft` proposal into a Draft Store draft.
+
+The Proposal Workspace exposes content/status history and computes a local
+side-by-side diff only when the selected Proposal version records one unique
+Draft source ref. Zero refs are shown as no baseline and multiple refs as
+ambiguous; it never substitutes the latest Draft. Unsaved Proposal title/body
+edits are visibly dirty and block review decisions, promotion, and
+proposal/scene/project switching until saved, discarded, or cancelled. Actions
+follow state: editable versions submit for review, ready versions accept/reject,
+and accepted artifacts expose only their applicable explicit promotion. A
+scene-draft promotion validates its declared Scene target, reuses the same
+already-derived Draft on a retry, and never writes canon.
 
 CLI file inputs are still intentionally narrow:
 

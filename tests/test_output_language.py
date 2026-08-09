@@ -395,7 +395,7 @@ def test_agent_discussion_rejects_untrusted_inline_revision_base_before_provider
         {"reply": "Reply", "replacement_text": "English replacement"}
     )
 
-    with pytest.raises(ContractError, match="validated latest Draft"):
+    with pytest.raises(ContractError, match="validated included Draft"):
         AgentDiscussionService(provider=provider, model="test-model").discuss(
             project_id="project_test",
             scene_id="scene_test",

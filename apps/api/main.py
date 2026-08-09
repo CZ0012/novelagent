@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import os
 import json
+from threading import RLock
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from typing import Literal
 
 from storygraph.core.agent_config import (
@@ -379,11 +387,25 @@ class AgentDiscussionRequest(BaseModel):
     base_text: str | None = None
     include_context_pack: bool = True
     include_latest_draft: bool = True
+    included_draft_id: str | None = Field(default=None, min_length=1)
     local_sources: list[AgentDiscussionSourceRequest] = Field(default_factory=list)
     source_document_ids: list[str] = Field(default_factory=list, max_length=32)
     allow_web_search: bool = False
     web_search_query: str | None = None
     cross_language_policy: CrossLanguagePolicy = "project_only"
+
+    @field_validator("included_draft_id", mode="before")
+    @classmethod
+    def normalized_included_draft_id(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def included_draft_requires_enabled_draft_input(self) -> "AgentDiscussionRequest":
+        if not self.include_latest_draft and self.included_draft_id is not None:
+            raise ValueError(
+                "included_draft_id requires include_latest_draft to be enabled"
+            )
+        return self
 
 
 class ProposalCreateRequest(BaseModel):
@@ -467,7 +489,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.10")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.11")
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -517,6 +539,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     proposal_store = SQLiteProposalStore(
         settings.proposal_store_path if use_persistent_stores else ":memory:"
     )
+    scene_draft_promotion_lock = RLock()
     source_store = SQLiteSourceDocumentStore(
         settings.source_store_path if use_persistent_stores else ":memory:"
     )
@@ -1495,27 +1518,39 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     ) -> dict:
         require_permission(AgentPermissionLevel.FULL)
         try:
-            proposal = proposal_store.get(proposal_id)
-            _ensure_proposal_project(proposal, project_id)
-            _ensure_proposal_promotable(proposal, request.expected_version)
-            _ensure_proposal_artifact_type(proposal, "scene_draft")
-            graph_query.scene_node(project_id=project_id, scene_id=request.scene_id)
-            content_language = _require_proposal_content_language(proposal)
-            draft = draft_store.create_draft(
-                project_id=project_id,
-                scene_id=request.scene_id,
-                content_language=content_language,
-                text=proposal.body,
-                summary=request.summary
-                or localized(
-                    content_language,
-                    zh=f"由协作草稿 {proposal.id} v{proposal.version} 转为场景草稿。",
-                    en=f"Converted collaboration proposal {proposal.id} v{proposal.version} to a scene draft.",
-                ),
-            )
-            updated_proposal = proposal_store.record_derived_ref(
-                proposal_id,
-                derived_ref=ProposalRef(
+            with scene_draft_promotion_lock:
+                proposal = proposal_store.get(proposal_id)
+                _ensure_proposal_project(proposal, project_id)
+                _ensure_proposal_artifact_type(proposal, "scene_draft")
+                _ensure_proposal_accepted(proposal)
+                _ensure_proposal_scene_target(proposal, request.scene_id)
+                graph_query.scene_node(project_id=project_id, scene_id=request.scene_id)
+                content_language = _require_proposal_content_language(proposal)
+                existing_draft = _existing_scene_draft_promotion(
+                    proposal,
+                    project_id=project_id,
+                    scene_id=request.scene_id,
+                    draft_store=draft_store,
+                )
+                if existing_draft is not None:
+                    return {
+                        "proposal": proposal.model_dump(),
+                        "draft": existing_draft.model_dump(),
+                    }
+                _ensure_proposal_expected_version(proposal, request.expected_version)
+                draft = draft_store.create_draft(
+                    project_id=project_id,
+                    scene_id=request.scene_id,
+                    content_language=content_language,
+                    text=proposal.body,
+                    summary=request.summary
+                    or localized(
+                        content_language,
+                        zh=f"由协作草稿 {proposal.id} v{proposal.version} 转为场景草稿。",
+                        en=f"Converted collaboration proposal {proposal.id} v{proposal.version} to a scene draft.",
+                    ),
+                )
+                derived_ref = ProposalRef(
                     kind="draft",
                     ref=draft.id,
                     note=localized(
@@ -1526,17 +1561,54 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                             f"v{proposal.version}."
                         ),
                     ),
-                ),
-                actor=request.actor,
-                content_language=content_language,
-                note=localized(
-                    content_language,
-                    zh="已将提案内容提升到草稿库。",
-                    en="Promoted proposal content to Draft Store.",
-                ),
-                expected_version=proposal.version,
-            )
-            return {"proposal": updated_proposal.model_dump(), "draft": draft.model_dump()}
+                )
+                try:
+                    updated_proposal = proposal_store.record_derived_ref(
+                        proposal_id,
+                        derived_ref=derived_ref,
+                        actor=request.actor,
+                        content_language=content_language,
+                        note=localized(
+                            content_language,
+                            zh="已将提案内容提升到草稿库。",
+                            en="Promoted proposal content to Draft Store.",
+                        ),
+                        expected_version=proposal.version,
+                    )
+                except Exception as exc:
+                    try:
+                        confirmed_proposal = proposal_store.rollback_and_get_confirmed(
+                            proposal_id
+                        )
+                    except Exception:
+                        confirmed_proposal = None
+                    recovered_proposal = _completed_scene_draft_promotion(
+                        proposal=confirmed_proposal,
+                        expected_draft=draft,
+                        project_id=project_id,
+                        scene_id=request.scene_id,
+                        draft_store=draft_store,
+                    )
+                    if recovered_proposal is not None:
+                        return {
+                            "proposal": recovered_proposal.model_dump(),
+                            "draft": draft.model_dump(),
+                        }
+                    if not draft_store.delete_if_unchanged(draft):
+                        raise ContractError(
+                            "Draft promotion failed and its newly created Draft could not "
+                            "be safely compensated."
+                        ) from exc
+                    if isinstance(exc, ContractError):
+                        raise
+                    raise ContractError(
+                        "Draft promotion failed before its derived reference was stored; "
+                        "the new Draft was compensated."
+                    ) from exc
+                return {
+                    "proposal": updated_proposal.model_dump(),
+                    "draft": draft.model_dump(),
+                }
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
@@ -2020,6 +2092,22 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
+    @app.get("/projects/{project_id}/scenes/{scene_id}/drafts/{draft_id}")
+    def get_scene_draft(project_id: str, scene_id: str, draft_id: str) -> dict:
+        require_permission(AgentPermissionLevel.READ_ONLY)
+        not_found = "这个项目和场景中没有找到该草稿。"
+        try:
+            graph_query.scene_node(project_id=project_id, scene_id=scene_id)
+        except (ContractError, GraphStoreError) as exc:
+            raise HTTPException(status_code=404, detail=not_found) from exc
+        draft = _get_scoped_scene_draft(
+            draft_store,
+            project_id=project_id,
+            scene_id=scene_id,
+            draft_id=draft_id,
+        )
+        return draft.model_dump()
+
     @app.post("/projects/{project_id}/scenes/{scene_id}/draft")
     def write_draft(project_id: str, scene_id: str, request: DraftRequest | None = None) -> dict:
         require_permission(AgentPermissionLevel.READ_GENERATE)
@@ -2052,11 +2140,17 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         try:
             graph_query.scene_node(project_id=project_id, scene_id=scene_id)
             output_language = resolve_project_output_language(graph, project_id)
-            latest = (
-                draft_store.latest_for_scene(project_id, scene_id)
-                if request.include_latest_draft
-                else None
-            )
+            if request.include_latest_draft and request.included_draft_id is not None:
+                latest = _get_scoped_scene_draft(
+                    draft_store,
+                    project_id=project_id,
+                    scene_id=scene_id,
+                    draft_id=request.included_draft_id,
+                )
+            elif request.include_latest_draft:
+                latest = draft_store.latest_for_scene(project_id, scene_id)
+            else:
+                latest = None
             context_pack = (
                 context_builder.build(project_id=project_id, scene_id=scene_id)
                 if request.include_context_pack
@@ -2506,6 +2600,23 @@ def _ensure_candidate_project(
         raise HTTPException(status_code=404, detail="这个项目中没有找到该候选事实。")
 
 
+def _get_scoped_scene_draft(
+    draft_store: SQLiteDraftStore,
+    *,
+    project_id: str,
+    scene_id: str,
+    draft_id: str,
+) -> Draft:
+    not_found = "这个项目和场景中没有找到该草稿。"
+    try:
+        draft = draft_store.get_draft(draft_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=not_found) from exc
+    if draft.project_id != project_id or draft.scene_id != scene_id:
+        raise HTTPException(status_code=404, detail=not_found)
+    return draft
+
+
 def _ensure_project_exists(graph, project_id: str):
     project = graph.get_node(project_id)
     if project.type != "Project":
@@ -2529,6 +2640,14 @@ def _ensure_proposal_promotable(
     proposal: ProposalArtifact,
     expected_version: int | None,
 ) -> None:
+    _ensure_proposal_expected_version(proposal, expected_version)
+    _ensure_proposal_accepted(proposal)
+
+
+def _ensure_proposal_expected_version(
+    proposal: ProposalArtifact,
+    expected_version: int | None,
+) -> None:
     if expected_version is not None and proposal.version != expected_version:
         raise HTTPException(
             status_code=409,
@@ -2537,6 +2656,9 @@ def _ensure_proposal_promotable(
                 f"期望 v{expected_version}，当前 v{proposal.version}。"
             ),
         )
+
+
+def _ensure_proposal_accepted(proposal: ProposalArtifact) -> None:
     if proposal.status != "accepted":
         raise HTTPException(status_code=409, detail="只有已接受的协作草稿可以执行提升。")
 
@@ -2557,6 +2679,69 @@ def _proposal_target_scene_id(proposal: ProposalArtifact) -> str:
     if not scene_ref:
         raise HTTPException(status_code=409, detail="该协作草稿缺少目标场景。")
     return scene_ref
+
+
+def _ensure_proposal_scene_target(proposal: ProposalArtifact, scene_id: str) -> None:
+    scene_targets = {
+        normalized_ref
+        for ref in proposal.target_refs
+        if ref.kind == "scene" and (normalized_ref := ref.ref.strip())
+    }
+    if len(scene_targets) > 1:
+        raise HTTPException(status_code=409, detail="该协作草稿包含多个不同的目标场景。")
+    if scene_targets and scene_id not in scene_targets:
+        raise HTTPException(status_code=409, detail="请求场景与协作草稿的目标场景不一致。")
+
+
+def _existing_scene_draft_promotion(
+    proposal: ProposalArtifact,
+    *,
+    project_id: str,
+    scene_id: str,
+    draft_store: SQLiteDraftStore,
+) -> Draft | None:
+    draft_refs = [ref.ref for ref in proposal.derived_refs if ref.kind == "draft"]
+    if not draft_refs:
+        return None
+    if len(draft_refs) != 1:
+        raise ContractError(
+            "A scene_draft proposal must not resolve to multiple derived Draft records."
+        )
+    try:
+        draft = draft_store.get_draft(draft_refs[0])
+    except KeyError as exc:
+        raise ContractError(
+            "The scene_draft proposal references a derived Draft that cannot be resolved."
+        ) from exc
+    if draft.project_id != project_id or draft.scene_id != scene_id:
+        raise ContractError(
+            "The scene_draft proposal's derived Draft does not belong to its promotion target."
+        )
+    return draft
+
+
+def _completed_scene_draft_promotion(
+    *,
+    proposal: ProposalArtifact | None,
+    expected_draft: Draft,
+    project_id: str,
+    scene_id: str,
+    draft_store: SQLiteDraftStore,
+) -> ProposalArtifact | None:
+    if proposal is None or proposal.project_id != project_id:
+        return None
+    try:
+        stored_draft = _existing_scene_draft_promotion(
+            proposal,
+            project_id=project_id,
+            scene_id=scene_id,
+            draft_store=draft_store,
+        )
+    except Exception:
+        return None
+    if stored_draft is None or stored_draft.model_dump() != expected_draft.model_dump():
+        return None
+    return proposal
 
 
 def _require_proposal_content_language(

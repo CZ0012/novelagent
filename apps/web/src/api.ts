@@ -72,7 +72,7 @@ export type SourceMediaType =
 
 export type SourceExtractionStatus = "ready" | "failed" | "archived";
 export type OutputLanguage = "zh-CN" | "en-US";
-export type SourceLanguage = OutputLanguage | "und";
+export type SourceLanguage = string;
 export type CrossLanguagePolicy = "project_only" | "explicit_reference";
 
 export type SourceImportProvenance = {
@@ -253,6 +253,7 @@ export type AgentDiscussionRequest = {
   base_text?: string | null;
   include_context_pack: boolean;
   include_latest_draft: boolean;
+  included_draft_id: string | null;
   local_sources: AgentDiscussionSource[];
   source_document_ids: string[];
   allow_web_search: boolean;

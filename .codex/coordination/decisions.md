@@ -146,3 +146,50 @@ translate, rewrite, relabel, or delete existing sources, drafts, proposals, styl
 samples, candidates, graph data, or workflow history. Language validation and
 cross-language rejection occur before any private text reaches a model provider,
 and errors or coordination records must not contain private source or draft text.
+
+## ADR-0008: Use Exact Provenance And Explicit Targets For Reviewable Rewrites
+
+Date: 2026-08-09
+
+Status: accepted
+
+Decision:
+
+StoryGraph review flows resolve persisted provenance exactly instead of guessing
+from whichever Draft or Source happens to be current. A Source-to-Agent handoff
+selects only the stable Source Document ID in transient client state. A Proposal
+diff uses the selected Proposal version's one unique Draft source ref; no ref is
+reported as no baseline and multiple refs are reported as ambiguous, with no
+fallback to the latest Draft.
+
+The client keeps pane dimensions, diff presentation, and unsaved editor state as
+UI-only state. It blocks Agent sends that would omit or replace unsaved Draft
+text, and blocks Proposal lifecycle or navigation actions while Proposal edits
+are dirty. Scene-draft promotion always carries an explicit request Scene,
+validates any Proposal Scene target before writing, and reuses one
+already-derived same-project/same-scene Draft for repeat-safe responses.
+
+When the current workbench includes a saved Draft, it pins the manifest record
+with `included_draft_id`. The backend/provider Draft and resulting Proposal
+Draft source ref use that same scoped id; latest-Draft fallback is legacy
+no-id compatibility only.
+
+Rationale:
+
+Authors need to see exactly which saved text an Agent used and exactly what will
+change before accepting a rewrite. Stable refs, visible input manifests, dirty
+guards, and explicit targets prevent silent latest-version substitution,
+cross-scene writes, and accidental loss of local edits while preserving the
+Proposal Workspace as a non-canon review layer.
+
+Constraints:
+
+Source-to-Agent navigation does not copy source text, call a provider, create an
+artifact, or change cross-language policy. Resizable Source pane preferences are
+versioned local UI dimensions only and contain no story data. Diff output is not
+persisted or translated. Promotion target, scope, language, version, and derived
+Draft checks occur before story-store writes; synchronous cross-store failure is
+compensated so a rejected request leaves no new Draft or derived ref. Proposal
+acceptance or Draft promotion never writes CandidateFact, Graph Store canon, or
+canon Event Log. Rich-document import and long-document chunking remain separate
+future work.

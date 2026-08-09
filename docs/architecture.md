@@ -189,6 +189,8 @@ MVP 应优先做成一个**本地引擎 + API + CLI + Web UI + 桌面宿主** �
 - 废稿。
 - 作者批注。
 
+Draft 的稳定 ID 也是 Proposal 审阅基线。除了当前场景最新草稿读取，后端提供精确作用域读取 `GET /projects/{project_id}/scenes/{scene_id}/drafts/{draft_id}`：至少需要本地 read permission，且 Draft 的 `project_id`、`scene_id` 必须同时与路径一致；缺失、跨项目或跨场景统一 fail-closed 为 not-found，不泄露正文或 metadata。该路由按 ID 返回原始历史版本，包括已标记 discarded 的 Draft，不得替换成最新版本。工作台在 Agent 请求中包含已保存 Draft 时还会提交清单所示的 `included_draft_id`；后端向 provider 发送的 Draft、提案记录的唯一 Draft source ref 与清单 ID 必须完全相同，不能在请求执行时偷换成较新的 Draft。
+
 推荐：SQLite/PostgreSQL + 文件系统。
 
 ### 5.3 Proposal Store：协作草稿与提案
@@ -203,11 +205,16 @@ MVP 应优先做成一个**本地引擎 + API + CLI + Web UI + 桌面宿主** �
 
 Proposal Artifact 使用 `proposal_artifact_v1`，保存 `source_refs`、`target_refs`、`provenance`、`version`、`review_decision` 和 `derived_refs`。作者和 Agent 的每次修改都应产生新版本。跨语言内容版本必须原子重写完整 `title` 与 `body`，不能只改 `content_language`；状态、审阅决定与 derived-ref 版本保留前一版本快照。legacy 未知语言提案只有经过完整内容修订才能获得已确认语言，不能通过状态迁移或项目当前语言伪确认。
 
+审阅 `scene_draft` 时，客户端从所选 Proposal 版本的 `source_refs` 解析 Draft 基线：恰好一个唯一 `kind = draft` ID 才能通过精确 Draft 路由读取；零个表示没有记录基线，多个表示多义，二者都不得静默回退到当前/最新草稿。客户端可据此对原文逐字计算双语安全的 diff，并用 `/versions` 展示内容和状态历史；diff 结果、展开状态和未保存 dirty 状态只存在客户端内存，不进入 Proposal/Draft/Source/Graph/Workflow 等 store，也不翻译任一侧文本。
+
 边界：
 
 - Proposal Artifact 不是 canon，也不是当前场景草稿。
 - 接受 Proposal Artifact 只表示作者接受该协作提案，不等于写入 canon。
 - `scene_draft` 只有经过显式 promotion API 才能进入 Draft Store。
+- `scene_draft` promotion 请求始终显式携带 `scene_id`。Proposal 若声明一个唯一 Scene target，请求必须匹配；声明多个不同 Scene target 属于多义；零 target 的 legacy Proposal 才可兼容使用显式请求 Scene。目标不一致、多义或越界必须在任何 Draft/derived-ref 写入前返回 `409`，失败不产生部分写入。
+- 已有且仅有一个合法 Draft derived ref 的重复 promotion 返回同一 Draft 与当前 Proposal，不创建新版本；即使丢失首次响应后的原样重试仍携带派生前 `expected_version`，也应在完整状态/类型/语言/目标/作用域校验后走此幂等返回，而不是仅因版本旧而拒绝。多条 derived Draft ref，或引用缺失、跨项目、跨场景 Draft，均返回 `409`，不得另建替代草稿。
+- 初次提升在单个 API 进程内串行。若 Draft 已创建而 derived-ref 调用同步失败，后端先确认该引用是否实际提交；未提交时仅补偿删除本次创建且仍完全一致的 Draft，再返回失败，不能留下孤儿。两个 SQLite Store 之间仍无跨库 2PC，进程或机器在提交间隔硬崩溃的恢复保留给后续对账任务，但普通同步错误和并发重试不得借此留下部分写入。
 - `fact_draft` 只有在提供真实 Draft Store `source_draft_id` 时，才能通过 ReviewService 提交 pending CandidateFact。
 - CandidateFact promotion 与最终 canon commit 都必须执行项目归属校验：来源场景、既有 subject/object、目标关系及关系两端只能属于 `CandidateFact.project_id`；新建节点/关系由受信任提交路径补齐同一 `project_id`，显式冲突则整批原子拒绝且不产生 Candidate、Graph 或 Event Log 部分写入。
 - CandidateFact 审阅决策使用 pending compare-and-set；并发接受/编辑/拒绝/延后只能有一个胜者。同步 graph commit 失败时仅在审阅记录仍等于本次写入值时补偿回原 pending。Neo4j 内一次候选提交的 node/relation delta 与全部 provenance events 必须位于同一个 write transaction；SQLite Candidate Store 与外部 Neo4j 之间仍无跨库 2PC，进程在两阶段之间硬崩溃的极端情况需要后续对账恢复任务处理。
@@ -227,6 +234,7 @@ Source Store 按 `project_id` 持久保存作者导入的 Source Document，边�
 - Source Document 不能替代 `candidate_fact_v1` 要求的真实 `source_draft_id`；事实提取仍需经过 Draft Store、pending CandidateFact 和 ReviewService。
 - 跨项目来源 ID 必须拒绝且不得泄露元数据或文本。
 - Source Store 文档默认不进入任何 Agent 输入；Agent 讨论只解析作者本次显式选择的 `source_document_ids`，结构分析则只解析路由路径中指定的单个 ready Source Document ID。
+- “交给 Agent”只在客户端临时选择该稳定 Source Document ID 并导航到 Agent 面板；它不复制 `extracted_text`，不写任何 store，不触发模型/提案/草稿动作，也不自动改变跨语言策略。真正发送时仍由作者确认清单并让后端按 ID 解析。
 - `source_document` 是新持久来源的 ProposalRef kind；旧 `imported_document` 只作为不可解析的 legacy opaque provenance 保留。
 - 归档只使文档退出活动资料库和 Agent 解析，不删除本地内容；初版不提供 delete API。
 
@@ -1058,10 +1066,10 @@ Neo4j / SQLite / Vector Store 本地连接
 核心界面模块：
 
 - Project Workspace：项目、卷、章节、场景树；Web/桌面工作台必须从后端 `/projects` 读取真实项目树，不能把前端 fixture 或占位数据当成真实 workspace。
-- Source Library / 资料库：通过同一本地 FastAPI 持久导入、列出、查看和归档项目 Source Document；列表不下发全文，跨项目不可见，Agent 来源默认不选中且只能由作者逐项显式选择。
-- Scene Editor：正文编辑器、版本切换、局部改写、批注。
-- Agent Discussion / Agent 对话：围绕当前场景、草稿选区、作者显式选择的同项目 Source Document 和可选联网搜索与 LLM 讨论；不选择 `source_document_ids` 时不得默认发送任何资料全文。输出只能是 Proposal Store 中的非 canon `scene_rebuild` 或 `scene_draft` 协作提案，不能直接覆盖 Draft Store 或写入 Graph Store。
-- Proposal Workspace / 协作草稿箱：展示、编辑、审阅和提升 `proposal_artifact_v1`；该模块必须来自后端 Proposal Store，不得使用前端 fixture 冒充持久化数据。
+- Source Library / 资料库：通过同一本地 FastAPI 持久导入、列出、查看和归档项目 Source Document；列表不下发全文，跨项目不可见，Agent 来源默认不选中且只能由作者逐项显式选择。“交给 Agent”只传递稳定 ID 到客户端临时选择并导航，不复制全文、不写 store、不自动切换跨语言策略。
+- Scene Editor：正文编辑器、版本切换、局部改写、批注；按稳定 ID 精确读取的历史或 discarded Draft 可作为 Proposal diff 审阅基线，但不会替换当前草稿。
+- Agent Discussion / Agent 对话：围绕当前场景、草稿选区、作者显式选择的同项目 Source Document 和可选联网搜索与 LLM 讨论；不选择 `source_document_ids` 时不得默认发送任何资料全文。发送前清单应明确目标 Scene、项目输出语言、是否包含及具体哪个已保存 Draft ID/version、Context Pack 行为、所选 Source summary/language、跨语言策略与联网搜索状态。工作台把清单中的精确 Draft ID 作为 `included_draft_id` 提交；后端按项目和场景解析同一 Draft，并把同一 ID 写入 Proposal source ref，不能回退到 latest。输出只能是 Proposal Store 中的非 canon `scene_rebuild` 或 `scene_draft` 协作提案，不能直接覆盖 Draft Store 或写入 Graph Store。
+- Proposal Workspace / 协作草稿箱：展示、编辑、审阅和提升 `proposal_artifact_v1`；从所选 Proposal 版本的唯一 Draft source ref 读取精确基线并在客户端计算不翻译文本的 diff，零/多基线明确显示不可比较，不能回退最新 Draft。未保存 title/body 与 dirty/diff UI 状态只在客户端存在，必须阻止危险状态转换或导航直至作者保存、放弃或取消；该模块必须来自后端 Proposal Store，不得使用前端 fixture 冒充持久化数据。
 - Context Pack Inspector：写作前上下文包，可查看、锁定、调整硬约束。
 - Agent Run Panel：展示工作流当前节点、事件、检查结果和失败重试；场景工作流按钮应明确包含 `build_context`、`write_draft`、`check_continuity`、`extract_state`、`human_review`。
 - Pending Facts Review：候选事实、关系变化、秘密揭露、伏笔状态的人审队列。
@@ -1081,10 +1089,10 @@ Neo4j / SQLite / Vector Store 本地连接
 - 当前可运行入口是 CLI、FastAPI + React/Vite Web 工作台、面向桌面宿主的持久化后端入口 `python -m apps.api.desktop_server`，以及源码构建的 Tauri 桌面应用。
 - `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。持久化或桌面空 workspace 应先显示项目创建；创建项目后，作者可以导入已有小说/资料，由 Agent 生成非正典 `project_structure_draft`，经作者接受并显式应用后才创建正式 Chapter/Scene 节点。需要默认 demo project 时，仍可调用 `POST /demo/seed`，该路径要求 full 权限并记录 reviewer、rationale 和 source_ref。已初始化的内置 demo 可以通过工作台或 `POST /demo/archive` 归档为非当前 canon 项目，以便回到空项目树。
 - 默认 `apps.api.main:app` 开发入口可用于本地 demo；不传入 settings 时它使用 seeded in-memory stores，不应被描述为完整桌面产品或持久化作者项目入口。
-- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、使用固定的 PyInstaller 6.21.0 生成 backend sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.10_x64-setup.exe`、Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.10_x64-setup.exe.sig`、用于 GitHub Release 的无空格副本及 `latest.json`。这些产物是本地源码构建输出；只有上传并发布后才构成签名 release channel。当前验证产物不包含 `nsis.zip`。
+- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、使用固定的 PyInstaller 6.21.0 生成 backend sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe`、Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe.sig`、用于 GitHub Release 的无空格副本及 `latest.json`。这些产物是本地源码构建输出；只有上传并发布后才构成签名 release channel。当前验证产物不包含 `nsis.zip`。
 - 桌面壳只应复用健康且 `/health.workspace` 与配置工作区一致的本机后端；如果端口被其他工作区的旧后端占用，应在设置页报告冲突，而不是继续加载旧 workspace 的项目树。
 - FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地操作者授权分级，不是身份认证；保存设置页或调用 `/settings/agent` 代表本地操作者显式授权，因此可升降权限并立即生效；CLI 当前不执行同一权限闸门。
-- SG-018 持久资料库路径由 `source_document_v1` 约束：React/Vite 与 Tauri 工作台在本地抽取 `.txt`、`.md`、`.markdown`、`.docx` 文本并把 text + metadata JSON 逐个提交到项目 Source Store；初版后端不保存原文件字节。重启后仍可按稳定 ID 与相对路径读取。导入响应和列表只返回 summary；作者打开同项目详情时才取得 `extracted_text`。v0.1.7 的浏览器内存 `local_sources` / `imported_document` 流程可在迁移期兼容，但不得冒充持久资料，新的 Source Store proposal ref 统一使用 `source_document`。作者可显式让 Agent 从单个来源详情生成 `project_structure_draft`；该草稿只包含章节/场景结构 JSON，且只有作者接受并应用后才创建 Chapter/Scene 节点。Agent 对话只解析本次请求中的 `source_document_ids`、显式选择的当前草稿/Context Pack 和作者开启的联网搜索，并只生成 `scene_rebuild` 或 `scene_draft` proposal，不覆盖当前草稿、不创建候选事实、不写 canon。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
+- SG-018 持久资料库路径由 `source_document_v1` 约束：React/Vite 与 Tauri 工作台在本地抽取 `.txt`、`.md`、`.markdown`、`.docx` 文本并把 text + metadata JSON 逐个提交到项目 Source Store；初版后端不保存原文件字节。重启后仍可按稳定 ID 与相对路径读取。导入响应和列表只返回 summary；作者打开同项目详情时才取得 `extracted_text`。v0.1.7 的浏览器内存 `local_sources` / `imported_document` 流程可在迁移期兼容，但不得冒充持久资料，新的 Source Store proposal ref 统一使用 `source_document`。作者可显式让 Agent 从单个来源详情生成 `project_structure_draft`；该草稿只包含章节/场景结构 JSON，且只有作者接受并应用后才创建 Chapter/Scene 节点。Agent 对话只解析本次请求中的 `source_document_ids`、由 `included_draft_id` 精确固定且作用域匹配的已保存 Draft、显式选择的 Context Pack 和作者开启的联网搜索，并只生成 `scene_rebuild` 或 `scene_draft` proposal，不覆盖当前草稿、不创建候选事实、不写 canon。旧客户端省略 additive Draft ID 时可兼容读取 latest，但工作台不得使用该回退。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
 - Web 工作台的项目树、当前场景选择、Graph 预览和 Timeline 预览必须来自后端项目/章节/场景数据；前端占位数据不得被 Context Pack、Draft Store、CandidateFact 或 Graph Store 当成真实 workspace 来源。
 - 设置页保存 API key、base URL 或模型名称不应自动切换到 LLM writer。LLM 写作只有在 scene writer mode 选择 `llm`、设置已保存、权限至少为 `read_generate`、当前项目/场景有效且 Context Pack 可构建时才应运行。
 - SG-019 语言隔离由 `language_policy_v1` 约束：Web/Tauri 在客户端本地持久化 `ui_locale`，不得放入 `/settings/agent` 或项目数据；后端从 `Project.language` 派生 `output_language`。legacy inline Agent source 与 legacy text structure request 必须提交有效 `source_language`，缺失或非法返回 `422`；`und` 在 `project_only` 和 `explicit_reference` 下都阻断模型使用。
@@ -1331,15 +1339,21 @@ PATCH /projects/{project_id}/scenes/{scene_id}
 
 ```http
 POST /projects/{project_id}/scenes/{scene_id}/context-pack
+GET  /projects/{project_id}/scenes/{scene_id}/draft
+GET  /projects/{project_id}/scenes/{scene_id}/drafts/{draft_id}
 POST /projects/{project_id}/scenes/{scene_id}/draft
 POST /projects/{project_id}/scenes/{scene_id}/revise
 POST /projects/{project_id}/scenes/{scene_id}/runs/scene-generation
 POST /projects/{project_id}/scenes/{scene_id}/runs/scene-generation { "output_target": "proposal_workspace" }
 POST /projects/{project_id}/scenes/{scene_id}/extract-document-facts
-POST /projects/{project_id}/scenes/{scene_id}/agent-discussion { "source_document_ids": [], "cross_language_policy": "project_only" }
+POST /projects/{project_id}/scenes/{scene_id}/agent-discussion { "source_document_ids": [], "include_latest_draft": true, "included_draft_id": "draft_001", "cross_language_policy": "project_only" }
 ```
 
+精确 Draft 路由至少要求 `read_only` permission，并返回 exact Draft projection。只有路径项目和场景都与 Draft 存储归属一致时才成功；历史或 discarded Draft 仍可按 ID 读取。缺失、跨项目和跨场景统一返回 not-found，且不得回退到最新 Draft。该路由用于解析 Proposal 的稳定审阅基线，不是草稿选择或写入操作。
+
 `source_document_ids` 默认为空；后端只解析作者本次显式选择、属于同项目、`ready` 且未归档的 Source Document。任一 ID 无效时整次请求失败，不静默忽略或跨项目读取。语言默认要求与项目完全一致；显式跨语言必须同时选择 ID 与 `explicit_reference`，`und` 永远阻断，检查失败必须发生在 provider 调用前。
+
+当前工作台开启已保存 Draft 输入时必须同时提交清单中的 `included_draft_id`。后端只按路径项目和 Scene 精确读取该 ID；缺失或越界统一在 provider 调用及 Proposal 创建前失败。provider 输入中的 Draft ID/version/text 与新 Proposal 的唯一 Draft source ref 必须对应同一记录。关闭 Draft 输入时该字段必须为空；只有未升级的旧客户端在开启输入但省略字段时保留 latest-Draft 兼容。
 
 ### 14.5 Source Library
 
@@ -1353,6 +1367,8 @@ POST /projects/{project_id}/sources/{source_document_id}/structure-draft
 ```
 
 `POST /sources` 接受本地客户端已抽取的 text + import metadata JSON，并要求至少 `read_generate` permission；响应为 `document` summary 加明确的 `created` / `updated` 布尔值。幂等键是项目、规范化相对路径与原文件 `checksum_sha256`：相同 ready 记录为 no-op，失败记录可原 ID 重试，路径相同但 checksum 改变时创建新稳定 ID。列表不返回 `extracted_text`，详情可以返回；archive 同样要求至少 `read_generate` 且不删除内容。Source language 必须是合法 canonical BCP 47 tag 或 `und`，元数据修正 PATCH 只改语言且使用 `expected_updated_at`。单文档 `structure-draft` 与 Agent discussion 都要求 `read_generate`；前者从路径中的 Source Document ID 解析一个 ready 来源，后者只解析请求中显式多选的 `source_document_ids`，两者都只产出非 canon proposal。Legacy inline/structure text 请求缺少有效 `source_language` 必须返回 `422`。完整字段和错误/兼容语义见 `contracts/source_document_v1.md` 与 `contracts/language_policy_v1.md`。
+
+Source→Agent 的 UI handoff 不属于上述转换 API：它只把 stable ID 放进 Agent 面板的临时选择并导航，不复制 `extracted_text`、不调用 provider、不创建 artifact、不写任何 store，也不自动改变 `cross_language_policy`。只有作者随后显式发送 Agent 请求时，后端才按现有 Source/语言/permission 边界解析该 ID。
 
 ### 14.6 Proposal Workspace
 
@@ -1369,6 +1385,10 @@ POST /projects/{project_id}/proposals/{proposal_id}/reject
 POST /projects/{project_id}/proposals/{proposal_id}/promote/draft
 POST /projects/{project_id}/proposals/{proposal_id}/promote/candidate-facts
 ```
+
+`/versions` 返回持久 Proposal 历史；客户端可结合所选版本唯一的 `source_refs[kind = draft]` 与精确 Draft 路由计算临时 diff，不新增 Proposal 字段。零个 Draft source ref 表示没有基线，多个不同 Draft ref 表示多义，均不得使用当前/最新 Draft 猜测。
+
+`promote/draft` 要求 `full` permission 与显式请求 `scene_id`。Proposal 的不同 Scene target 集合为零时兼容使用请求值、为一时必须匹配、超过一时返回 `409`；项目/场景作用域、状态、类型、语言、目标和既有 derived ref 均在写入前验证，首次写入还校验版本，目标失败不写 Draft 或 derived ref。重复请求若已有且仅有一个同项目同场景的有效 Draft derived ref，则以不变响应形状返回当前 Proposal 与原 Draft，不创建任何版本；该幂等分支允许响应丢失后的原请求仍携带派生前 `expected_version`。derived ref 多义、缺失目标 Draft 或越界时返回 `409`。同步记录 derived ref 失败且实际未提交时，后端补偿删除本次刚创建且未变化的 Draft；提交间硬崩溃的跨库对账仍是后续恢复工作。
 
 ### 14.7 Checking
 
