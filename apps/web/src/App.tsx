@@ -4394,7 +4394,7 @@ function DocumentReader({
           )}
         </div>
       ) : (
-        <>
+        <div className="reader-content">
           {doc.warnings.length > 0 && (
             <div className="reader-warning">
               <AlertTriangle size={15} />
@@ -4406,7 +4406,7 @@ function DocumentReader({
             </div>
           )}
           <pre>{doc.extracted_text}</pre>
-        </>
+        </div>
       )}
     </div>
   );

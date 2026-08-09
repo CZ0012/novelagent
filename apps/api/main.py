@@ -467,7 +467,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.9")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.10")
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(

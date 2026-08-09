@@ -847,7 +847,7 @@ h1 {
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   background: #ffffff;
 }
 
@@ -916,6 +916,8 @@ h1 {
 }
 
 .reader-error {
+  min-height: 0;
+  overflow: auto;
   border-color: #f4b8b0;
   background: var(--red-soft);
   color: var(--red);
@@ -997,7 +999,15 @@ h1 {
   background: #fffafa;
 }
 
-.document-reader pre {
+.reader-content {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.reader-content pre {
+  flex: 1 1 auto;
   min-height: 0;
   margin: 0;
   overflow: auto;
