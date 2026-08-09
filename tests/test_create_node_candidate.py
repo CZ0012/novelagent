@@ -19,10 +19,16 @@ def test_create_node_candidate_uses_graph_node_type_property():
     )
     candidates = RuleBasedStateExtractor().extract(project_id=PROJECT_ID, draft=draft)
     review = ReviewService(InMemoryCandidateStore(), graph)
-    review.submit(candidates)
+    submitted = review.submit(candidates)
+
+    assert submitted[0].proposed_graph_patch.properties["project_id"] == PROJECT_ID
 
     review.accept(candidates[0].id, reviewer="author", note="The item is explicit.")
 
     node = graph.get_node("item_new_key")
     assert node.type == "Item"
     assert node.properties["name"] == "New Key"
+    assert node.properties["project_id"] == PROJECT_ID
+    provenance_event = graph.event_log.get(node.event_id)
+    assert provenance_event.operation == "commit_candidate_fact"
+    assert provenance_event.target == node.id

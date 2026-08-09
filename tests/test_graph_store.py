@@ -1,7 +1,7 @@
 from storygraph.core.errors import GraphStoreError
 from storygraph.core.time import utc_now
 from storygraph.demo import PROJECT_ID, build_fantasy_demo_graph
-from storygraph.models.graph import GraphNode
+from storygraph.models.graph import GraphNode, GraphRelationship
 from storygraph.stores.memory_graph import InMemoryGraphStore
 
 
@@ -49,3 +49,31 @@ def test_canon_reads_exclude_non_canon_nodes():
     else:
         raise AssertionError("Expected non-canon node to be hidden")
 
+
+def test_canon_reads_exclude_non_canon_relationships():
+    graph = build_fantasy_demo_graph()
+    now = utc_now()
+    graph.create_relation(
+        GraphRelationship(
+            id="rel_hypothesis",
+            type="KNOWS",
+            status="HYPOTHESIS",
+            created_at=now,
+            updated_at=now,
+            source_ref="test",
+            source_id=PROJECT_ID,
+            target_id=PROJECT_ID,
+            properties={"project_id": PROJECT_ID},
+        )
+    )
+
+    assert graph.get_relationship(
+        "rel_hypothesis",
+        include_non_canon=True,
+    ).id == "rel_hypothesis"
+    try:
+        graph.get_relationship("rel_hypothesis")
+    except GraphStoreError as exc:
+        assert exc.category == "not_found"
+    else:
+        raise AssertionError("Expected non-canon relationship to be hidden")

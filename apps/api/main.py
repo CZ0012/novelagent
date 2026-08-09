@@ -5,9 +5,11 @@ from __future__ import annotations
 import os
 import json
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, ValidationError
 from typing import Literal
 
 from storygraph.core.agent_config import (
@@ -34,7 +36,10 @@ from storygraph.models.proposal import (
     ProposalProvenance,
     ProposalRef,
 )
+from storygraph.models.candidate import CandidateFact
 from storygraph.models.common import EvidenceItem
+from storygraph.models.draft import Draft
+from storygraph.models.source import SourceDocument, SourceImportProvenance
 from storygraph.models.style import StyleSample
 from storygraph.services import (
     AgentDiscussionService,
@@ -57,6 +62,7 @@ from storygraph.stores import (
     SQLiteCandidateStore,
     SQLiteDraftStore,
     SQLiteProposalStore,
+    SQLiteSourceDocumentStore,
     SQLiteStyleSampleStore,
 )
 from storygraph.stores.graph_factory import open_configured_graph_store, save_configured_graph_store
@@ -227,6 +233,29 @@ class ProjectStructureDraftRequest(BaseModel):
     max_scenes_per_chapter: int = Field(8, ge=1, le=24)
 
 
+class SourceDocumentImportRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=500)
+    relative_path: str = Field(..., min_length=1, max_length=2048)
+    media_type: Literal[
+        "text/plain",
+        "text/markdown",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ]
+    language: str = Field(..., min_length=1, max_length=35)
+    byte_size: int = Field(..., ge=0)
+    checksum_sha256: str = Field(..., min_length=64, max_length=64)
+    extraction_status: Literal["ready", "failed"]
+    extracted_text: str | None = None
+    warnings: list[str] = Field(default_factory=list, max_length=32)
+    error: str | None = Field(default=None, max_length=500)
+    provenance: SourceImportProvenance
+
+
+class SourceStructureDraftRequest(BaseModel):
+    max_chapters: int = Field(12, ge=1, le=40)
+    max_scenes_per_chapter: int = Field(8, ge=1, le=24)
+
+
 class SceneGenerationRunRequest(BaseModel):
     output_target: Literal["draft_store", "proposal_workspace"] = "draft_store"
 
@@ -247,6 +276,7 @@ class AgentDiscussionRequest(BaseModel):
     include_context_pack: bool = True
     include_latest_draft: bool = True
     local_sources: list[AgentDiscussionSourceRequest] = Field(default_factory=list)
+    source_document_ids: list[str] = Field(default_factory=list, max_length=32)
     allow_web_search: bool = False
     web_search_query: str | None = None
 
@@ -332,7 +362,27 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.7")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.8")
+
+    @app.exception_handler(RequestValidationError)
+    async def sanitized_request_validation_error(
+        _request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": [
+                    {
+                        "type": error.get("type", "validation_error"),
+                        "loc": list(error.get("loc", ())),
+                        "msg": error.get("msg", "Invalid request."),
+                    }
+                    for error in exc.errors()
+                ]
+            },
+        )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
@@ -361,6 +411,9 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     )
     proposal_store = SQLiteProposalStore(
         settings.proposal_store_path if use_persistent_stores else ":memory:"
+    )
+    source_store = SQLiteSourceDocumentStore(
+        settings.source_store_path if use_persistent_stores else ":memory:"
     )
     workflow_store = SQLiteWorkflowStore(
         settings.workflow_store_path if use_persistent_stores else ":memory:"
@@ -400,6 +453,124 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     ),
                 },
             )
+
+    def build_project_structure_draft(
+        *,
+        project_id: str,
+        title: str,
+        source_text: str,
+        source_ref: ProposalRef,
+        max_chapters: int,
+        max_scenes_per_chapter: int,
+    ) -> dict:
+        if _llm_is_configured(settings):
+            analyzer = LLMProjectStructureAnalyzer(
+                provider=create_llm_provider(settings),
+                model=settings.llm_model,
+                max_chapters=max_chapters,
+                max_scenes_per_chapter=max_scenes_per_chapter,
+            )
+            model_ref = f"{agent_config.provider_label}/{settings.llm_model}"
+        else:
+            analyzer = RuleBasedProjectStructureAnalyzer(
+                max_chapters=max_chapters,
+                max_scenes_per_chapter=max_scenes_per_chapter,
+            )
+            model_ref = None
+        draft = analyzer.analyze(
+            project_id=project_id,
+            title=title,
+            source_text=source_text,
+        )
+        now = utc_now()
+        proposal = ProposalArtifact(
+            id=new_id("proposal"),
+            project_id=project_id,
+            artifact_type="project_structure_draft",
+            status="agent_revised",
+            title=f"项目结构草稿：{title}",
+            body=draft.body,
+            body_format="structured_json",
+            target_refs=[ProposalRef(kind="project", ref=project_id)],
+            source_refs=[source_ref],
+            provenance=ProposalProvenance(
+                created_by="agent",
+                created_via=draft.created_via,  # type: ignore[arg-type]
+                model_ref=model_ref,
+                note="Agent proposed project chapters and scenes from an imported document.",
+            ),
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+        stored = proposal_store.create(proposal)
+        return {
+            "proposal": stored.model_dump(),
+            "outline": draft.outline,
+            "truncated": draft.truncated,
+        }
+
+    def get_project_source(project_id: str, source_document_id: str) -> SourceDocument:
+        _ensure_project_exists(graph, project_id)
+        try:
+            return source_store.get(
+                project_id=project_id,
+                source_id=source_document_id,
+            )
+        except ContractError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="这个项目中没有找到该来源文档。",
+            ) from exc
+
+    def resolve_discussion_source_documents(
+        project_id: str,
+        source_document_ids: list[str],
+    ) -> list[DiscussionSource]:
+        resolved: list[DiscussionSource] = []
+        seen: set[str] = set()
+        for source_document_id in source_document_ids:
+            if source_document_id in seen:
+                continue
+            seen.add(source_document_id)
+            document = get_project_source(project_id, source_document_id)
+            if document.extraction_status != "ready" or not document.extracted_text:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Agent 只能读取已成功提取正文的来源文档。",
+                )
+            resolved.append(
+                DiscussionSource(
+                    kind="source_document",
+                    ref=document.id,
+                    title=document.title,
+                    text=document.extracted_text,
+                    note=document.relative_path,
+                )
+            )
+        return resolved
+
+    def resolve_inline_discussion_sources(
+        sources: list[AgentDiscussionSourceRequest],
+    ) -> list[DiscussionSource]:
+        if any(source.kind == "source_document" for source in sources):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "持久化来源文档必须通过 source_document_ids 选择，"
+                    "不能通过 local_sources 伪造来源引用。"
+                ),
+            )
+        return [
+            DiscussionSource(
+                kind=source.kind,
+                ref=source.ref,
+                title=source.title,
+                text=source.text,
+                note=source.note,
+            )
+            for source in sources
+        ]
 
     @app.get("/health")
     def health() -> dict:
@@ -706,6 +877,134 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
+    @app.post("/projects/{project_id}/sources")
+    def import_source_document(
+        project_id: str,
+        request: SourceDocumentImportRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        try:
+            _ensure_project_exists(graph, project_id)
+            now = utc_now()
+            document = SourceDocument(
+                id=new_id("source"),
+                project_id=project_id,
+                title=request.title,
+                relative_path=request.relative_path,
+                media_type=request.media_type,
+                language=request.language,
+                byte_size=request.byte_size,
+                checksum_sha256=request.checksum_sha256,
+                extraction_status=request.extraction_status,
+                extracted_text=request.extracted_text,
+                character_count=len(request.extracted_text or ""),
+                warnings=request.warnings,
+                error=request.error,
+                provenance=request.provenance,
+                created_at=now,
+                updated_at=now,
+            )
+            result = source_store.create_or_get(document)
+            return {
+                "document": result.document.to_summary().model_dump(),
+                "created": result.created,
+                "updated": result.updated,
+            }
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "category": "invalid_source_document",
+                    "errors": [
+                        {
+                            "type": error["type"],
+                            "loc": error["loc"],
+                            "message": error["msg"],
+                        }
+                        for error in exc.errors(
+                            include_url=False,
+                            include_context=False,
+                            include_input=False,
+                        )
+                    ],
+                },
+            ) from exc
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.get("/projects/{project_id}/sources")
+    def list_source_documents(
+        project_id: str,
+        include_archived: bool = False,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.READ_ONLY)
+        try:
+            _ensure_project_exists(graph, project_id)
+            documents = source_store.list(
+                project_id=project_id,
+                include_archived=include_archived,
+            )
+            return {"sources": [document.model_dump() for document in documents]}
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.get("/projects/{project_id}/sources/{source_document_id}")
+    def get_source_document(project_id: str, source_document_id: str) -> dict:
+        require_permission(AgentPermissionLevel.READ_ONLY)
+        try:
+            return get_project_source(project_id, source_document_id).model_dump()
+        except GraphStoreError as exc:
+            raise _graph_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/sources/{source_document_id}/archive")
+    def archive_source_document(project_id: str, source_document_id: str) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        try:
+            get_project_source(project_id, source_document_id)
+            archived = source_store.archive(
+                project_id=project_id,
+                source_id=source_document_id,
+            )
+            return archived.to_summary().model_dump()
+        except GraphStoreError as exc:
+            raise _graph_http_exception(exc) from exc
+        except ContractError as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/sources/{source_document_id}/structure-draft")
+    def create_source_project_structure_draft(
+        project_id: str,
+        source_document_id: str,
+        request: SourceStructureDraftRequest | None = None,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        request = request or SourceStructureDraftRequest()
+        try:
+            document = get_project_source(project_id, source_document_id)
+            if document.extraction_status != "ready" or not document.extracted_text:
+                raise HTTPException(
+                    status_code=409,
+                    detail="只有已成功提取正文的来源文档可以生成项目结构草稿。",
+                )
+            return build_project_structure_draft(
+                project_id=project_id,
+                title=document.title,
+                source_text=document.extracted_text,
+                source_ref=ProposalRef(
+                    kind="source_document",
+                    ref=document.id,
+                    note=document.title,
+                ),
+                max_chapters=request.max_chapters,
+                max_scenes_per_chapter=request.max_scenes_per_chapter,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except GraphStoreError as exc:
+            raise _graph_http_exception(exc) from exc
+        except ContractError as exc:
+            raise _contract_http_exception(exc) from exc
+
     @app.post("/projects/{project_id}/imports/structure-draft")
     def create_project_structure_draft(
         project_id: str,
@@ -714,58 +1013,18 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         require_permission(AgentPermissionLevel.READ_GENERATE)
         try:
             _ensure_project_exists(graph, project_id)
-            if _llm_is_configured(settings):
-                analyzer = LLMProjectStructureAnalyzer(
-                    provider=create_llm_provider(settings),
-                    model=settings.llm_model,
-                    max_chapters=request.max_chapters,
-                    max_scenes_per_chapter=request.max_scenes_per_chapter,
-                )
-                model_ref = f"{agent_config.provider_label}/{settings.llm_model}"
-            else:
-                analyzer = RuleBasedProjectStructureAnalyzer(
-                    max_chapters=request.max_chapters,
-                    max_scenes_per_chapter=request.max_scenes_per_chapter,
-                )
-                model_ref = None
-            draft = analyzer.analyze(
+            return build_project_structure_draft(
                 project_id=project_id,
                 title=request.title,
                 source_text=request.text,
-            )
-            now = utc_now()
-            proposal = ProposalArtifact(
-                id=new_id("proposal"),
-                project_id=project_id,
-                artifact_type="project_structure_draft",
-                status="agent_revised",
-                title=f"项目结构草稿：{request.title}",
-                body=draft.body,
-                body_format="structured_json",
-                target_refs=[ProposalRef(kind="project", ref=project_id)],
-                source_refs=[
-                    ProposalRef(
-                        kind="imported_document",
-                        ref=request.source_ref,
-                        note=f"Imported source document: {request.title}",
-                    )
-                ],
-                provenance=ProposalProvenance(
-                    created_by="agent",
-                    created_via=draft.created_via,  # type: ignore[arg-type]
-                    model_ref=model_ref,
-                    note="Agent proposed project chapters and scenes from an imported document.",
+                source_ref=ProposalRef(
+                    kind="imported_document",
+                    ref=request.source_ref,
+                    note=f"Imported source document: {request.title}",
                 ),
-                version=1,
-                created_at=now,
-                updated_at=now,
+                max_chapters=request.max_chapters,
+                max_scenes_per_chapter=request.max_scenes_per_chapter,
             )
-            stored = proposal_store.create(proposal)
-            return {
-                "proposal": stored.model_dump(),
-                "outline": draft.outline,
-                "truncated": draft.truncated,
-            }
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except (ContractError, GraphStoreError) as exc:
@@ -1015,42 +1274,49 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             source_draft = draft_store.get_draft(request.source_draft_id)
             if source_draft.project_id != project_id:
                 raise HTTPException(status_code=404, detail="这个项目中没有找到来源草稿。")
-            candidates = extractor.extract_from_text(
+            candidates = _fact_draft_candidates(
                 project_id=project_id,
-                draft=source_draft,
-                text=proposal.body,
-                supporting_evidence=[
-                    EvidenceItem(
-                        kind="proposal_artifact",
-                        ref=proposal.id,
-                        note=f"CandidateFact extracted from proposal v{proposal.version}.",
-                    )
-                ],
+                proposal=proposal,
+                source_draft=source_draft,
+                extractor=extractor,
             )
+            candidates = [
+                review.validate_candidate_scope(candidate, project_id=project_id)
+                for candidate in candidates
+            ]
             if not candidates:
                 return {
                     "proposal": proposal.model_dump(),
                     "source_draft": source_draft.model_dump(),
                     "candidates": [],
+                    "already_promoted": False,
                 }
-            submitted = review.submit(candidates)
-            updated_proposal = proposal
-            for candidate in submitted:
-                updated_proposal = proposal_store.record_derived_ref(
-                    proposal_id,
-                    derived_ref=ProposalRef(
+            existing = _existing_fact_draft_promotion(
+                proposal=proposal,
+                candidates=candidates,
+                candidate_store=candidate_store,
+            )
+            already_promoted = existing is not None
+            submitted = existing if existing is not None else review.submit(candidates)
+            updated_proposal = proposal_store.record_derived_refs(
+                proposal_id,
+                derived_refs=[
+                    ProposalRef(
                         kind="candidate_fact",
                         ref=candidate.id,
-                        note=f"CandidateFact extracted from proposal v{proposal.version}.",
-                    ),
-                    actor=request.actor,
-                    note="Recorded CandidateFact derived from proposal content.",
-                    expected_version=updated_proposal.version,
-                )
+                        note="CandidateFact promoted from this accepted fact_draft.",
+                    )
+                    for candidate in submitted
+                ],
+                actor=request.actor,
+                note="Recorded CandidateFacts derived from accepted proposal content.",
+                expected_version=proposal.version,
+            )
             return {
                 "proposal": updated_proposal.model_dump(),
                 "source_draft": source_draft.model_dump(),
                 "candidates": [candidate.model_dump() for candidate in submitted],
+                "already_promoted": already_promoted,
             }
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="没有找到来源草稿。") from exc
@@ -1432,6 +1698,11 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 provider=create_llm_provider(settings),
                 model=settings.llm_model,
             )
+            selected_source_documents = resolve_discussion_source_documents(
+                project_id,
+                request.source_document_ids,
+            )
+            inline_sources = resolve_inline_discussion_sources(request.local_sources)
             result = service.discuss(
                 project_id=project_id,
                 scene_id=scene_id,
@@ -1442,14 +1713,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 context_pack=context_pack,
                 latest_draft=latest,
                 local_sources=[
-                    DiscussionSource(
-                        kind=source.kind,
-                        ref=source.ref,
-                        title=source.title,
-                        text=source.text,
-                        note=source.note,
-                    )
-                    for source in request.local_sources
+                    *selected_source_documents,
+                    *inline_sources,
                 ],
                 allow_web_search=request.allow_web_search,
                 web_search_query=request.web_search_query,
@@ -1554,10 +1819,10 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 "candidates": [],
             }
         try:
-            review.submit(candidates)
+            submitted = review.submit(candidates)
         except ContractError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"candidates": [candidate.model_dump() for candidate in candidates]}
+        return {"candidates": [candidate.model_dump() for candidate in submitted]}
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/extract-document-facts")
     def extract_document_facts(
@@ -1775,7 +2040,9 @@ def _ensure_candidate_project(
 
 
 def _ensure_project_exists(graph, project_id: str) -> None:
-    graph.get_node(project_id)
+    project = graph.get_node(project_id)
+    if project.type != "Project":
+        raise GraphStoreError("not_found", f"Project not found: {project_id}")
 
 
 def _ensure_chapter_project(graph, *, project_id: str, chapter_id: str) -> None:
@@ -1822,6 +2089,234 @@ def _proposal_target_scene_id(proposal: ProposalArtifact) -> str:
     if not scene_ref:
         raise HTTPException(status_code=409, detail="该协作草稿缺少目标场景。")
     return scene_ref
+
+
+def _fact_draft_candidates(
+    *,
+    project_id: str,
+    proposal: ProposalArtifact,
+    source_draft: Draft,
+    extractor: RuleBasedStateExtractor,
+) -> list[CandidateFact]:
+    proposal_evidence = EvidenceItem(
+        kind="proposal_artifact",
+        ref=proposal.id,
+        note="CandidateFact promoted from this accepted fact_draft.",
+    )
+    if proposal.body_format == "structured_json":
+        candidates = _structured_fact_draft_candidates(
+            proposal=proposal,
+            source_draft=source_draft,
+            proposal_evidence=proposal_evidence,
+        )
+        strict_spans = True
+    else:
+        candidates = extractor.extract_from_text(
+            project_id=project_id,
+            draft=source_draft,
+            text=proposal.body,
+            supporting_evidence=[proposal_evidence],
+        )
+        candidates = [
+            _relocate_marker_candidate_span(candidate, source_draft=source_draft)
+            for candidate in candidates
+        ]
+        strict_spans = False
+
+    validated = [
+        _validate_fact_draft_candidate(
+            candidate,
+            project_id=project_id,
+            source_draft=source_draft,
+            strict_span=strict_spans,
+        )
+        for candidate in candidates
+    ]
+    return _deduplicate_fact_draft_candidates(validated)
+
+
+def _structured_fact_draft_candidates(
+    *,
+    proposal: ProposalArtifact,
+    source_draft: Draft,
+    proposal_evidence: EvidenceItem,
+) -> list[CandidateFact]:
+    try:
+        payload = json.loads(proposal.body)
+    except json.JSONDecodeError as exc:
+        raise ContractError("Structured fact_draft body must be valid JSON.") from exc
+    if not isinstance(payload, dict):
+        raise ContractError("Structured fact_draft body must be a JSON object.")
+    payload_source_draft_id = payload.get("source_draft_id")
+    if payload_source_draft_id is not None and payload_source_draft_id != source_draft.id:
+        raise ContractError("Structured fact_draft source_draft_id does not match the request.")
+    raw_candidates = payload.get("candidate_previews")
+    if not isinstance(raw_candidates, list):
+        raise ContractError("Structured fact_draft requires candidate_previews array.")
+
+    candidates: list[CandidateFact] = []
+    for index, raw_candidate in enumerate(raw_candidates):
+        try:
+            candidate = CandidateFact.model_validate(raw_candidate)
+        except ValueError as exc:
+            raise ContractError(
+                f"Structured fact_draft candidate_previews[{index}] is invalid: {exc}"
+            ) from exc
+        evidence = list(candidate.evidence)
+        if not any(
+            item.kind == "proposal_artifact" and item.ref == proposal.id
+            for item in evidence
+        ):
+            evidence.append(proposal_evidence)
+        candidates.append(candidate.model_copy(update={"evidence": evidence}))
+    return candidates
+
+
+def _relocate_marker_candidate_span(
+    candidate: CandidateFact,
+    *,
+    source_draft: Draft,
+) -> CandidateFact:
+    quote = candidate.source_span.quote
+    if not quote:
+        raise ContractError(f"CandidateFact {candidate.id} requires a non-empty source quote.")
+    start_offset = source_draft.text.find(quote)
+    if start_offset < 0:
+        raise ContractError(
+            f"CandidateFact {candidate.id} quote was not found in source draft {source_draft.id}."
+        )
+    return candidate.model_copy(
+        update={
+            "source_span": candidate.source_span.model_copy(
+                update={
+                    "start_offset": start_offset,
+                    "end_offset": start_offset + len(quote),
+                }
+            )
+        }
+    )
+
+
+def _validate_fact_draft_candidate(
+    candidate: CandidateFact,
+    *,
+    project_id: str,
+    source_draft: Draft,
+    strict_span: bool,
+) -> CandidateFact:
+    if not candidate.id.strip():
+        raise ContractError("CandidateFact id cannot be empty.")
+    if not candidate.subject_id.strip() or not candidate.relation.strip():
+        raise ContractError(f"CandidateFact {candidate.id} requires subject_id and relation.")
+    if candidate.project_id != project_id:
+        raise ContractError(f"CandidateFact {candidate.id} belongs to another project.")
+    if candidate.source_draft_id != source_draft.id:
+        raise ContractError(
+            f"CandidateFact {candidate.id} source_draft_id does not match {source_draft.id}."
+        )
+    if candidate.source_scene_id != source_draft.scene_id:
+        raise ContractError(
+            f"CandidateFact {candidate.id} source_scene_id does not match its source draft."
+        )
+    if candidate.proposed_graph_patch.source_ref != source_draft.id:
+        raise ContractError(
+            f"CandidateFact {candidate.id} graph patch must cite source draft {source_draft.id}."
+        )
+    if (
+        candidate.review.status != "pending"
+        or candidate.review.reviewer is not None
+        or candidate.review.reviewed_at is not None
+    ):
+        raise ContractError(f"CandidateFact {candidate.id} must be pending before promotion.")
+    if candidate.status not in {"DRAFT_FACT", "HYPOTHESIS", "CONFLICT"}:
+        raise ContractError(
+            f"CandidateFact {candidate.id} has invalid pre-review status {candidate.status}."
+        )
+
+    span = candidate.source_span
+    if not span.quote:
+        raise ContractError(f"CandidateFact {candidate.id} requires a non-empty source quote.")
+    if span.start_offset >= span.end_offset or span.end_offset > len(source_draft.text):
+        raise ContractError(f"CandidateFact {candidate.id} has an invalid source span.")
+    source_text = source_draft.text[span.start_offset : span.end_offset]
+    if source_text != span.quote:
+        if strict_span and source_text.startswith(span.quote) and len(span.quote) == 200:
+            candidate = candidate.model_copy(
+                update={
+                    "source_span": span.model_copy(
+                        update={"end_offset": span.start_offset + len(span.quote)}
+                    )
+                }
+            )
+        else:
+            raise ContractError(
+                f"CandidateFact {candidate.id} source span does not match its quote."
+            )
+    return candidate
+
+
+def _deduplicate_fact_draft_candidates(
+    candidates: list[CandidateFact],
+) -> list[CandidateFact]:
+    unique: dict[str, CandidateFact] = {}
+    for candidate in candidates:
+        previous = unique.get(candidate.id)
+        if previous is None:
+            unique[candidate.id] = candidate
+            continue
+        if _candidate_promotion_payload(previous) != _candidate_promotion_payload(candidate):
+            raise ContractError(
+                f"Conflicting duplicate CandidateFact id in fact_draft: {candidate.id}"
+            )
+    return list(unique.values())
+
+
+def _existing_fact_draft_promotion(
+    *,
+    proposal: ProposalArtifact,
+    candidates: list[CandidateFact],
+    candidate_store: CandidateStore,
+) -> list[CandidateFact] | None:
+    candidate_ids = {candidate.id for candidate in candidates}
+    derived_ids = {
+        ref.ref for ref in proposal.derived_refs if ref.kind == "candidate_fact"
+    }
+    unexpected_refs = derived_ids - candidate_ids
+    if unexpected_refs:
+        raise ContractError(
+            "fact_draft derived CandidateFact refs do not match the accepted proposal body: "
+            + ", ".join(sorted(unexpected_refs))
+        )
+
+    stored_by_id = {
+        candidate.id: candidate
+        for candidate in candidate_store.list()
+        if candidate.id in candidate_ids
+    }
+    if derived_ids and len(stored_by_id) != len(candidate_ids):
+        raise ContractError("fact_draft promotion has incomplete derived CandidateFact records.")
+    if not derived_ids and not stored_by_id:
+        return None
+    if len(stored_by_id) != len(candidate_ids):
+        raise ContractError(
+            "CandidateFact id conflict would leave a partial fact_draft promotion."
+        )
+
+    ordered: list[CandidateFact] = []
+    for candidate in candidates:
+        stored = stored_by_id[candidate.id]
+        if _candidate_promotion_payload(stored) != _candidate_promotion_payload(candidate):
+            raise ContractError(f"CandidateFact id already exists with different data: {candidate.id}")
+        ordered.append(stored)
+    return ordered
+
+
+def _candidate_promotion_payload(candidate: CandidateFact) -> dict:
+    payload = candidate.model_dump()
+    payload.pop("created_at", None)
+    payload.pop("review", None)
+    payload.pop("status", None)
+    return payload
 
 
 def _project_structure_from_proposal(proposal: ProposalArtifact) -> dict:

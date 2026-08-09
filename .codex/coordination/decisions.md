@@ -87,3 +87,23 @@ Authors need fact-draft collaboration before committing candidates, but proposal
 Constraints:
 
 `fact_draft` promotion must be explicit, require `full` permission, require an accepted proposal version, and submit pending CandidateFacts through ReviewService. Graph Store canon writes remain limited to human seed APIs or CandidateFact accept/edit-accept review paths.
+
+## ADR-0006: Use A Project-Scoped Source Store For Persistent Imported Materials
+
+Date: 2026-08-09
+
+Status: accepted
+
+Decision:
+
+StoryGraph uses `source_document_v1` and a local Source Store for persistent imported TXT, Markdown, and DOCX materials. Source Documents have stable server IDs, normalized project-relative paths, the original-file `checksum_sha256`, client-extracted text, extraction state, provenance, and timestamps. The initial Source Store persists text + metadata JSON, not original file bytes. Import, archive, Agent discussion, and structure analysis require at least `read_generate`; list/detail require read permission.
+
+New persistent Proposal Artifact refs use `kind = source_document` and the stable Source Document ID. Existing optional note/quote/source-span fields may carry bounded review context, but never full text. Existing `imported_document` refs remain valid opaque legacy provenance and are not reinterpreted as Source Store IDs. This decision does not change `proposal_artifact_v1` fields or `candidate_fact_v1`.
+
+Rationale:
+
+Browser-memory imports disappear on restart and require clients to resend private text to Agent routes. A backend-owned, project-scoped Source Store provides durable retrieval and trustworthy provenance while keeping source material outside canon and outside draft/candidate review state.
+
+Constraints:
+
+Source lists never return `extracted_text`; same-project detail may. Cross-project, failed, or archived Source Documents must not reach Agent/structure prompts. Structure analysis resolves one ready Source Document from the route ID; Agent discussion resolves only the explicitly selected `source_document_ids`. Source import/read/archive cannot create Drafts, proposals, CandidateFacts, graph writes, canon events, style samples, vector records, or workflow checkpoints. A Source Document cannot replace the real Draft Store `source_draft_id` required by `candidate_fact_v1`. Archive is non-destructive and v1 has no delete route.

@@ -6,6 +6,12 @@ from storygraph.stores.event_log import InMemoryEventLog
 from storygraph.stores.graph_neo4j import Neo4jGraphStore
 from storygraph.stores.memory_graph import InMemoryGraphStore
 from storygraph.stores.proposal_store import ProposalStore, SQLiteProposalStore
+from storygraph.stores.source_store import (
+    SQLiteSourceDocumentStore,
+    SQLiteSourceStore,
+    SourceStore,
+    SourceStoreWriteResult,
+)
 from storygraph.stores.style_sample_store import SQLiteStyleSampleStore, StyleSampleStore
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
 
@@ -19,7 +25,11 @@ __all__ = [
     "SQLiteCandidateStore",
     "SQLiteDraftStore",
     "SQLiteProposalStore",
+    "SQLiteSourceDocumentStore",
+    "SQLiteSourceStore",
     "SQLiteStyleSampleStore",
+    "SourceStore",
+    "SourceStoreWriteResult",
     "StyleSampleStore",
     "SQLiteWorkflowStore",
 ]

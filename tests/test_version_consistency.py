@@ -16,21 +16,42 @@ def test_release_version_is_single_semver_across_manifests():
     desktop_package = json.loads(
         (ROOT / "apps/desktop/package.json").read_text(encoding="utf-8")
     )
+    web_package_lock = json.loads(
+        (ROOT / "apps/web/package-lock.json").read_text(encoding="utf-8")
+    )
+    desktop_package_lock = json.loads(
+        (ROOT / "apps/desktop/package-lock.json").read_text(encoding="utf-8")
+    )
     cargo = tomllib.loads(
         (ROOT / "apps/desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")
+    )
+    cargo_lock = tomllib.loads(
+        (ROOT / "apps/desktop/src-tauri/Cargo.lock").read_text(encoding="utf-8")
     )
     tauri_config = json.loads(
         (ROOT / "apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
     )
     web_version_source = (ROOT / "apps/web/src/version.ts").read_text(encoding="utf-8")
+    api_source = (ROOT / "apps/api/main.py").read_text(encoding="utf-8")
     updater_pubkey = tauri_config["plugins"]["updater"]["pubkey"]
 
     assert pyproject["project"]["version"] == version
     assert web_package["version"] == version
     assert desktop_package["version"] == version
+    assert web_package_lock["version"] == version
+    assert web_package_lock["packages"][""]["version"] == version
+    assert desktop_package_lock["version"] == version
+    assert desktop_package_lock["packages"][""]["version"] == version
     assert cargo["package"]["version"] == version
+    desktop_lock_entry = next(
+        package
+        for package in cargo_lock["package"]
+        if package["name"] == "storygraph-agent-desktop"
+    )
+    assert desktop_lock_entry["version"] == version
     assert tauri_config["version"] == version
     assert f'APP_VERSION = "{version}"' in web_version_source
+    assert f'version="{version}"' in api_source
 
     assert tauri_config["bundle"]["createUpdaterArtifacts"] is True
     assert updater_pubkey.strip()
@@ -56,7 +77,10 @@ def test_desktop_updater_dependencies_are_explicitly_pinned():
     assert desktop_package["devDependencies"]["@tauri-apps/cli"] == "2.10.1"
     assert desktop_package["dependencies"]["@tauri-apps/plugin-updater"] == "2.10.1"
     assert web_package["dependencies"]["@tauri-apps/api"] == "2.11.1"
+    assert web_package["dependencies"]["@tauri-apps/plugin-process"] == "2.3.1"
     assert web_package["dependencies"]["@tauri-apps/plugin-updater"] == "2.10.1"
     assert cargo["dependencies"]["tauri"]["version"].startswith("=")
+    assert cargo["dependencies"]["tauri-plugin-process"].startswith("=")
     assert cargo["dependencies"]["tauri-plugin-updater"].startswith("=")
+    assert "process:allow-restart" in capability["permissions"]
     assert "updater:default" in capability["permissions"]

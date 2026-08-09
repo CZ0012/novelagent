@@ -68,6 +68,17 @@ class Neo4jGraphStore(GraphStore):
             raise GraphStoreError("not_found", f"Node is not canon: {node_id}")
         return graph_node
 
+    def get_relationship(
+        self,
+        relation_id: str,
+        *,
+        include_non_canon: bool = False,
+    ) -> GraphRelationship:
+        relation = self._get_relationship(relation_id)
+        if relation.status != "CANON" and not include_non_canon:
+            raise GraphStoreError("not_found", f"Relationship is not canon: {relation_id}")
+        return relation
+
     def create_node(self, node: GraphNode, *, allow_canon: bool = False) -> GraphNode:
         self._validate_node(node)
         if node.status == "CANON" and not allow_canon:
@@ -300,21 +311,116 @@ class Neo4jGraphStore(GraphStore):
         self, candidate: CandidateFact, *, reviewer: str, rationale: str
     ) -> EventLogEntry:
         memory = self._snapshot()
-        before_relationships = set(memory.relationships)
-        before_nodes = set(memory.nodes)
+        before_relationships = dict(memory.relationships)
+        before_nodes = dict(memory.nodes)
+        before_event_ids = {event.event_id for event in memory.event_log.list()}
         event = memory.commit_candidate_fact(candidate, reviewer=reviewer, rationale=rationale)
-        for node_id, node in memory.nodes.items():
-            if node_id not in before_nodes:
-                self.create_node(node, allow_canon=True)
-            elif node != self.get_node(node_id, include_non_canon=True):
-                self._write_node_model(node)
-        for relation_id, relation in memory.relationships.items():
-            if relation_id not in before_relationships:
-                self.create_relation(relation, allow_canon=True)
-            elif relation != self._get_relationship(relation_id):
-                self._write_relationship_model(relation)
-        self._record_event_model(event)
+        new_nodes = [
+            node for node_id, node in memory.nodes.items() if node_id not in before_nodes
+        ]
+        changed_nodes = [
+            node
+            for node_id, node in memory.nodes.items()
+            if node_id in before_nodes and node != before_nodes[node_id]
+        ]
+        new_relationships = [
+            relation
+            for relation_id, relation in memory.relationships.items()
+            if relation_id not in before_relationships
+        ]
+        changed_relationships = [
+            relation
+            for relation_id, relation in memory.relationships.items()
+            if relation_id in before_relationships
+            and relation != before_relationships[relation_id]
+        ]
+        new_events = [
+            item
+            for item in memory.event_log.list()
+            if item.event_id not in before_event_ids
+        ]
+        try:
+            with self.driver.session(database=self.database) as session:
+                session.execute_write(
+                    self._write_candidate_delta,
+                    new_nodes,
+                    changed_nodes,
+                    new_relationships,
+                    changed_relationships,
+                    new_events,
+                )
+        except GraphStoreError:
+            raise
+        except Exception as exc:
+            raise GraphStoreError(
+                "backend_unavailable",
+                f"Neo4j candidate commit failed: {exc}",
+            ) from exc
         return event
+
+    def _write_candidate_delta(
+        self,
+        tx: Any,
+        new_nodes: list[GraphNode],
+        changed_nodes: list[GraphNode],
+        new_relationships: list[GraphRelationship],
+        changed_relationships: list[GraphRelationship],
+        new_events: list[EventLogEntry],
+    ) -> None:
+        """Apply one reviewed candidate's complete graph/event delta in one tx."""
+
+        for node in new_nodes:
+            label = self._safe_node_label(node.type)
+            self._tx_write_required(
+                tx,
+                f"CREATE (n:StoryGraphNode:`{label}`) SET n = $props RETURN n",
+                {"props": self._node_props(node)},
+            )
+        for node in changed_nodes:
+            self._tx_write_required(
+                tx,
+                "MATCH (n:StoryGraphNode {id: $id}) SET n += $props RETURN n",
+                {"id": node.id, "props": self._node_props(node)},
+            )
+        for relation in new_relationships:
+            rel_type = self._safe_edge_label(relation.type)
+            self._tx_write_required(
+                tx,
+                (
+                    "MATCH (s:StoryGraphNode {id: $source_id}), "
+                    "(t:StoryGraphNode {id: $target_id}) "
+                    f"CREATE (s)-[r:`{rel_type}`]->(t) SET r = $props RETURN r"
+                ),
+                {
+                    "source_id": relation.source_id,
+                    "target_id": relation.target_id,
+                    "props": self._relationship_props(relation),
+                },
+            )
+        for relation in changed_relationships:
+            self._tx_write_required(
+                tx,
+                "MATCH ()-[r {id: $id}]->() SET r += $props RETURN r",
+                {"id": relation.id, "props": self._relationship_props(relation)},
+            )
+        for item in new_events:
+            self._tx_write_required(
+                tx,
+                """
+                MERGE (e:StoryGraphEvent {event_id: $event_id})
+                SET e = $props
+                RETURN e
+                """,
+                {"event_id": item.event_id, "props": self._event_props(item)},
+            )
+
+    @staticmethod
+    def _tx_write_required(tx: Any, query: str, params: dict) -> None:
+        if tx.run(query, params).single() is None:
+            raise GraphStoreError(
+                "backend_unavailable",
+                "Neo4j candidate transaction could not write an expected entity",
+            )
 
     def _snapshot(self) -> InMemoryGraphStore:
         memory = InMemoryGraphStore()
@@ -407,16 +513,7 @@ class Neo4jGraphStore(GraphStore):
             """,
             {
                 "event_id": event.event_id,
-                "props": {
-                    "event_id": event.event_id,
-                    "operation": event.operation,
-                    "target": event.target,
-                    "source_ref": event.source_ref,
-                    "reviewer": event.reviewer,
-                    "rationale": event.rationale,
-                    "created_at": event.created_at,
-                    "payload_json": json.dumps(event.payload),
-                },
+                "props": self._event_props(event),
             },
             "e",
         )
@@ -478,6 +575,19 @@ class Neo4jGraphStore(GraphStore):
             "source_id": relation.source_id,
             "target_id": relation.target_id,
             "properties_json": json.dumps(relation.properties),
+        }
+
+    @staticmethod
+    def _event_props(event: EventLogEntry) -> dict:
+        return {
+            "event_id": event.event_id,
+            "operation": event.operation,
+            "target": event.target,
+            "source_ref": event.source_ref,
+            "reviewer": event.reviewer,
+            "rationale": event.rationale,
+            "created_at": event.created_at,
+            "payload_json": json.dumps(event.payload),
         }
 
     @staticmethod

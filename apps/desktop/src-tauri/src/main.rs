@@ -266,6 +266,7 @@ fn stop_managed_backend(state: &BackendProcess) -> Result<(), String> {
 fn main() {
     tauri::Builder::default()
         .manage(BackendProcess::default())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             setup_tray(app)?;

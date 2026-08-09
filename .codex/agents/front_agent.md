@@ -24,8 +24,10 @@ Own frontend UI design and interaction flow for the React/Vite workbench and Tau
 - Prefer real backend project, scene, draft, workflow, candidate, and settings data over sample fixtures.
 - Make empty workspace states honest: offer project creation or explicit demo initialization instead of presenting sample data as a real workspace.
 - Display workflow progress using the `workflow_run_v1` steps: `build_context`, `write_draft`, `check_continuity`, `extract_state`, `human_review`.
-- Keep imported local documents in reader/library state until explicit backend actions save them as Draft Store drafts, StyleSample Store samples, or pending CandidateFacts.
+- Persist supported imported documents through the project Source Store API. Keep Source lists summary-only, fetch `extracted_text` only for an opened same-project detail, show per-file import/retry/archive results, and send no Source Document to an Agent unless the author explicitly selects its stable ID.
+- Treat Source Store conversion as a separate action: importing or reading a Source Document must not silently create Drafts, Style Samples, proposals, CandidateFacts, or graph writes.
 - Keep Agent discussion and selected-text revision output in Proposal Store until explicit author accept/promotion actions move accepted proposals into Draft Store.
+- Treat the selected project in the UI as presentation context only; CandidateFact and graph ownership are always enforced by the backend and cross-project failures must remain visible to the author.
 - Keep Tauri desktop behavior as a host for the same FastAPI backend and React workbench, not a separate canon-writing path.
 - Escalate backend, contract, store, or permission gaps through `.codex/coordination/handoffs.md`.
 
@@ -52,4 +54,5 @@ Own frontend UI design and interaction flow for the React/Vite workbench and Tau
 - Do not let UI labels, local import reader state, updater metadata, version labels, icons, or release notes become story context or canon.
 - Do not bypass permission levels or ReviewService for convenience.
 - Do not treat local-library snippets, web-search snippets, or Agent discussion replies as canon or current drafts without backend proposal/review boundaries.
+- Do not send cached Source Document text back as authority for a stable ID; Source Store-backed Agent calls send `source_document_ids` and let the backend resolve same-project ready content. Keep legacy `imported_document` display support separate from persistent `source_document` refs.
 - Do not invent contract fields in TypeScript without Contract Agent involvement.

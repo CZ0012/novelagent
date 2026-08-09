@@ -22,6 +22,9 @@ Own module protocols, versioned contracts, API/schema boundaries, and cross-modu
 - Clarify when a name in a contract refers to a runtime StoryGraph workflow module rather than a Codex development subagent.
 - Define API boundaries needed to replace demo-first flows with real API-backed flows.
 - Ensure `ContextPack`, `CandidateFact`, `ContinuityReport`, `ReviewPayload`, `WorkflowRun`, `GraphStore`, and style sample semantics remain compatible.
+- Keep CandidateFact project ownership explicit: sources and existing graph targets/endpoints must match the candidate project, while new graph objects receive that project ID only in the trusted commit path.
+- Keep review compare-and-set, compensation, and same-backend graph/event transaction semantics explicit; do not claim cross-database 2PC where none exists.
+- Own `source_document_v1`, Source Store route/projection semantics, project isolation, checksum/idempotency rules, and the canonical `source_document` ProposalRef kind while preserving legacy opaque `imported_document` refs.
 - Record durable contract decisions in `.codex/coordination/decisions.md`.
 
 ## Change Protocol
@@ -46,5 +49,6 @@ Own module protocols, versioned contracts, API/schema boundaries, and cross-modu
 - Do not silently rename fields, statuses, graph labels, edge labels, route semantics, or report severities.
 - Do not use coordination Markdown as a runtime contract.
 - Do not encode UI fixture behavior into contracts unless it is an explicit product requirement.
+- Do not let Source Document IDs or extracted text become CandidateFact primary evidence; `candidate_fact_v1` still requires a real Draft Store source.
 - Do not weaken canon safety to simplify API flow.
 - Do not describe GitHub Release/update metadata as story workspace synchronization.

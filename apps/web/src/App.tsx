@@ -53,7 +53,6 @@ import {
   ContextPack,
   ContinuityReport,
   DemoArchiveResult,
-  DocumentFactExtractionResult,
   Draft,
   GraphNodePayload,
   ProposalArtifact,
@@ -67,6 +66,11 @@ import {
   ProjectOutline,
   SceneOutline,
   SceneRunResult,
+  SourceDocument,
+  SourceDocumentImportRequest,
+  SourceDocumentImportResult,
+  SourceDocumentSummary,
+  SourceMediaType,
   WorkflowRun,
   WorkflowStep,
   apiGet,
@@ -99,21 +103,6 @@ import "./styles.css";
 
 type InspectorTab = "context" | "continuity" | "facts" | "settings";
 type WorkspaceTab = "write" | "sources" | "agent" | "proposals" | "workflow";
-type LibraryDocumentKind = "txt" | "md" | "docx";
-type LibraryDocumentStatus = "ready" | "error";
-
-type LibraryDocument = {
-  id: string;
-  name: string;
-  path: string;
-  kind: LibraryDocumentKind;
-  size: number;
-  lastModified: number;
-  content: string;
-  status: LibraryDocumentStatus;
-  error?: string;
-  warnings: string[];
-};
 
 type LibraryTreeNode = {
   id: string;
@@ -121,13 +110,20 @@ type LibraryTreeNode = {
   path: string;
   type: "folder" | "document";
   children: LibraryTreeNode[];
-  document?: LibraryDocument;
+  document?: SourceDocumentSummary;
 };
 
-type ImportSummary = {
-  documents: LibraryDocument[];
+type SourceImportProgress = {
+  active: boolean;
+  current: number;
+  total: number;
+  currentName: string;
+  created: number;
+  updated: number;
+  unchanged: number;
   skipped: number;
   failed: number;
+  issues: Array<{ name: string; message: string }>;
 };
 
 type ProjectForm = {
@@ -194,7 +190,6 @@ type AgentDiscussionForm = {
   selectedText: string;
   includeContextPack: boolean;
   includeLatestDraft: boolean;
-  includeLibrarySources: boolean;
   allowWebSearch: boolean;
   webSearchQuery: string;
 };
@@ -328,7 +323,6 @@ const defaultAgentDiscussionForm: AgentDiscussionForm = {
   selectedText: "",
   includeContextPack: true,
   includeLatestDraft: true,
-  includeLibrarySources: true,
   allowWebSearch: false,
   webSearchQuery: ""
 };
@@ -384,12 +378,28 @@ export default function App() {
   const [desktopSettings, setDesktopSettings] = useState<DesktopSettings | null>(null);
   const [desktopBackend, setDesktopBackend] = useState<DesktopBackendStatus | null>(null);
   const [desktopBackendChecked, setDesktopBackendChecked] = useState(() => !isDesktopRuntime());
-  const [libraryDocuments, setLibraryDocuments] = useState<LibraryDocument[]>([]);
-  const [selectedLibraryDocumentId, setSelectedLibraryDocumentId] = useState<string | null>(null);
+  const [sourceDocuments, setSourceDocuments] = useState<SourceDocumentSummary[]>([]);
+  const [selectedSourceDocumentId, setSelectedSourceDocumentId] = useState<string | null>(null);
+  const [selectedSourceDocument, setSelectedSourceDocument] = useState<SourceDocument | null>(null);
+  const [sourceDetailLoading, setSourceDetailLoading] = useState(false);
+  const [sourceDetailRevision, setSourceDetailRevision] = useState(0);
+  const [selectedAgentSourceIds, setSelectedAgentSourceIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [sourceImportProgress, setSourceImportProgress] = useState<SourceImportProgress | null>(null);
   const [expandedLibraryPaths, setExpandedLibraryPaths] = useState<Set<string>>(
     () => new Set(["library"])
   );
+  const sourceListRequestSequenceRef = useRef(0);
+  const draftRequestSequenceRef = useRef(0);
+  const activeApiBaseRef = useRef(apiBase);
+  const activeProjectIdRef = useRef(projectId);
+  const activeSceneIdRef = useRef(sceneId);
+  activeApiBaseRef.current = apiBase;
+  activeProjectIdRef.current = projectId;
+  activeSceneIdRef.current = sceneId;
   const [busy, setBusy] = useState<string | null>(null);
+  const actionInFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -419,20 +429,16 @@ export default function App() {
     [projectId, sceneId]
   );
   const libraryTree = useMemo(
-    () => buildLibraryTree(libraryDocuments),
-    [libraryDocuments]
+    () => buildLibraryTree(sourceDocuments),
+    [sourceDocuments]
   );
-  const selectedLibraryDocument = useMemo(
-    () => libraryDocuments.find((document) => document.id === selectedLibraryDocumentId) ?? null,
-    [libraryDocuments, selectedLibraryDocumentId]
+  const selectedSourceSummary = useMemo(
+    () => sourceDocuments.find((document) => document.id === selectedSourceDocumentId) ?? null,
+    [selectedSourceDocumentId, sourceDocuments]
   );
   const selectedProposal = useMemo(
     () => proposals.find((proposal) => proposal.id === selectedProposalId) ?? null,
     [proposals, selectedProposalId]
-  );
-  const agentDiscussionSources = useMemo(
-    () => selectAgentDiscussionSources(libraryDocuments, selectedLibraryDocumentId),
-    [libraryDocuments, selectedLibraryDocumentId]
   );
   const visibleProposals = useMemo(
     () =>
@@ -443,6 +449,8 @@ export default function App() {
   );
 
   const runAction = useCallback(async (label: string, action: () => Promise<void>) => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
     setBusy(label);
     setError(null);
     setNotice(null);
@@ -451,6 +459,7 @@ export default function App() {
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
     } finally {
+      actionInFlightRef.current = false;
       setBusy(null);
     }
   }, []);
@@ -484,48 +493,146 @@ export default function App() {
     setNotice(status.reachable ? "已请求停止受管后端；仍检测到外部后端在运行。" : "受管后端已停止。");
   }, []);
 
-  const addLibraryFiles = useCallback(async (files: File[]) => {
-    const summary = await readLibraryFiles(files);
-    if (!summary.documents.length) {
-      setNotice(
-        summary.skipped
-          ? `没有找到支持的文档，已跳过 ${summary.skipped} 个文件。`
-          : "没有选择文档。"
-      );
-      return;
-    }
-
-    setLibraryDocuments((current) => mergeLibraryDocuments(current, summary.documents));
-    setExpandedLibraryPaths((current) => {
-      const next = new Set(current);
-      for (const document of summary.documents) {
-        for (const path of getAncestorFolderPaths(document.path)) {
-          next.add(path);
+  const refreshSources = useCallback(
+    async (targetProjectId = projectId) => {
+      const requestSequence = ++sourceListRequestSequenceRef.current;
+      const requestApiBase = apiBase;
+      const requestIsCurrent = () =>
+        requestSequence === sourceListRequestSequenceRef.current &&
+        activeApiBaseRef.current === requestApiBase &&
+        activeProjectIdRef.current === targetProjectId;
+      if (!targetProjectId) {
+        if (requestIsCurrent()) {
+          setSourceDocuments([]);
+          setSelectedSourceDocumentId(null);
+          setSelectedSourceDocument(null);
         }
+        return [];
       }
-      return next;
-    });
+      let payload: { sources: SourceDocumentSummary[] };
+      try {
+        payload = await apiGet<{ sources: SourceDocumentSummary[] }>(
+          requestApiBase,
+          `/projects/${targetProjectId}/sources`
+        );
+      } catch (exc) {
+        if (!requestIsCurrent()) return [];
+        throw exc;
+      }
+      if (!requestIsCurrent()) return [];
+      setSourceDocuments(payload.sources);
+      setSourceDetailRevision((current) => current + 1);
+      const readyIds = new Set(
+        payload.sources
+          .filter((document) => document.extraction_status === "ready")
+          .map((document) => document.id)
+      );
+      setSelectedAgentSourceIds((current) =>
+        new Set(Array.from(current).filter((sourceId) => readyIds.has(sourceId)))
+      );
+      setSelectedSourceDocumentId((current) =>
+        current && payload.sources.some((document) => document.id === current) ? current : null
+      );
+      return payload.sources;
+    },
+    [apiBase, projectId]
+  );
 
-    const firstImported = summary.documents[0];
-    setSelectedLibraryDocumentId(firstImported.id);
-
-    const importedCount = summary.documents.length;
-    const parts = [
-      `已导入 ${importedCount} 个文档。`
-    ];
-    if (summary.failed) parts.push(`${summary.failed} 个需要检查。`);
-    if (summary.skipped) parts.push(`已跳过 ${summary.skipped} 个不支持的文件。`);
-    setNotice(parts.join(" "));
-  }, []);
+  const importSourceFiles = useCallback(
+    async (files: File[], retryTarget?: SourceDocumentSummary) => {
+      if (!projectId) throw new Error(uiText.errors.selectProjectOrCreate);
+      if (!files.length) {
+        setNotice(uiText.notices.sourceImportNoSelection);
+        return;
+      }
+      const progress: SourceImportProgress = {
+        active: true,
+        current: 0,
+        total: files.length,
+        currentName: "",
+        created: 0,
+        updated: 0,
+        unchanged: 0,
+        failed: 0,
+        skipped: 0,
+        issues: []
+      };
+      setSourceImportProgress({ ...progress });
+      let firstPersistedId: string | null = null;
+      for (const [index, file] of files.entries()) {
+        progress.current = index + 1;
+        progress.currentName = file.name;
+        setSourceImportProgress({ ...progress });
+        const mediaType = getSourceMediaType(file.name);
+        if (!mediaType) {
+          if (retryTarget) {
+            progress.failed += 1;
+          } else {
+            progress.skipped += 1;
+          }
+          progress.issues.push({
+            name: file.name,
+            message: uiText.errors.sourceUnsupportedFormat
+          });
+          setSourceImportProgress({ ...progress });
+          continue;
+        }
+        try {
+          if (retryTarget && mediaType !== retryTarget.media_type) {
+            throw new Error(uiText.errors.sourceRetryFormatMismatch);
+          }
+          const request = await prepareSourceDocumentImport(
+            file,
+            mediaType,
+            retryTarget?.language || selectedProject?.language || "zh-CN"
+          );
+          if (retryTarget) {
+            request.title = retryTarget.title;
+            request.relative_path = retryTarget.relative_path;
+          }
+          const result = await apiPost<SourceDocumentImportResult>(
+            apiBase,
+            `/projects/${projectId}/sources`,
+            request
+          );
+          firstPersistedId ??= result.document.id;
+          if (result.created) progress.created += 1;
+          else if (result.updated) progress.updated += 1;
+          else progress.unchanged += 1;
+          if (result.document.extraction_status === "failed") {
+            progress.failed += 1;
+            progress.issues.push({
+              name: result.document.title,
+              message: result.document.error ?? uiText.library.unknownReadError
+            });
+          }
+          for (const path of getAncestorFolderPaths(result.document.relative_path)) {
+            setExpandedLibraryPaths((current) => new Set(current).add(path));
+          }
+        } catch (exc) {
+          progress.failed += 1;
+          progress.issues.push({ name: file.name, message: toErrorMessage(exc) });
+        }
+        setSourceImportProgress({ ...progress });
+      }
+      progress.active = false;
+      progress.currentName = "";
+      setSourceImportProgress({ ...progress });
+      await refreshSources(projectId);
+      if (firstPersistedId) setSelectedSourceDocumentId(firstPersistedId);
+      setNotice(retryTarget ? uiText.notices.sourceRetryFinished : uiText.notices.sourceImportFinished);
+    },
+    [apiBase, projectId, refreshSources, selectedProject]
+  );
 
   const handleLibraryInputChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.currentTarget.files ?? []);
       event.currentTarget.value = "";
       if (!files.length) return;
-      void runAction("import", () => addLibraryFiles(files));
+      void runAction("source-import", () => importSourceFiles(files));
     },
-    [addLibraryFiles, runAction]
+    [importSourceFiles, runAction]
   );
 
   const toggleLibraryPath = useCallback((path: string) => {
@@ -538,13 +645,6 @@ export default function App() {
       }
       return next;
     });
-  }, []);
-
-  const clearLibrary = useCallback(async () => {
-    setLibraryDocuments([]);
-    setSelectedLibraryDocumentId(null);
-    setExpandedLibraryPaths(new Set(["library"]));
-    setNotice(uiText.notices.localLibraryCleared);
   }, []);
 
   const refreshWorkspace = useCallback(
@@ -624,16 +724,32 @@ export default function App() {
 
   const refreshLatestDraft = useCallback(
     async (targetProjectId = projectId, targetSceneId = sceneId) => {
+      const requestSequence = ++draftRequestSequenceRef.current;
+      const requestApiBase = apiBase;
+      const requestIsCurrent = () =>
+        requestSequence === draftRequestSequenceRef.current &&
+        activeApiBaseRef.current === requestApiBase &&
+        activeProjectIdRef.current === targetProjectId &&
+        activeSceneIdRef.current === targetSceneId;
       if (!targetProjectId || !targetSceneId) {
-        setDraft(null);
-        setDraftText("");
-        setDraftSummary("");
+        if (requestIsCurrent()) {
+          setDraft(null);
+          setDraftText("");
+          setDraftSummary("");
+        }
         return;
       }
-      const payload = await apiGet<{ draft: Draft | null }>(
-        apiBase,
-        `/projects/${targetProjectId}/scenes/${targetSceneId}/draft`
-      );
+      let payload: { draft: Draft | null };
+      try {
+        payload = await apiGet<{ draft: Draft | null }>(
+          requestApiBase,
+          `/projects/${targetProjectId}/scenes/${targetSceneId}/draft`
+        );
+      } catch (exc) {
+        if (!requestIsCurrent()) return;
+        throw exc;
+      }
+      if (!requestIsCurrent()) return;
       setDraft(payload.draft);
       setDraftText(payload.draft?.text ?? "");
       setDraftSummary(payload.draft?.summary ?? "");
@@ -819,9 +935,11 @@ export default function App() {
       canInstall: false
     });
 
+    let updateInstalled = false;
     try {
       await invoke("stop_backend").catch(() => undefined);
       await desktopUpdate.downloadAndInstall();
+      updateInstalled = true;
       setUpdateStatus({
         state: "installing",
         channel: "desktop",
@@ -829,11 +947,43 @@ export default function App() {
         latestVersion: desktopUpdate.version,
         publishedAt: desktopUpdate.date
       });
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
     } catch (exc) {
+      const failureMessage = toErrorMessage(exc);
+      if (updateInstalled) {
+        setUpdateStatus({
+          state: "error",
+          channel: "desktop",
+          message: `更新已安装，但自动重启失败：${failureMessage}。请手动退出并重新打开应用以完成更新。`,
+          latestVersion: desktopUpdate.version,
+          publishedAt: desktopUpdate.date,
+          canInstall: false
+        });
+        return;
+      }
+
+      let backendRecoveryMessage: string;
+      try {
+        const status = await invoke<DesktopBackendStatus>("start_backend");
+        setDesktopBackend(status);
+        setDesktopBackendChecked(true);
+        if (status.reachable && status.workspaceCompatible) {
+          backendRecoveryMessage = "本地后端已恢复，工作台可以继续使用。";
+        } else if (status.reachable) {
+          backendRecoveryMessage = `本地后端已启动，但工作区不兼容：${status.error || "请检查后端工作区设置。"}`;
+        } else {
+          backendRecoveryMessage = `本地后端恢复失败：${status.error || "启动后仍无法连接。"}`;
+        }
+      } catch (recoveryExc) {
+        setDesktopBackend(null);
+        setDesktopBackendChecked(true);
+        backendRecoveryMessage = `本地后端恢复失败：${toErrorMessage(recoveryExc)}`;
+      }
       setUpdateStatus({
         state: "error",
         channel: "desktop",
-        message: `安装更新失败：${toErrorMessage(exc)}`,
+        message: `安装更新失败：${failureMessage}；${backendRecoveryMessage}`,
         latestVersion: desktopUpdate.version,
         publishedAt: desktopUpdate.date,
         canInstall: true
@@ -1081,52 +1231,51 @@ export default function App() {
   }, [apiBase, projectId, refreshGraphPreview, worldRuleForm]);
 
   const saveDocumentAsDraft = useCallback(
-    async (document: LibraryDocument) => {
-      if (!endpoint) throw new Error("请先创建并选择一个场景。");
-      if (document.status !== "ready") throw new Error("这个文档还不能保存为草稿。");
+    async (document: SourceDocument) => {
+      if (!endpoint) throw new Error(uiText.errors.selectSceneForDraft);
+      const sourceText = requireReadySourceText(document);
       const saved = await apiPost<Draft>(apiBase, `${endpoint}/draft`, {
-        text: document.content,
-        summary: `从本地导入文档“${document.name}”设为当前场景草稿。`
+        text: sourceText,
+        summary: `${uiText.library.importedDraftSummaryPrefix}${document.title}`
       });
       setDraft(saved);
       setDraftText(saved.text);
       setDraftSummary(saved.summary ?? "");
       setWorkspaceTab("write");
-      setNotice(`已把“${document.name}”保存为草稿 v${saved.version}；正典未改变。`);
+      setNotice(uiText.notices.sourceSavedAsDraft(document.title, saved.version));
       return saved;
     },
     [apiBase, endpoint]
   );
 
   const saveDocumentAsStyleSample = useCallback(
-    async (document: LibraryDocument) => {
-      if (!projectId) throw new Error("请先创建并选择项目。");
-      if (document.status !== "ready") throw new Error("这个文档还不能保存为风格样本。");
+    async (document: SourceDocument) => {
+      if (!projectId) throw new Error(uiText.errors.selectProjectForStyle);
+      const sourceText = requireReadySourceText(document);
       await apiPost(apiBase, `/projects/${projectId}/style-samples`, {
-        text: document.content,
-        source_ref: `import:${document.path}::${document.id}`,
+        text: sourceText,
+        source_ref: `source_document:${document.id}`,
         pov: contextPack?.style_constraints.pov ?? null,
         tone: contextPack?.style_constraints.tone ?? null,
         dialogue_style: contextPack?.style_constraints.dialogue_style ?? null,
-        tags: ["import"],
-        summary: `本地导入风格样本：${document.name}`
+        tags: ["source_document"],
+        summary: `${uiText.library.importedStyleSummaryPrefix}${document.title}`
       });
-      setNotice(`“${document.name}”已保存为风格样本；它只会作为 P6 软参考。`);
+      setNotice(uiText.notices.sourceSavedAsStyle(document.title));
     },
     [apiBase, contextPack, projectId]
   );
 
   const analyzeDocumentStructure = useCallback(
-    async (document: LibraryDocument) => {
-      if (!projectId) throw new Error("请先创建并选择项目。");
-      if (document.status !== "ready") throw new Error("这个文档还不能生成结构草稿。");
+    async (document: SourceDocumentSummary) => {
+      if (!projectId) throw new Error(uiText.errors.selectProject);
+      if (document.extraction_status !== "ready") {
+        throw new Error(uiText.errors.sourceNotReadyStructure);
+      }
       const result = await apiPost<ProjectStructureDraftResult>(
         apiBase,
-        `/projects/${projectId}/imports/structure-draft`,
+        `/projects/${projectId}/sources/${document.id}/structure-draft`,
         {
-          title: document.name,
-          text: document.content,
-          source_ref: `import:${document.path}::${document.id}`,
           max_chapters: 24,
           max_scenes_per_chapter: 12
         }
@@ -1138,88 +1287,61 @@ export default function App() {
         (total, chapter) => total + chapter.scenes.length,
         0
       );
-      const suffix = result.truncated ? " 源文档较长，本次只读取前部片段。" : "";
-      setNotice(
-        `已生成项目结构草稿：${result.outline.chapters.length} 章、${sceneCount} 个场景；请在协作草稿箱确认后再应用。${suffix}`
-      );
+      setNotice(uiText.notices.sourceStructureCreated(
+        result.outline.chapters.length,
+        sceneCount,
+        result.truncated
+      ));
     },
     [apiBase, projectId, refreshProposals]
   );
 
   const saveDocumentAsProposal = useCallback(
-    async (document: LibraryDocument) => {
-      if (!projectId || !sceneId) throw new Error("请先创建并选择一个场景。");
-      if (document.status !== "ready") throw new Error("这个文档还不能保存为协作草稿。");
+    async (document: SourceDocument) => {
+      if (!projectId || !sceneId) throw new Error(uiText.errors.selectSceneForDraft);
+      const sourceText = requireReadySourceText(document);
       const proposal = await apiPost<ProposalArtifact>(
         apiBase,
         `/projects/${projectId}/proposals`,
         {
           artifact_type: "scene_draft",
-          title: `导入提案：${document.name}`,
-          body: document.content,
+          title: `${uiText.library.importedProposalTitlePrefix}${document.title}`,
+          body: sourceText,
           target_refs: [{ kind: "scene", ref: sceneId }],
-          source_refs: [{ kind: "imported_document", ref: `import:${document.path}::${document.id}` }],
+          source_refs: [{ kind: "source_document", ref: document.id, note: document.title }],
           created_by: "author",
           created_via: "import",
-          provenance_note: `本地导入文档：${document.name}`
+          provenance_note: `${uiText.library.importedProposalNotePrefix}${document.title}`
         }
       );
       await refreshProposals(projectId);
       setSelectedProposalId(proposal.id);
       setWorkspaceTab("proposals");
-      setNotice(`“${document.name}”已保存到协作草稿箱；当前场景草稿和正典未改变。`);
+      setNotice(uiText.notices.sourceSavedAsProposal(document.title));
     },
     [apiBase, projectId, refreshProposals, sceneId]
   );
 
-  const extractDocumentFacts = useCallback(
-    async (document: LibraryDocument) => {
-      if (!endpoint || !projectId) throw new Error("请先创建并选择一个项目和场景。");
-      if (document.status !== "ready") throw new Error("这个文档还不能抽取设定。");
-      const result = await apiPost<DocumentFactExtractionResult>(
+  const archiveSourceDocument = useCallback(
+    async (document: SourceDocumentSummary) => {
+      if (!projectId) throw new Error(uiText.errors.selectProject);
+      await apiPost<SourceDocumentSummary>(
         apiBase,
-        `${endpoint}/extract-document-facts`,
-        {
-          title: document.name,
-          text: document.content,
-          source_ref: `import:${document.path}::${document.id}`,
-          max_facts: 16
-        }
+        `/projects/${projectId}/sources/${document.id}/archive`
       );
-      setDraft(result.source_draft);
-      setDraftText(result.source_draft.text);
-      setDraftSummary(result.source_draft.summary ?? "");
-      await refreshProposals(projectId);
-      setSelectedProposalId(result.proposal.id);
-      setProposalSourceDraftId(result.source_draft.id);
-      setWorkspaceTab("proposals");
-      setActiveTab("facts");
-      const suffix = result.truncated ? " 源文档较长，本次只读取前部片段。" : "";
-      setNotice(
-        result.candidate_previews.length
-          ? `已生成事实草稿，包含 ${result.candidate_previews.length} 条候选预览；正典未改变。${suffix}`
-          : `已生成事实草稿，但未发现可抽取事实；正典未改变。${suffix}`
-      );
+      setSelectedAgentSourceIds((current) => {
+        const next = new Set(current);
+        next.delete(document.id);
+        return next;
+      });
+      if (selectedSourceDocumentId === document.id) {
+        setSelectedSourceDocumentId(null);
+        setSelectedSourceDocument(null);
+      }
+      await refreshSources(projectId);
+      setNotice(uiText.notices.sourceArchived(document.title));
     },
-    [apiBase, endpoint, projectId, refreshProposals]
-  );
-
-  const saveDocumentAsDraftAndExtract = useCallback(
-    async (document: LibraryDocument) => {
-      await saveDocumentAsDraft(document);
-      const payload = await apiPost<{ candidates: CandidateFact[] }>(
-        apiBase,
-        `${endpoint}/extract-state`
-      );
-      await refreshFacts();
-      setActiveTab("facts");
-      setNotice(
-        payload.candidates.length
-          ? `已生成 ${payload.candidates.length} 条待审候选事实；正典尚未改变。`
-          : "草稿已保存，未抽取到候选事实；正典未改变。"
-      );
-    },
-    [apiBase, endpoint, refreshFacts, saveDocumentAsDraft]
+    [apiBase, projectId, refreshSources, selectedSourceDocumentId]
   );
 
   const archiveDemo = useCallback(async () => {
@@ -1294,7 +1416,8 @@ export default function App() {
     setAgentDiscussionForm((current) => ({
       ...current,
       mode: "revise_selection",
-      selectedText: selection
+      selectedText: selection,
+      includeLatestDraft: true
     }));
     setWorkspaceTab("agent");
   }, [draftSelection, refreshDraftSelection]);
@@ -1310,11 +1433,12 @@ export default function App() {
     const payload: AgentDiscussionRequest = {
       mode: agentDiscussionForm.mode,
       instruction,
-      selected_text: selectedText || null,
-      base_text: draftText,
+      selected_text: agentDiscussionForm.includeLatestDraft ? selectedText || null : null,
+      base_text: agentDiscussionForm.includeLatestDraft ? draftText : null,
       include_context_pack: agentDiscussionForm.includeContextPack,
       include_latest_draft: agentDiscussionForm.includeLatestDraft,
-      local_sources: agentDiscussionForm.includeLibrarySources ? agentDiscussionSources : [],
+      local_sources: [],
+      source_document_ids: Array.from(selectedAgentSourceIds),
       allow_web_search: agentDiscussionForm.allowWebSearch,
       web_search_query: agentDiscussionForm.webSearchQuery.trim() || null
     };
@@ -1338,12 +1462,12 @@ export default function App() {
     );
   }, [
     agentDiscussionForm,
-    agentDiscussionSources,
     apiBase,
     draftText,
     endpoint,
     projectId,
-    refreshProposals
+    refreshProposals,
+    selectedAgentSourceIds
   ]);
 
   const generateDraft = useCallback(async () => {
@@ -1694,6 +1818,55 @@ export default function App() {
   }, [refreshProposals]);
 
   useEffect(() => {
+    setSourceDocuments([]);
+    setSelectedSourceDocumentId(null);
+    setSelectedSourceDocument(null);
+    setSelectedAgentSourceIds(new Set());
+    setSourceImportProgress(null);
+    setExpandedLibraryPaths(new Set(["library"]));
+    setAgentDiscussionResult(null);
+    if (!projectId) return;
+    refreshSources(projectId).catch((exc) => setError(toErrorMessage(exc)));
+  }, [projectId, refreshSources]);
+
+  useEffect(() => {
+    setAgentDiscussionResult(null);
+    setSelectedAgentSourceIds(new Set());
+    setDraftSelection("");
+    setDraft(null);
+    setDraftText("");
+    setDraftSummary("");
+    setAgentDiscussionForm((current) => ({ ...current, selectedText: "" }));
+  }, [projectId, sceneId]);
+
+  useEffect(() => {
+    if (!projectId || !selectedSourceDocumentId) {
+      setSelectedSourceDocument(null);
+      setSourceDetailLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSelectedSourceDocument(null);
+    setSourceDetailLoading(true);
+    apiGet<SourceDocument>(
+      apiBase,
+      `/projects/${projectId}/sources/${selectedSourceDocumentId}`
+    )
+      .then((document) => {
+        if (!cancelled) setSelectedSourceDocument(document);
+      })
+      .catch((exc) => {
+        if (!cancelled) setError(toErrorMessage(exc));
+      })
+      .finally(() => {
+        if (!cancelled) setSourceDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, projectId, selectedSourceDocumentId, sourceDetailRevision]);
+
+  useEffect(() => {
     if (!proposals.length) {
       setSelectedProposalId(null);
       return;
@@ -1738,8 +1911,20 @@ export default function App() {
     agentSettings?.api_key_configured && agentSettings.llm_base_url && agentSettings.llm_model
   );
   const canRunScene = hasScene && canGenerate && !writerNeedsKey;
-  const canExtractDocumentFacts = hasScene && canGenerate && llmConfigured;
   const canDiscussWithAgent = hasScene && canGenerate && llmConfigured;
+  const toggleAgentSource = useCallback((sourceId: string) => {
+    setSelectedAgentSourceIds((current) => {
+      const next = new Set(current);
+      if (next.has(sourceId)) {
+        next.delete(sourceId);
+      } else if (next.size < 32) {
+        next.add(sourceId);
+      } else {
+        setNotice(uiText.notices.agentSourceLimit);
+      }
+      return next;
+    });
+  }, []);
   const runEditCommand = useCallback((command: "undo" | "redo") => {
     const active = document.activeElement;
     if (
@@ -1991,29 +2176,34 @@ export default function App() {
           )}
 
           {workspaceTab === "sources" && (
-          <section className="library-panel" aria-label="本地资料库">
+          <section
+            className={`library-panel ${sourceImportProgress ? "has-import-progress" : ""}`}
+            aria-label={uiText.library.ariaLabel}
+          >
             <div className="library-header">
               <div>
                 <span><Library size={15} /> {uiText.library.title}</span>
-                <small>{libraryDocuments.length} {uiText.library.summary}</small>
+                <small>{uiText.library.summary(sourceDocuments.length)}</small>
               </div>
               <div className="library-actions">
-                <label className="import-button">
+                <label className={`import-button ${!projectId || !canGenerate || busy !== null ? "disabled" : ""}`}>
                   <FileUp size={15} />
                   {uiText.library.fileButton}
                   <input
                     accept=".txt,.md,.markdown,.docx"
+                    disabled={!projectId || !canGenerate || busy !== null}
                     multiple
                     onChange={handleLibraryInputChange}
                     type="file"
                   />
                 </label>
-                <label className="import-button">
+                <label className={`import-button ${!projectId || !canGenerate || busy !== null ? "disabled" : ""}`}>
                   <FolderOpen size={15} />
                   {uiText.library.folderButton}
                   <DirectoryInput
                     accept=".txt,.md,.markdown,.docx"
                     directory=""
+                    disabled={!projectId || !canGenerate || busy !== null}
                     multiple
                     onChange={handleLibraryInputChange}
                     type="file"
@@ -2021,23 +2211,28 @@ export default function App() {
                   />
                 </label>
                 <button
-                  onClick={() => runAction("clear-library", clearLibrary)}
+                  onClick={() => runAction("source-refresh", async () => {
+                    await refreshSources(projectId);
+                  })}
                   type="button"
-                  disabled={!libraryDocuments.length || busy === "import"}
+                  disabled={!projectId || busy !== null}
                 >
-                  <X size={15} /> {uiText.library.clearButton}
+                  <RefreshCw size={15} /> {uiText.library.refreshButton}
                 </button>
               </div>
             </div>
+            {sourceImportProgress && (
+              <SourceImportStatus progress={sourceImportProgress} />
+            )}
             <div className="library-grid">
               <div className="library-tree-panel">
-                {libraryDocuments.length ? (
+                {sourceDocuments.length ? (
                   <LibraryTree
                     expandedPaths={expandedLibraryPaths}
                     node={libraryTree}
-                    onSelectDocument={setSelectedLibraryDocumentId}
+                    onSelectDocument={setSelectedSourceDocumentId}
                     onToggleFolder={toggleLibraryPath}
-                    selectedDocumentId={selectedLibraryDocumentId}
+                    selectedDocumentId={selectedSourceDocumentId}
                   />
                 ) : (
                   <EmptyState
@@ -2049,20 +2244,19 @@ export default function App() {
               </div>
               <DocumentReader
                 busy={busy}
-                canAnalyzeProjectStructure={Boolean(projectId) && canGenerate}
-                canExtractDocumentFacts={canExtractDocumentFacts}
                 canGenerate={canGenerate}
-                document={selectedLibraryDocument}
+                document={selectedSourceDocument}
                 hasProject={Boolean(projectId)}
                 hasScene={hasScene}
+                loading={sourceDetailLoading}
                 onAnalyzeStructure={(document) =>
                   runAction("document-structure", () => analyzeDocumentStructure(document))
                 }
-                onExtractDocumentFacts={(document) =>
-                  runAction("document-facts", () => extractDocumentFacts(document))
+                onArchive={(document) =>
+                  runAction("source-archive", () => archiveSourceDocument(document))
                 }
-                onExtract={(document) =>
-                  runAction("import-extract", () => saveDocumentAsDraftAndExtract(document))
+                onRetry={(document, file) =>
+                  runAction("source-retry", () => importSourceFiles([file], document))
                 }
                 onSaveDraft={(document) =>
                   runAction("import-draft", async () => {
@@ -2075,6 +2269,7 @@ export default function App() {
                 onSaveStyle={(document) =>
                   runAction("import-style", () => saveDocumentAsStyleSample(document))
                 }
+                summary={selectedSourceSummary}
               />
             </div>
           </section>
@@ -2087,14 +2282,16 @@ export default function App() {
             draftSelection={draftSelection}
             form={agentDiscussionForm}
             hasScene={hasScene}
-            librarySourceCount={agentDiscussionSources.length}
             llmConfigured={llmConfigured}
             onFormChange={setAgentDiscussionForm}
             onOpenProposal={() => setWorkspaceTab("proposals")}
             onSubmit={() => runAction("agent-discussion", requestAgentDiscussion)}
+            onToggleSource={toggleAgentSource}
             onUseDraftSelection={useDraftSelectionForAgent}
             result={agentDiscussionResult}
+            selectedSourceIds={selectedAgentSourceIds}
             selectedProposal={selectedProposal}
+            sources={sourceDocuments}
           />
           )}
 
@@ -2249,34 +2446,40 @@ function AgentDiscussionPanel({
   draftSelection,
   form,
   hasScene,
-  librarySourceCount,
   llmConfigured,
   onFormChange,
   onOpenProposal,
   onSubmit,
+  onToggleSource,
   onUseDraftSelection,
   result,
-  selectedProposal
+  selectedProposal,
+  selectedSourceIds,
+  sources
 }: {
   busy: string | null;
   canDiscuss: boolean;
   draftSelection: string;
   form: AgentDiscussionForm;
   hasScene: boolean;
-  librarySourceCount: number;
   llmConfigured: boolean;
   onFormChange: React.Dispatch<React.SetStateAction<AgentDiscussionForm>>;
   onOpenProposal: () => void;
   onSubmit: () => void;
+  onToggleSource: (sourceId: string) => void;
   onUseDraftSelection: () => void;
   result: AgentDiscussionResult | null;
   selectedProposal: ProposalArtifact | null;
+  selectedSourceIds: Set<string>;
+  sources: SourceDocumentSummary[];
 }) {
   const selectedRequired = form.mode === "revise_selection";
+  const draftRequired = form.mode !== "discuss";
   const canSubmit =
     canDiscuss &&
     busy === null &&
     form.instruction.trim().length > 0 &&
+    (!draftRequired || form.includeLatestDraft) &&
     (!selectedRequired || form.selectedText.trim().length > 0);
   return (
     <section className="agent-panel" aria-label={uiText.agentDiscussion.ariaLabel}>
@@ -2325,6 +2528,7 @@ function AgentDiscussionPanel({
         <label className="agent-field selection">
           <span>{uiText.agentDiscussion.selectionLabel}</span>
           <textarea
+            disabled={!form.includeLatestDraft}
             value={form.selectedText}
             onChange={(event) =>
               onFormChange((current) => ({ ...current, selectedText: event.target.value }))
@@ -2363,24 +2567,13 @@ function AgentDiscussionPanel({
               onChange={(event) =>
                 onFormChange((current) => ({
                   ...current,
-                  includeLatestDraft: event.target.checked
+                  includeLatestDraft: event.target.checked,
+                  mode: event.target.checked ? current.mode : "discuss",
+                  selectedText: event.target.checked ? current.selectedText : ""
                 }))
               }
             />
             {uiText.agentDiscussion.includeLatestDraft}
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={form.includeLibrarySources}
-              onChange={(event) =>
-                onFormChange((current) => ({
-                  ...current,
-                  includeLibrarySources: event.target.checked
-                }))
-              }
-            />
-            {uiText.agentDiscussion.includeLibrarySources}（{librarySourceCount}）
           </label>
           <label>
             <input
@@ -2403,6 +2596,47 @@ function AgentDiscussionPanel({
             placeholder={uiText.agentDiscussion.webSearchPlaceholder}
             disabled={!form.allowWebSearch}
           />
+        </div>
+        {draftRequired && !form.includeLatestDraft && (
+          <div className="agent-context-note warning">
+            <AlertTriangle size={14} />
+            <span>{uiText.agentDiscussion.revisionNeedsDraft}</span>
+          </div>
+        )}
+        <div className="agent-source-picker">
+          <div className="agent-source-head">
+            <div>
+              <strong>{uiText.agentDiscussion.sourcePickerTitle}</strong>
+              <span>{uiText.agentDiscussion.sourcePickerCount(selectedSourceIds.size)}</span>
+            </div>
+            <small>{uiText.agentDiscussion.sourcePickerDefault}</small>
+          </div>
+          {sources.length ? (
+            <div className="agent-source-list" aria-label={uiText.agentDiscussion.sourcePickerAria}>
+              {sources.map((source) => {
+                const ready = source.extraction_status === "ready";
+                return (
+                  <label className={!ready ? "disabled" : ""} key={source.id}>
+                    <input
+                      checked={selectedSourceIds.has(source.id)}
+                      disabled={!ready || busy !== null}
+                      onChange={() => onToggleSource(source.id)}
+                      type="checkbox"
+                    />
+                    <span>
+                      <strong>{source.title}</strong>
+                      <small>
+                        {source.relative_path} · {source.language} · {formatStatus(source.extraction_status)} · {source.id}
+                      </small>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="agent-source-empty">{uiText.agentDiscussion.sourcePickerEmpty}</p>
+          )}
+          <small className="agent-source-safety">{uiText.agentDiscussion.sourcePickerSafety}</small>
         </div>
         {!hasScene && (
           <EmptyState
@@ -2822,6 +3056,7 @@ function ProjectSidebar({
             <>
               <select
                 className="sidebar-select"
+                disabled={busy !== null}
                 value={projectId}
                 onChange={(event) => onSelectProject(event.target.value)}
               >
@@ -2901,6 +3136,7 @@ function ProjectSidebar({
                     <button
                       key={scene.id}
                       className={`scene-row ${scene.id === sceneId ? "selected" : ""}`}
+                      disabled={busy !== null}
                       onClick={() => onSelectScene(scene.id)}
                       type="button"
                     >
@@ -3528,6 +3764,41 @@ function DirectoryInput(props: DirectoryInputProps) {
   return <input {...props} />;
 }
 
+function SourceImportStatus({ progress }: { progress: SourceImportProgress }) {
+  return (
+    <div
+      aria-live="polite"
+      className={`source-import-progress ${progress.active ? "active" : "complete"}`}
+    >
+      <div>
+        {progress.active ? <RefreshCw className="spin" size={15} /> : <Check size={15} />}
+        <strong>
+          {progress.active
+            ? uiText.library.importProgress(progress.current, progress.total)
+            : uiText.library.importComplete}
+        </strong>
+        {progress.currentName && <span title={progress.currentName}>{progress.currentName}</span>}
+      </div>
+      <div className="source-import-metrics">
+        <span>{uiText.library.importCreated(progress.created)}</span>
+        <span>{uiText.library.importUpdated(progress.updated)}</span>
+        <span>{uiText.library.importUnchanged(progress.unchanged)}</span>
+        <span>{uiText.library.importFailed(progress.failed)}</span>
+        <span>{uiText.library.importSkipped(progress.skipped)}</span>
+      </div>
+      {progress.issues.length > 0 && (
+        <div className="source-import-issues">
+          {progress.issues.map((issue, index) => (
+            <span key={`${issue.name}:${index}`} title={issue.message}>
+              <AlertTriangle size={13} /> {issue.name}：{issue.message}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LibraryTree({
   expandedPaths,
   node,
@@ -3616,49 +3887,53 @@ function LibraryTreeItem({
 
   return (
     <button
-      className={`library-node document ${document.id === selectedDocumentId ? "selected" : ""} ${document.status}`}
+      className={`library-node document ${document.id === selectedDocumentId ? "selected" : ""} ${document.extraction_status}`}
       onClick={() => onSelectDocument(document.id)}
       style={indent}
-      title={document.path}
+      title={`${document.relative_path} · ${document.id}`}
       type="button"
     >
-      {document.kind === "docx" ? <FileText size={15} /> : <FileIcon size={15} />}
-      <span>{document.name}</span>
-      <small>{document.kind.toUpperCase()}</small>
+      {document.media_type.includes("wordprocessingml") ? <FileText size={15} /> : <FileIcon size={15} />}
+      <span>{document.title}</span>
+      <small>
+        {document.extraction_status === "ready"
+          ? sourceMediaTypeLabel(document.media_type)
+          : formatStatus(document.extraction_status)}
+      </small>
     </button>
   );
 }
 
 function DocumentReader({
   busy,
-  canAnalyzeProjectStructure,
-  canExtractDocumentFacts,
   canGenerate,
   document: doc,
   hasProject,
   hasScene,
+  loading,
   onAnalyzeStructure,
-  onExtract,
-  onExtractDocumentFacts,
+  onArchive,
+  onRetry,
   onSaveDraft,
   onSaveProposal,
-  onSaveStyle
+  onSaveStyle,
+  summary
 }: {
   busy: string | null;
-  canAnalyzeProjectStructure: boolean;
-  canExtractDocumentFacts: boolean;
   canGenerate: boolean;
-  document: LibraryDocument | null;
+  document: SourceDocument | null;
   hasProject: boolean;
   hasScene: boolean;
-  onAnalyzeStructure: (document: LibraryDocument) => void;
-  onExtract: (document: LibraryDocument) => void;
-  onExtractDocumentFacts: (document: LibraryDocument) => void;
-  onSaveDraft: (document: LibraryDocument) => void;
-  onSaveProposal: (document: LibraryDocument) => void;
-  onSaveStyle: (document: LibraryDocument) => void;
+  loading: boolean;
+  onAnalyzeStructure: (document: SourceDocumentSummary) => void;
+  onArchive: (document: SourceDocumentSummary) => void;
+  onRetry: (document: SourceDocumentSummary, file: File) => void;
+  onSaveDraft: (document: SourceDocument) => void;
+  onSaveProposal: (document: SourceDocument) => void;
+  onSaveStyle: (document: SourceDocument) => void;
+  summary: SourceDocumentSummary | null;
 }) {
-  if (!doc) {
+  if (!summary) {
     return (
       <div className="document-reader empty">
         <EmptyState
@@ -3670,21 +3945,36 @@ function DocumentReader({
     );
   }
 
-  const canBridge = doc.status === "ready" && canGenerate && hasScene && busy === null;
-  const canBuildStructure = doc.status === "ready" && canAnalyzeProjectStructure && busy === null;
-  const canUseLlmExtraction = doc.status === "ready" && canExtractDocumentFacts && busy === null;
-  const noProjectTitle = hasProject ? undefined : "请先创建或选择项目。";
+  if (loading || !doc || doc.id !== summary.id) {
+    return (
+      <div className="document-reader empty">
+        <EmptyState
+          icon={<RefreshCw className={loading ? "spin" : undefined} />}
+          title={loading ? uiText.library.readerLoadingTitle : uiText.library.readerLoadFailedTitle}
+          text={loading ? uiText.library.readerLoadingText : uiText.library.readerLoadFailedText}
+        />
+      </div>
+    );
+  }
+
+  const ready = doc.extraction_status === "ready";
+  const canSceneBridge = ready && canGenerate && hasScene && busy === null;
+  const canProjectBridge = ready && canGenerate && hasProject && busy === null;
+  const canArchive = hasProject && canGenerate && busy === null;
 
   return (
     <div className="document-reader">
       <div className="reader-head">
         <div>
-          <strong>{doc.name}</strong>
-          <span>{doc.path}</span>
+          <strong>{doc.title}</strong>
+          <span>{doc.relative_path}</span>
         </div>
         <div className="reader-tags">
-          <span>{doc.kind.toUpperCase()}</span>
-          <span>{formatFileSize(doc.size)}</span>
+          <span>{sourceMediaTypeLabel(doc.media_type)}</span>
+          <span>{doc.language}</span>
+          <span>{formatFileSize(doc.byte_size)}</span>
+          <span>{formatStatus(doc.extraction_status)}</span>
+          <span title={doc.id}>{doc.id}</span>
         </div>
       </div>
       <div className="reader-bridge">
@@ -3692,15 +3982,15 @@ function DocumentReader({
         <div>
           <button
             className="primary"
-            disabled={!canBuildStructure}
-            onClick={() => onAnalyzeStructure(doc)}
-            title={noProjectTitle ?? uiText.library.buildStructureTitle}
+            disabled={!canProjectBridge}
+            onClick={() => onAnalyzeStructure(summary)}
+            title={!hasProject ? uiText.errors.selectProjectOrCreate : uiText.library.buildStructureTitle}
             type="button"
           >
             <BookOpen size={14} /> {uiText.library.buildStructure}
           </button>
           <button
-            disabled={!canBridge}
+            disabled={!canSceneBridge}
             onClick={() => onSaveDraft(doc)}
             title={uiText.library.saveDraftTitle}
             type="button"
@@ -3708,7 +3998,7 @@ function DocumentReader({
             <FileText size={14} /> {uiText.library.saveDraft}
           </button>
           <button
-            disabled={!canBridge}
+            disabled={!canSceneBridge}
             onClick={() => onSaveProposal(doc)}
             title={uiText.library.saveProposalTitle}
             type="button"
@@ -3716,36 +4006,49 @@ function DocumentReader({
             <SplitSquareVertical size={14} /> {uiText.library.saveProposal}
           </button>
           <button
-            disabled={doc.status !== "ready" || !canGenerate || busy !== null}
+            disabled={!canProjectBridge}
             onClick={() => onSaveStyle(doc)}
             title={uiText.library.saveStyleTitle}
             type="button"
           >
             <Wand2 size={14} /> {uiText.library.saveStyle}
           </button>
+          {doc.extraction_status === "failed" && (
+            <label
+              className={`import-button reader-retry ${!canArchive ? "disabled" : ""}`}
+              title={uiText.library.retryTitle}
+            >
+              <RefreshCw size={14} /> {uiText.library.retry}
+              <input
+                accept={sourceFileAccept(doc.media_type)}
+                disabled={!canArchive}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = "";
+                  if (file) onRetry(summary, file);
+                }}
+                type="file"
+              />
+            </label>
+          )}
           <button
-            disabled={!canUseLlmExtraction}
-            onClick={() => onExtractDocumentFacts(doc)}
-            title={uiText.library.llmFactDraftTitle}
+            className="archive"
+            disabled={!canArchive}
+            onClick={() => {
+              if (window.confirm(uiText.library.archiveConfirm(doc.title))) onArchive(summary);
+            }}
+            title={uiText.library.archiveTitle}
             type="button"
           >
-            <ShieldCheck size={14} /> {uiText.library.llmFactDraft}
-          </button>
-          <button
-            disabled={!canBridge}
-            onClick={() => onExtract(doc)}
-            title={uiText.library.parseMarkersTitle}
-            type="button"
-          >
-            <ShieldCheck size={14} /> {uiText.library.parseMarkers}
+            <X size={14} /> {uiText.library.archive}
           </button>
         </div>
       </div>
-      {doc.status === "error" ? (
+      {doc.extraction_status === "failed" ? (
         <div className="reader-error">
           <AlertTriangle size={17} />
           <strong>{uiText.library.readErrorTitle}</strong>
-          <span>{doc.error}</span>
+          <span>{doc.error ?? uiText.library.unknownReadError}</span>
         </div>
       ) : (
         <>
@@ -3755,7 +4058,7 @@ function DocumentReader({
               <span>{doc.warnings.slice(0, 2).join(" ")}</span>
             </div>
           )}
-          <pre>{doc.content}</pre>
+          <pre>{doc.extracted_text}</pre>
         </>
       )}
     </div>
@@ -3842,13 +4145,13 @@ function AgentSettingsInspector({
             </div>
           )}
           <div className="settings-actions compact">
-            <button onClick={onBackendRefresh} type="button" disabled={busy === "desktop-backend"}>
+            <button onClick={onBackendRefresh} type="button" disabled={busy !== null}>
               <RefreshCw size={15} /> {uiText.settings.refreshBackend}
             </button>
-            <button onClick={onBackendStart} type="button" disabled={busy === "desktop-backend"}>
+            <button onClick={onBackendStart} type="button" disabled={busy !== null}>
               <Play size={15} /> {uiText.settings.startOrConnect}
             </button>
-            <button onClick={onBackendStop} type="button" disabled={busy === "desktop-backend" || !desktopBackend?.managed}>
+            <button onClick={onBackendStop} type="button" disabled={busy !== null || !desktopBackend?.managed}>
               <X size={15} /> {uiText.settings.stopManagedBackend}
             </button>
           </div>
@@ -3978,7 +4281,7 @@ function AgentSettingsInspector({
               className="inline-update-button"
               onClick={onInstallUpdate}
               type="button"
-              disabled={busy === "update-install"}
+              disabled={busy !== null}
             >
               <Download size={14} /> {uiText.settings.installUpdate}
             </button>
@@ -3992,13 +4295,13 @@ function AgentSettingsInspector({
       </section>
 
       <div className="settings-actions">
-        <button onClick={onRefresh} type="button" disabled={busy === "settings"}>
+        <button onClick={onRefresh} type="button" disabled={busy !== null}>
           <RefreshCw size={15} /> {uiText.settings.refreshSettings}
         </button>
-        <button onClick={onUpdateCheck} type="button" disabled={busy === "update-check"}>
+        <button onClick={onUpdateCheck} type="button" disabled={busy !== null}>
           <RefreshCw size={15} /> {uiText.settings.checkUpdates}
         </button>
-        <button className="primary" onClick={onSave} type="button" disabled={busy === "settings"}>
+        <button className="primary" onClick={onSave} type="button" disabled={busy !== null}>
           <Save size={15} /> {uiText.settings.saveSettings}
         </button>
       </div>
@@ -4426,72 +4729,66 @@ function desktopBackendTone(status: DesktopBackendStatus): "good" | "warning" | 
   return "good";
 }
 
-async function readLibraryFiles(files: File[]): Promise<ImportSummary> {
-  let skipped = 0;
-  const candidates: Array<{ file: File; index: number }> = [];
-
-  files.forEach((file, index) => {
-    if (getDocumentKind(file.name)) {
-      candidates.push({ file, index });
-    } else {
-      skipped += 1;
-    }
-  });
-
-  const documents = await Promise.all(
-    candidates.map(({ file, index }) => readLibraryDocument(file, index))
-  );
-
-  return {
-    documents,
-    skipped,
-    failed: documents.filter((document) => document.status === "error").length
-  };
-}
-
-async function readLibraryDocument(file: File, index: number): Promise<LibraryDocument> {
-  const kind = getDocumentKind(file.name) ?? "txt";
-  const path = getImportPath(file);
-  const base = {
-    id: createDocumentId(path, file, index),
-    name: file.name,
-    path,
-    kind,
-    size: file.size,
-    lastModified: file.lastModified,
-    warnings: []
-  };
+async function prepareSourceDocumentImport(
+  file: File,
+  mediaType: SourceMediaType,
+  language: string
+): Promise<SourceDocumentImportRequest> {
+  const arrayBuffer = await file.arrayBuffer();
+  const checksum = await sha256Hex(arrayBuffer);
+  const warnings: string[] = [];
+  let extractedText: string | null = null;
+  let extractionStatus: "ready" | "failed" = "ready";
+  let extractionError: string | null = null;
 
   try {
-    if (kind === "docx") {
-      const result = await readDocxText(file);
-      return {
-        ...base,
-        content: normalizeImportedText(result.text),
-        status: "ready",
-        warnings: result.warnings
-      };
+    if (mediaType.includes("wordprocessingml")) {
+      const result = await readDocxText(arrayBuffer);
+      extractedText = normalizeImportedText(result.text);
+      warnings.push(...result.warnings);
+    } else {
+      extractedText = normalizeImportedText(new TextDecoder("utf-8").decode(arrayBuffer));
     }
-
-    return {
-      ...base,
-      content: normalizeImportedText(await file.text()),
-      status: "ready"
-    };
+    if (!extractedText) throw new Error(uiText.errors.sourceEmptyText);
   } catch (exc) {
-    return {
-      ...base,
-      content: "",
-      status: "error",
-      error:
-        kind === "docx"
-          ? `DOCX 文本抽取不可用或失败：${toErrorMessage(exc)}`
-          : toErrorMessage(exc)
-    };
+    extractionStatus = "failed";
+    extractedText = null;
+    const message = toErrorMessage(exc);
+    extractionError = sanitizeSourceMetadata(
+      mediaType.includes("wordprocessingml")
+        ? uiText.errors.docxExtractionFailed(message)
+        : message,
+      500
+    );
   }
+
+  return {
+    title: file.name,
+    relative_path: getImportPath(file),
+    media_type: mediaType,
+    language: (language.trim() || "zh-CN").slice(0, 35),
+    byte_size: file.size,
+    checksum_sha256: checksum,
+    extraction_status: extractionStatus,
+    extracted_text: extractedText,
+    warnings: boundSourceWarnings(warnings),
+    error: extractionError,
+    provenance: {
+      imported_by: "author",
+      imported_via: "local_file",
+      source_last_modified_ms: file.lastModified,
+      note: uiText.library.importProvenanceNote
+    }
+  };
 }
 
-async function readDocxText(file: File): Promise<{ text: string; warnings: string[] }> {
+async function sha256Hex(arrayBuffer: ArrayBuffer): Promise<string> {
+  if (!globalThis.crypto?.subtle) throw new Error(uiText.errors.webCryptoUnavailable);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function readDocxText(arrayBuffer: ArrayBuffer): Promise<{ text: string; warnings: string[] }> {
   type MammothApi = {
     extractRawText: (input: { arrayBuffer: ArrayBuffer }) => Promise<{
       value: string;
@@ -4503,15 +4800,35 @@ async function readDocxText(file: File): Promise<{ text: string; warnings: strin
   const mammoth =
     (mammothModule as unknown as { default?: MammothApi }).default ??
     (mammothModule as unknown as MammothApi);
-  const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+  const result = await mammoth.extractRawText({ arrayBuffer });
 
   return {
     text: result.value,
-    warnings: result.messages.map((message) => message.message)
+    warnings: boundSourceWarnings(result.messages.map((message) => message.message))
   };
 }
 
-function buildLibraryTree(documents: LibraryDocument[]): LibraryTreeNode {
+function boundSourceWarnings(values: string[]): string[] {
+  const warnings: string[] = [];
+  let remainingCharacters = 2000;
+  for (const value of values) {
+    if (warnings.length >= 32 || remainingCharacters <= 0) break;
+    const warning = sanitizeSourceMetadata(value, Math.min(200, remainingCharacters));
+    if (!warning) continue;
+    warnings.push(warning);
+    remainingCharacters -= warning.length;
+  }
+  return warnings;
+}
+
+function sanitizeSourceMetadata(value: string, maxLength: number): string {
+  return value
+    .replace(/(?:\b[a-zA-Z]:[\\/]|\\\\)[^\s"'<>]+/g, uiText.library.redactedLocalPath)
+    .trim()
+    .slice(0, maxLength);
+}
+
+function buildLibraryTree(documents: SourceDocumentSummary[]): LibraryTreeNode {
   const root: LibraryTreeNode = {
     id: "library",
     name: uiText.library.localRoot,
@@ -4521,7 +4838,7 @@ function buildLibraryTree(documents: LibraryDocument[]): LibraryTreeNode {
   };
 
   for (const document of documents) {
-    const parts = document.path.split("/").filter(Boolean);
+    const parts = document.relative_path.split("/").filter(Boolean);
     let current = root;
 
     parts.slice(0, -1).forEach((part, index) => {
@@ -4544,8 +4861,8 @@ function buildLibraryTree(documents: LibraryDocument[]): LibraryTreeNode {
 
     current.children.push({
       id: `document:${document.id}`,
-      name: document.name,
-      path: document.path,
+      name: document.title,
+      path: document.relative_path,
       type: "document",
       children: [],
       document
@@ -4564,36 +4881,6 @@ function sortLibraryNode(node: LibraryTreeNode) {
   node.children.forEach(sortLibraryNode);
 }
 
-function mergeLibraryDocuments(
-  current: LibraryDocument[],
-  incoming: LibraryDocument[]
-): LibraryDocument[] {
-  const documents = new Map(current.map((document) => [document.id, document]));
-  incoming.forEach((document) => documents.set(document.id, document));
-  return Array.from(documents.values());
-}
-
-function selectAgentDiscussionSources(
-  documents: LibraryDocument[],
-  selectedDocumentId: string | null
-): AgentDiscussionRequest["local_sources"] {
-  const ready = documents.filter((document) => document.status === "ready");
-  const selected = selectedDocumentId
-    ? ready.filter((document) => document.id === selectedDocumentId)
-    : [];
-  const ordered = [
-    ...selected,
-    ...ready.filter((document) => document.id !== selectedDocumentId)
-  ].slice(0, 6);
-  return ordered.map((document) => ({
-    kind: "imported_document",
-    ref: `local:${document.id}`,
-    title: document.name,
-    text: document.content,
-    note: document.path
-  }));
-}
-
 function getAncestorFolderPaths(path: string): string[] {
   const parts = path.split("/").filter(Boolean);
   const ancestors = ["library"];
@@ -4609,24 +4896,55 @@ function getImportPath(file: File): string {
 }
 
 function normalizeImportPath(path: string): string {
-  return path.replace(/\\/g, "/").split("/").filter(Boolean).join("/");
+  const slashPath = path.replace(/\\/g, "/");
+  if (slashPath.startsWith("/") || /^[a-zA-Z]:/.test(slashPath)) {
+    throw new Error(uiText.errors.sourceUnsafePath);
+  }
+  const parts = slashPath.split("/").filter(Boolean);
+  if (parts.some((part) => part === "." || part === "..")) {
+    throw new Error(uiText.errors.sourceUnsafePath);
+  }
+  const normalized = parts.join("/");
+  if (!normalized) {
+    throw new Error(uiText.errors.sourceUnsafePath);
+  }
+  return normalized;
 }
 
-function createDocumentId(path: string, file: File, index: number): string {
-  return `${path}::${file.size}::${file.lastModified}::${index}`;
-}
-
-function getDocumentKind(fileName: string): LibraryDocumentKind | null {
+function getSourceMediaType(fileName: string): SourceMediaType | null {
   const normalizedName = fileName.toLowerCase();
-  if (normalizedName.endsWith(".txt")) return "txt";
-  if (normalizedName.endsWith(".md") || normalizedName.endsWith(".markdown")) return "md";
-  if (normalizedName.endsWith(".docx")) return "docx";
+  if (normalizedName.endsWith(".txt")) return "text/plain";
+  if (normalizedName.endsWith(".md") || normalizedName.endsWith(".markdown")) {
+    return "text/markdown";
+  }
+  if (normalizedName.endsWith(".docx")) {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
   return null;
 }
 
 function normalizeImportedText(text: string): string {
-  const normalized = text.replace(/\r\n?/g, "\n").trim();
-  return normalized || uiText.library.emptyDocumentText;
+  return text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
+}
+
+function requireReadySourceText(document: SourceDocument): string {
+  const text = normalizeImportedText(document.extracted_text ?? "");
+  if (document.extraction_status !== "ready" || !text) {
+    throw new Error(uiText.errors.sourceDetailNotReady);
+  }
+  return text;
+}
+
+function sourceMediaTypeLabel(mediaType: SourceMediaType): string {
+  if (mediaType === "text/plain") return uiText.library.formats.txt;
+  if (mediaType === "text/markdown") return uiText.library.formats.markdown;
+  return uiText.library.formats.docx;
+}
+
+function sourceFileAccept(mediaType: SourceMediaType): string {
+  if (mediaType === "text/plain") return ".txt";
+  if (mediaType === "text/markdown") return ".md,.markdown";
+  return ".docx";
 }
 
 function countDocuments(node: LibraryTreeNode): number {

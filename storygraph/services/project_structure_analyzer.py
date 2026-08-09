@@ -200,12 +200,13 @@ class RuleBasedProjectStructureAnalyzer:
                 normalized_scenes = [self._normalize_scene({}, scene_index=1)]
             normalized_chapters.append(
                 {
-                    "title": self._text(raw_chapter.get("title")) or f"第 {chapter_index} 章",
+                    "title": self._text(raw_chapter.get("title"), max_chars=120)
+                    or f"第 {chapter_index} 章",
                     "chapter_index": self._positive_int(
                         raw_chapter.get("chapter_index"), chapter_index
                     ),
-                    "summary": self._text(raw_chapter.get("summary")),
-                    "purpose": self._text(raw_chapter.get("purpose")),
+                    "summary": self._text(raw_chapter.get("summary"), max_chars=500),
+                    "purpose": self._text(raw_chapter.get("purpose"), max_chars=300),
                     "scenes": normalized_scenes,
                 }
             )
@@ -214,32 +215,38 @@ class RuleBasedProjectStructureAnalyzer:
         return {
             "schema": "project_structure_draft_v1",
             "project_id": project_id,
-            "source_title": self._text(payload.get("source_title")) or title,
-            "summary": self._text(payload.get("summary")),
+            "source_title": self._text(payload.get("source_title"), max_chars=500)
+            or title[:500],
+            "summary": self._text(payload.get("summary"), max_chars=1000),
             "chapters": normalized_chapters,
         }
 
     def _normalize_scene(self, raw_scene: dict[str, Any], *, scene_index: int) -> dict[str, Any]:
         return {
-            "title": self._text(raw_scene.get("title")) or f"场景 {scene_index}",
+            "title": self._text(raw_scene.get("title"), max_chars=120)
+            or f"场景 {scene_index}",
             "scene_index": self._positive_int(raw_scene.get("scene_index"), scene_index),
-            "summary": self._text(raw_scene.get("summary")),
-            "goal": self._text(raw_scene.get("goal")),
-            "conflict": self._text(raw_scene.get("conflict")),
-            "timeline_position": self._nullable_text(raw_scene.get("timeline_position")),
-            "pov_label": self._nullable_text(raw_scene.get("pov_label")),
-            "location_label": self._nullable_text(raw_scene.get("location_label")),
+            "summary": self._text(raw_scene.get("summary"), max_chars=500),
+            "goal": self._text(raw_scene.get("goal"), max_chars=300),
+            "conflict": self._text(raw_scene.get("conflict"), max_chars=300),
+            "timeline_position": self._nullable_text(
+                raw_scene.get("timeline_position"), max_chars=120
+            ),
+            "pov_label": self._nullable_text(raw_scene.get("pov_label"), max_chars=120),
+            "location_label": self._nullable_text(
+                raw_scene.get("location_label"), max_chars=120
+            ),
         }
 
     @staticmethod
-    def _text(value: Any) -> str:
+    def _text(value: Any, *, max_chars: int) -> str:
         if value is None:
             return ""
-        return str(value).strip()
+        return str(value).strip()[:max_chars]
 
     @classmethod
-    def _nullable_text(cls, value: Any) -> str | None:
-        text = cls._text(value)
+    def _nullable_text(cls, value: Any, *, max_chars: int) -> str | None:
+        text = cls._text(value, max_chars=max_chars)
         return text or None
 
     @staticmethod

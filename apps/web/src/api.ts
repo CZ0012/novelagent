@@ -62,6 +62,63 @@ export type Draft = {
   updated_at: string;
 };
 
+export type SourceMediaType =
+  | "text/plain"
+  | "text/markdown"
+  | "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+export type SourceExtractionStatus = "ready" | "failed" | "archived";
+
+export type SourceImportProvenance = {
+  imported_by: string;
+  imported_via: "local_file";
+  source_last_modified_ms?: number | null;
+  note?: string | null;
+};
+
+export type SourceDocumentSummary = {
+  contract_version: "source_document_v1";
+  id: string;
+  project_id: string;
+  title: string;
+  relative_path: string;
+  media_type: SourceMediaType;
+  language: string;
+  byte_size: number;
+  checksum_sha256: string;
+  extraction_status: SourceExtractionStatus;
+  character_count: number;
+  warnings: string[];
+  error?: string | null;
+  provenance: SourceImportProvenance;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SourceDocument = SourceDocumentSummary & {
+  extracted_text?: string | null;
+};
+
+export type SourceDocumentImportRequest = {
+  title: string;
+  relative_path: string;
+  media_type: SourceMediaType;
+  language: string;
+  byte_size: number;
+  checksum_sha256: string;
+  extraction_status: "ready" | "failed";
+  extracted_text?: string | null;
+  warnings: string[];
+  error?: string | null;
+  provenance: SourceImportProvenance;
+};
+
+export type SourceDocumentImportResult = {
+  document: SourceDocumentSummary;
+  created: boolean;
+  updated: boolean;
+};
+
 export type ProposalArtifactType =
   | "scene_draft"
   | "fact_draft"
@@ -183,6 +240,7 @@ export type AgentDiscussionRequest = {
   include_context_pack: boolean;
   include_latest_draft: boolean;
   local_sources: AgentDiscussionSource[];
+  source_document_ids: string[];
   allow_web_search: boolean;
   web_search_query?: string | null;
 };

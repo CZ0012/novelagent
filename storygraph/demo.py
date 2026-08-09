@@ -23,7 +23,7 @@ def build_fantasy_demo_graph(locale: str | None = None) -> InMemoryGraphStore:
     graph.seed_canon_node(
         node_id=PROJECT_ID,
         node_type="Project",
-        properties=_section(text, "project"),
+        properties=_project_properties(_section(text, "project")),
     )
     graph.seed_canon_node(
         node_id=CHAPTER_ID,
@@ -38,37 +38,38 @@ def build_fantasy_demo_graph(locale: str | None = None) -> InMemoryGraphStore:
     graph.seed_canon_node(
         node_id=POV_CHARACTER_ID,
         node_type="Character",
-        properties=_section(text, "characters", POV_CHARACTER_ID),
+        properties=_project_properties(_section(text, "characters", POV_CHARACTER_ID)),
     )
     graph.seed_canon_node(
         node_id="character_helianya",
         node_type="Character",
-        properties=_section(text, "characters", "character_helianya"),
+        properties=_project_properties(_section(text, "characters", "character_helianya")),
     )
     graph.seed_canon_node(
         node_id="organization_silver_crow",
         node_type="Organization",
-        properties=_section(text, "organization"),
+        properties=_project_properties(_section(text, "organization")),
     )
     graph.seed_canon_node(
         node_id=LOCATION_ID,
         node_type="Location",
-        properties=_section(text, "location"),
+        properties=_project_properties(_section(text, "location")),
     )
     graph.seed_canon_node(
         node_id=ITEM_ID,
         node_type="Item",
-        properties=_section(text, "item"),
+        properties=_project_properties(_section(text, "item")),
     )
     graph.seed_canon_node(
         node_id=SECRET_ID,
         node_type="Secret",
-        properties=_section(text, "secret"),
+        properties=_project_properties(_section(text, "secret")),
     )
     graph.seed_canon_node(
         node_id="foreshadowing_early_bell",
         node_type="Foreshadowing",
         properties={
+            "project_id": PROJECT_ID,
             "seed_scene_id": SCENE_ID,
             "payoff_scene_id": "scene_005",
             **_section(text, "foreshadowing"),
@@ -77,7 +78,7 @@ def build_fantasy_demo_graph(locale: str | None = None) -> InMemoryGraphStore:
     graph.seed_canon_node(
         node_id="worldrule_secret_reveals",
         node_type="WorldRule",
-        properties=_section(text, "world_rule"),
+        properties=_project_properties(_section(text, "world_rule")),
     )
     graph.seed_canon_node(
         node_id=SCENE_ID,
@@ -97,31 +98,37 @@ def build_fantasy_demo_graph(locale: str | None = None) -> InMemoryGraphStore:
         relation_type="HAS_CHAPTER",
         source_id=PROJECT_ID,
         target_id=CHAPTER_ID,
+        properties={"project_id": PROJECT_ID},
     )
     graph.seed_canon_relation(
         relation_id="rel_chapter_scene_003",
         relation_type="HAS_SCENE",
         source_id=CHAPTER_ID,
         target_id=SCENE_ID,
+        properties={"project_id": PROJECT_ID},
     )
     graph.seed_canon_relation(
         relation_id="rel_silver_crow_controls_tower",
         relation_type="CONTROLS",
         source_id="organization_silver_crow",
         target_id=LOCATION_ID,
+        properties={"project_id": PROJECT_ID},
     )
     graph.seed_canon_relation(
         relation_id="rel_linj_knows_helianya",
         relation_type="KNOWS",
         source_id=POV_CHARACTER_ID,
         target_id="character_helianya",
-        properties=_section(text, "relations", "rel_linj_knows_helianya"),
+        properties=_project_properties(
+            _section(text, "relations", "rel_linj_knows_helianya")
+        ),
     )
     graph.seed_canon_relation(
         relation_id="rel_foreshadowing_points_to_secret",
         relation_type="POINTS_TO",
         source_id="foreshadowing_early_bell",
         target_id=SECRET_ID,
+        properties={"project_id": PROJECT_ID},
     )
     return graph
 
@@ -131,3 +138,7 @@ def _section(payload: dict[str, Any], *keys: str) -> dict[str, Any]:
     for key in keys:
         current = current[key]
     return dict(current)
+
+
+def _project_properties(properties: dict[str, Any]) -> dict[str, Any]:
+    return {"project_id": PROJECT_ID, **properties}

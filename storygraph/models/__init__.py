@@ -6,6 +6,7 @@ from storygraph.models.continuity import ContinuityReport
 from storygraph.models.draft import Draft
 from storygraph.models.graph import EventLogEntry, GraphNode, GraphRelationship
 from storygraph.models.proposal import ProposalArtifact
+from storygraph.models.source import SourceDocument, SourceDocumentSummary, SourceImportProvenance
 from storygraph.models.style import StyleSample, StyleSampleMatch
 from storygraph.models.workflow import ReviewPayload, WorkflowRun, WorkflowStep
 
@@ -20,6 +21,9 @@ __all__ = [
     "GraphRelationship",
     "ProposalArtifact",
     "ReviewPayload",
+    "SourceDocument",
+    "SourceDocumentSummary",
+    "SourceImportProvenance",
     "StyleSample",
     "StyleSampleMatch",
     "WorkflowRun",

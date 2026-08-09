@@ -41,6 +41,17 @@ class ProposalStore(Protocol):
     ) -> list[ProposalArtifact]:
         raise NotImplementedError
 
+    def record_derived_refs(
+        self,
+        proposal_id: str,
+        *,
+        derived_refs: list[ProposalRef],
+        actor: str,
+        note: str | None = None,
+        expected_version: int | None = None,
+    ) -> ProposalArtifact:
+        raise NotImplementedError
+
 
 class SQLiteProposalStore(ProposalStore):
     def __init__(self, path: str | Path = ":memory:") -> None:
@@ -280,6 +291,23 @@ class SQLiteProposalStore(ProposalStore):
         note: str | None = None,
         expected_version: int | None = None,
     ) -> ProposalArtifact:
+        return self.record_derived_refs(
+            proposal_id,
+            derived_refs=[derived_ref],
+            actor=actor,
+            note=note,
+            expected_version=expected_version,
+        )
+
+    def record_derived_refs(
+        self,
+        proposal_id: str,
+        *,
+        derived_refs: list[ProposalRef],
+        actor: str,
+        note: str | None = None,
+        expected_version: int | None = None,
+    ) -> ProposalArtifact:
         with self._lock:
             latest = self.get(proposal_id)
             if expected_version is not None and latest.version != expected_version:
@@ -289,6 +317,14 @@ class SQLiteProposalStore(ProposalStore):
                 )
             if latest.status == "rejected":
                 raise ContractError(f"Rejected ProposalArtifact cannot derive refs: {latest.id}")
+            existing_ref_keys = {(ref.kind, ref.ref) for ref in latest.derived_refs}
+            new_refs = [
+                ref
+                for ref in derived_refs
+                if (ref.kind, ref.ref) not in existing_ref_keys
+            ]
+            if not new_refs:
+                return latest
             now = utc_now()
             proposal = ProposalArtifact.model_validate(
                 {
@@ -301,7 +337,7 @@ class SQLiteProposalStore(ProposalStore):
                         note=note,
                     ),
                     "version": latest.version + 1,
-                    "derived_refs": [*latest.derived_refs, derived_ref],
+                    "derived_refs": [*latest.derived_refs, *new_refs],
                     "updated_at": now,
                 }
             )

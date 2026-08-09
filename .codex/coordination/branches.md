@@ -52,6 +52,7 @@ Use the existing user-requested branch name if the user asks for one.
 | `codex/sg-014-import-hint-prefill` | SG-015 | Main Agent | current branch | Web-only link-back from newly seeded Character/Location nodes into the current Scene metadata form. | done | project default branch when ready |
 | `codex/sg-014-import-hint-prefill` | SG-016 | Main Agent | current branch | Web-only exact match from imported Scene POV/location hints to existing Character/Location canon nodes. | done | project default branch when ready |
 | `codex/sg-017-agent-discussion-localization` | SG-017 | Main Agent | `codex/sg-014-import-hint-prefill` | Chinese-first localization coverage plus Agent discussion/selected-text revision into non-canon Proposal Store artifacts. | done | `main` / release tag `v0.1.7` |
+| `codex/sg-018-persistent-source-library` | SG-018 | Main Agent | `main` at `643a6bf` | Project-scoped persistent Source Store/API/UI, explicit Agent source selection, atomic fact-draft promotion hardening, and release 0.1.8 validation. | active | `main` / release tag `v0.1.8` when checked and reviewed |
 
 ## SG-002 Branch Notes
 
@@ -170,6 +171,13 @@ Use the existing user-requested branch name if the user asks for one.
 - Agent discussion may read the current Context Pack, current draft editor text, already-imported local-library snippets, and author-enabled web search snippets. These are inputs to a non-canon Proposal Store artifact only.
 - Selected-text revision can generate a full `scene_draft` proposal, but it must not overwrite the current Draft Store draft until the author explicitly accepts and promotes the proposal.
 - GitHub synchronization for this branch remains only the software release/update channel: tag, release assets, updater signature, and `latest.json`.
+
+## SG-018 Branch Notes
+
+- Source documents are private local project data. Their full text, API credentials, extracted private prose, workspace databases, and local file paths must not enter Git or coordination Markdown.
+- Source Store is a retrieval/provenance layer, not Draft Store, Proposal Store, Candidate Store, Graph Store, Event Log, or canon.
+- This task keeps initial format support to TXT, Markdown, and DOCX. Legacy CP936 RTF and PDF/OCR support are planned only after the persistent source boundary is verified.
+- GitHub publication remains software release/update distribution only; it does not synchronize local Source Store documents or other novel workspace state.
 
 ## Branch Entry Template
 

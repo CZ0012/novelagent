@@ -85,6 +85,14 @@ Default status for automated extraction is `DRAFT_FACT`.
 
 Returns one graph node by stable ID.
 
+### `get_relationship`
+
+Returns one relationship by stable ID. The default read returns only `CANON`
+relationships; a trusted validation or migration path may explicitly request a
+non-canon relationship. CandidateFact scope validation uses this operation to
+verify the target relationship and both endpoints before review and again at
+final canon commit.
+
 ### `query_neighbors`
 
 Returns adjacent nodes and relationships for a source node, filtered by edge labels, node labels, status, and hop limit.
@@ -153,6 +161,10 @@ Updates relationship properties such as strength, public status, private status,
 ### `commit_candidate_fact`
 
 Applies an accepted `CandidateFact` or edited candidate fact as canon. This operation must be reachable only through the human review path.
+
+For a durable graph backend, all node/relationship changes and every provenance
+event produced by one candidate commit must share one backend transaction. Any
+synchronous write failure rolls back the complete graph/event delta.
 
 ### `record_event`
 

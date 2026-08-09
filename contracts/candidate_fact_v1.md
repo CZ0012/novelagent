@@ -86,6 +86,22 @@ Minimum fields:
 - `properties`
 - `source_ref`
 
+`proposed_graph_patch.source_ref` must exactly equal the candidate's real
+`source_draft_id`; a Proposal Artifact, Source Document, another draft, or an
+arbitrary client reference cannot replace that primary provenance.
+
+Project ownership is part of this contract, not a UI convention. Before a
+candidate is stored from a promotion path and again immediately before canon
+commit, the backend must verify that the candidate project resolves to a
+`Project` node and that its source scene, every referenced existing node, the
+target relationship, and both relationship endpoints belong to that same
+project. A `Project` node may be referenced only when its ID equals
+`CandidateFact.project_id`; non-Project graph objects require an exact
+`properties.project_id` match. New node and relationship patches are normalized
+with that project ID when it is omitted and are rejected when they supply a
+different one. A scope failure rejects the whole candidate batch and must not
+leave pending candidates, graph mutations, or event-log entries behind.
+
 ## Review
 
 Before human review:
@@ -121,6 +137,14 @@ A workflow pause with `ReviewPayload.status = pending` is not a review decision 
 
 Accepted or edited candidates require reviewer identity, review timestamp, rationale/provenance, and an event log entry before they become canon graph state. Rejected or deferred candidates must not mutate canon.
 
+The transition from `pending` to any review decision must use an atomic
+compare-and-set. Concurrent accept/edit/reject/defer requests may have only one
+winner. Accept/edit paths persist the reviewed candidate before graph commit;
+if the synchronous graph commit fails, they must conditionally restore the
+unchanged reviewed record to its original pending form. A losing or compensated
+request must never overwrite another completed review or create a second canon
+event.
+
 Current review API routes governed by this integration:
 
 - `GET /projects/{project_id}/facts/pending`
@@ -138,6 +162,7 @@ Current review API routes governed by this integration:
 ## Invariants
 
 - A candidate must cite a source scene and source draft.
+- The source scene and every graph target or endpoint must belong to the candidate project.
 - A candidate must not rely only on model inference unless marked `HYPOTHESIS`.
 - A candidate must not modify the Graph Store directly.
 - A candidate that conflicts with canon must be marked `CONFLICT`.

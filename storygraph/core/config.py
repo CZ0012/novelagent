@@ -18,6 +18,7 @@ class StoryGraphSettings:
         self.draft_store_path = root / "drafts.sqlite"
         self.candidate_store_path = root / "candidates.sqlite"
         self.proposal_store_path = root / "proposals.sqlite"
+        self.source_store_path = root / "sources.sqlite"
         self.workflow_store_path = root / "workflows.sqlite"
         self.workflow_checkpoint_path = root / "langgraph_checkpoints.sqlite"
         self.style_sample_store_path = root / "style_samples.sqlite"

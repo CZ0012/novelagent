@@ -40,6 +40,16 @@ Status values: `planned`, `active`, `blocked`, `ready-for-check`, `ready-for-rev
 | SG-015 | done | Main Agent | `codex/sg-014-import-hint-prefill` | Carry newly seeded Character/Location stable IDs back into the current Scene metadata form without auto-saving Scene graph updates. | Front Agent, Check Agent | Closed after implementation: seed-created IDs are copied only into local Scene form state and verification passes. |
 | SG-016 | done | Main Agent | `codex/sg-014-import-hint-prefill` | Let imported Scene POV/location hints reuse exact-matching existing canon Character/Location IDs from the Web sidebar. | Front Agent, Check Agent | Closed after implementation: exact matches can fill local Scene form IDs without saving graph updates, and verification passes. |
 | SG-017 | done | Main Agent | `codex/sg-017-agent-discussion-localization` | Add Chinese-first localization coverage and an Agent discussion/selected-text revision path that creates non-canon proposals only. | Front Agent, Localization Worker, Backend/API Creation Agent, Check Agent | Closed for v0.1.7 release: implementation, localization pass, browser validation, tests, build, installer, and release asset generation passed. |
+| SG-018 | active | Main Agent | `codex/sg-018-persistent-source-library` | Add a project-scoped persistent Source Library so imported documents survive restart, stay isolated by project, and enter Agent workflows only after explicit author selection. | Contract Agent, Backend/API Creation Agent, Front Agent, Check Agent, Review Agent | Implementation and release gates passed; build, sign, publish, and run the installed 0.1.7→0.1.8 updater smoke. |
+| SG-018A | done | Contract Agent | `codex/sg-018-persistent-source-library` | Define `source_document_v1` and stable proposal/Agent source-reference boundaries without weakening canon safety. | Main Agent, Check Agent | Contract, architecture, affected agent instructions, and ADR are synchronized; implementation/check must follow the locked shapes. |
+| SG-018B | done | Backend/API Creation Agent | `codex/sg-018-persistent-source-library` | Implement the persistent project-scoped Source Store and API, plus source-backed structure analysis and Agent discussion. | Contract Agent, Check Agent | Store/API persistence, project isolation, privacy projections, permissions, idempotency, archive/retry, stable refs, and no-canon side effects passed. |
+| SG-018C | done | Front Agent | `codex/sg-018-persistent-source-library` | Replace the transient import-only flow with API-backed project documents, explicit Agent source selection, progress/error feedback, and responsive Chinese-first UX. | Contract Agent, Backend/API Creation Agent, Check Agent | Persistent Source UI, explicit Agent IDs, retry/archive/bridges, stale-response guards, 390px layout, and updater recovery passed. |
+| SG-018D | done | Backend/API Creation Agent | `codex/sg-018-persistent-source-library` | Make accepted fact-draft promotion atomic and compatible with structured candidate previews so a failed request cannot leave partial pending facts. | Contract Agent, Check Agent | Atomic batch submission, structured preview validation/deduplication, idempotent repeat promotion, focused/full tests, Ruff, and diff checks passed. |
+| SG-018F | done | Check Agent | `codex/sg-018-persistent-source-library` | Verify persistence, project isolation, explicit source selection, permission gates, atomicity, canon safety, builds, and release hygiene. | Review Agent | Focused/full tests, Ruff, Web/Cargo builds, dependency/privacy/version/release gates passed. |
+| SG-018G | done | Review Agent | `codex/sg-018-persistent-source-library` | Judge whether the persistent Source Library is genuinely useful for a Chinese desktop author and safe for release 0.1.8. | Main Agent, Check Agent | Final review found no remaining P0/P1 and approved build/sign/publish plus installed updater smoke. |
+| SG-019 | planned | Main Agent | future branch | Enforce Chinese and English project/UI/Agent output isolation with explicit locale and output-language contracts. | Contract Agent, Backend/API Creation Agent, Front Agent, Check Agent | Start after the v0.1.8 updater smoke; include strict language tags and no cross-locale fallback leakage. |
+| SG-020 | planned | Main Agent | future branch | Add RTF and text-layer PDF import plus long-document chunking, progress, cancellation, and stable source spans. | Contract Agent, Backend/API Creation Agent, Front Agent, Check Agent | Start after Source Store provenance/chunk contracts are defined; OCR remains separate. |
+| SG-021 | planned | Main Agent | future branch | Add crash recovery and editor lifecycle hardening around Candidate/Graph reconciliation, dirty-draft guards, and Store shutdown. | Backend/API Creation Agent, Front Agent, Check Agent | Reconcile cross-store hard-crash windows without weakening canon provenance or overwriting unsaved text. |
 
 ## SG-005 Acceptance Criteria
 
@@ -260,6 +270,37 @@ Status values: `planned`, `active`, `blocked`, `ready-for-check`, `ready-for-rev
 - `npm --prefix apps/desktop run build:installer`
 - Version consistency and GitHub release verification for the new release tag.
 - Final local verification on 2026-07-06: focused Agent discussion API coverage is included in full `python -m pytest -q` (120 passed / 1 skipped), `python -m ruff check .` passed, `npm --prefix apps/web run build` passed, browser validation passed on desktop and 390px mobile viewports with no console errors, `git diff --check` reported no whitespace errors, and `npm --prefix apps/desktop run build:installer` regenerated the v0.1.7 NSIS installer, `.sig`, and `latest.json`.
+
+## SG-018 Acceptance Criteria
+
+- Imported TXT, Markdown, and DOCX documents are persisted in a project-scoped local Source Store and reappear after backend or desktop restart.
+- Source documents have stable ids, relative paths, media types, language, checksum, extraction status, warnings, provenance, and timestamps; list responses do not expose full private text.
+- Documents from one project are not visible or usable in another project, including Agent discussion and project-structure analysis routes.
+- Re-importing the same project document is idempotent by checksum and normalized path; partial batch failures remain visible and retryable.
+- Agent discussion includes no Source Store document by default. Only ids explicitly selected by the author are resolved by the backend and recorded as stable proposal source refs.
+- Deselecting the current scene draft prevents its text from being sent as Agent `base_text`.
+- Source import and analysis do not create Drafts, CandidateFacts, Graph nodes, graph relations, or canon events. Applying an accepted project-structure proposal retains the existing Chapter/Scene-only boundary.
+- Accepted fact-draft promotion is all-or-nothing and consumes structured candidate previews without duplicate partial writes.
+- The Sources and Agent panels remain usable without horizontal overflow at 390px and desktop widths.
+
+## SG-018 Non-Goals
+
+- RTF, PDF, OCR, images, PSD, cloud synchronization, filesystem watching, or cross-project search.
+- Automatic canon writes or making Source Store a second canon source.
+- Copying full imported documents into proposal refs, workflow events, coordination Markdown, or Git.
+- Full English UI localization or changing CandidateFact review decisions.
+
+## SG-018 Verification
+
+- Focused store/API tests for restart persistence, project isolation, idempotent import, permission gates, source-backed structure/Agent calls, and no Draft/Candidate/Graph/Event side effects.
+- Regression tests proving fact-draft promotion is atomic for structured previews, duplicate ids, invalid quotes, and repeated promotion.
+- Frontend build plus browser smoke for batch import feedback, explicit source selection, scene-draft exclusion, and 390px layout.
+- Private smoke may use author-approved local manuscript documents and configured local LLM credentials, but must not print, commit, or write paths, filenames, or manuscript prose into coordination files.
+- `python -m pytest -q`
+- `python -m ruff check .`
+- `npm --prefix apps/web run build`
+- `git diff --check`
+- Final pre-release verification on 2026-08-09: 73 focused checks passed; full `python -m pytest -q` passed with 169 passed / 1 skipped; Ruff, Web production build, locked Cargo check, runtime dependency audit, version consistency, privacy scan, and diff check passed. The remaining hard-crash reconciliation, dirty same-scene Draft guard, strict language tags, and Store lifespan cleanup are recorded as SG-019/SG-021 follow-ups rather than hidden release claims.
 
 ## SG-003 Acceptance Criteria
 

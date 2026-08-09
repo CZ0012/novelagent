@@ -29,6 +29,19 @@ class InMemoryGraphStore(GraphStore):
             raise GraphStoreError("not_found", f"Node is not canon: {node_id}")
         return node
 
+    def get_relationship(
+        self,
+        relation_id: str,
+        *,
+        include_non_canon: bool = False,
+    ) -> GraphRelationship:
+        relation = self.relationships.get(relation_id)
+        if relation is None:
+            raise GraphStoreError("not_found", f"Relationship not found: {relation_id}")
+        if relation.status != "CANON" and not include_non_canon:
+            raise GraphStoreError("not_found", f"Relationship is not canon: {relation_id}")
+        return relation
+
     def create_node(self, node: GraphNode, *, allow_canon: bool = False) -> GraphNode:
         self._validate_node(node)
         if node.id in self.nodes:
@@ -478,6 +491,7 @@ class InMemoryGraphStore(GraphStore):
             raise GraphStoreError("invalid_status_transition", "Candidate is not accepted for canon")
         if candidate.status != "ACCEPTED_FOR_CANON":
             raise GraphStoreError("invalid_status_transition", "Candidate status is not ACCEPTED_FOR_CANON")
+        candidate = self.validate_candidate_scope(candidate)
         patch = candidate.proposed_graph_patch
         if patch.operation == "none":
             return self._record_event(
@@ -570,6 +584,7 @@ class InMemoryGraphStore(GraphStore):
             reviewer=reviewer,
             rationale=rationale,
             payload={"candidate": candidate.model_dump()},
+            event_id=node.event_id if patch.operation == "create_node" else None,
         )
 
     def _record_event(

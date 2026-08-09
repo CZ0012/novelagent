@@ -15,7 +15,7 @@ not Draft Store records, not CandidateFact records, and not Graph Store canon.
 {
   "contract_version": "proposal_artifact_v1",
   "id": "proposal_001",
-  "project_id": "project_fanxing",
+  "project_id": "project_sample",
   "artifact_type": "scene_draft",
   "status": "drafting",
   "title": "第二章开场提案",
@@ -25,7 +25,11 @@ not Draft Store records, not CandidateFact records, and not Graph Store canon.
     { "kind": "scene", "ref": "scene_opening", "note": "目标场景" }
   ],
   "source_refs": [
-    { "kind": "imported_document", "ref": "local_doc:fanxing_chronicle" }
+    {
+      "kind": "source_document",
+      "ref": "source_world_notes",
+      "note": "持久资料库来源"
+    }
   ],
   "provenance": {
     "created_by": "agent",
@@ -82,7 +86,7 @@ or graph object that the proposal concerns.
 Each ref object has:
 
 - `kind`: a stable lower-snake-case kind such as `author_instruction`,
-  `imported_document`, `draft`, `scene`, `chapter`, `graph_node`,
+  `source_document`, `draft`, `scene`, `chapter`, `graph_node`,
   `graph_relation`, `candidate_fact`, `context_pack`, `continuity_report`,
   `workflow_run`, `style_sample`, or `proposal_artifact`.
 - `ref`: the stable local id or opaque local ref.
@@ -91,8 +95,19 @@ Each ref object has:
   manuscript passages in refs.
 - `source_span`: optional structured location metadata.
 
-All refs MUST belong to the same `project_id` unless the ref is an opaque local
-document identifier that is only used as import provenance.
+All resolvable refs MUST belong to the same `project_id`.
+
+`source_document` is the canonical kind for a persistent Source Store record.
+Its `ref` is the stable `SourceDocument.id`; producers may record a short note,
+bounded quote, or consumed offsets inside the existing optional fields when
+needed for review. Full source text and absolute local paths must not be copied
+into a ref.
+
+Legacy `imported_document` refs remain valid opaque provenance for artifacts
+created by transient pre-Source-Store clients. They do not resolve to a Source
+Document, and new Source Store-backed routes must not emit them. This is a ref
+kind clarification only; `proposal_artifact_v1` adds no field and existing
+artifacts require no migration.
 
 ## Provenance
 

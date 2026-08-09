@@ -148,6 +148,7 @@ MVP 应优先做成一个**本地引擎 + API + CLI + Web UI + 桌面宿主** �
 - LangGraph 负责**长流程编排**：规划、上下文构建、写作、检查、抽取、人工审阅、提交或回滚。
 - 图数据库负责**canon 真相源**：角色关系、知识边界、秘密、伏笔、地点状态、事件因果。
 - Draft Store 负责**文本与版本**：正文、废稿、修订、作者批注。
+- Source Store 负责**项目资料与来源追踪**：持久保存来源元数据和抽取文本，只有作者显式选择后才能进入 Agent 输入；它不是 canon 或 Draft Store，初版也不保存原文件字节。
 - Proposal Store 负责**非 canon 协作产物**：Agent 与作者共同修改的场景草稿提案、事实草稿提案、场景重建和 canon patch 提议。
 - Vector Store 负责**相似性辅助**：风格样本、情绪节奏片段、历史场景摘要。
 - StoryGraph Writing Agent 不直接写入 canon，只能提出 `CandidateFact` 或 `GraphPatch`，经人工审阅后提交。
@@ -208,11 +209,28 @@ Proposal Artifact 使用 `proposal_artifact_v1`，保存 `source_refs`、`target
 - 接受 Proposal Artifact 只表示作者接受该协作提案，不等于写入 canon。
 - `scene_draft` 只有经过显式 promotion API 才能进入 Draft Store。
 - `fact_draft` 只有在提供真实 Draft Store `source_draft_id` 时，才能通过 ReviewService 提交 pending CandidateFact。
+- CandidateFact promotion 与最终 canon commit 都必须执行项目归属校验：来源场景、既有 subject/object、目标关系及关系两端只能属于 `CandidateFact.project_id`；新建节点/关系由受信任提交路径补齐同一 `project_id`，显式冲突则整批原子拒绝且不产生 Candidate、Graph 或 Event Log 部分写入。
+- CandidateFact 审阅决策使用 pending compare-and-set；并发接受/编辑/拒绝/延后只能有一个胜者。同步 graph commit 失败时仅在审阅记录仍等于本次写入值时补偿回原 pending。Neo4j 内一次候选提交的 node/relation delta 与全部 provenance events 必须位于同一个 write transaction；SQLite Candidate Store 与外部 Neo4j 之间仍无跨库 2PC，进程在两阶段之间硬崩溃的极端情况需要后续对账恢复任务处理。
 - Rejected proposal 不能派生 Draft、CandidateFact 或 Graph 写入。
 
 推荐：SQLite JSON payload store，主键为 `(id, version)`，列表默认只返回每个 proposal 的最新版本。
 
-### 5.4 Vector Store：语义检索
+### 5.4 Source Store：项目资料与来源追踪
+
+Source Store 按 `project_id` 持久保存作者导入的 Source Document，边界由 `source_document_v1` 定义。初版只接受 TXT、Markdown 和 DOCX，并保存稳定 ID、标题、规范化相对路径、media type、语言、原文件字节数与 `checksum_sha256`、抽取状态、字符数、warning/error、provenance 与时间戳。
+
+本地 Web/Tauri 客户端负责从用户选择的文件抽取文本，并把 `extracted_text` 与 metadata 通过 JSON 提交给同一本地 FastAPI；初版 Source Store 不保存原文件字节。资料列表只返回不含 `extracted_text` 的 summary；只有同项目详情读取和作者显式选择的后端 Agent/结构分析可以取得全文。绝对本地路径、全文、API key 和私有资料不得进入 proposal ref、workflow event、协调 Markdown、日志或 Git。
+
+边界：
+
+- Source Document 是本地私有来源资料，不是 canon、Draft、Proposal、CandidateFact、Style Sample、Event Log 或 workflow checkpoint。
+- Source Document 不能替代 `candidate_fact_v1` 要求的真实 `source_draft_id`；事实提取仍需经过 Draft Store、pending CandidateFact 和 ReviewService。
+- 跨项目来源 ID 必须拒绝且不得泄露元数据或文本。
+- Source Store 文档默认不进入任何 Agent 输入；Agent 讨论只解析作者本次显式选择的 `source_document_ids`，结构分析则只解析路由路径中指定的单个 ready Source Document ID。
+- `source_document` 是新持久来源的 ProposalRef kind；旧 `imported_document` 只作为不可解析的 legacy opaque provenance 保留。
+- 归档只使文档退出活动资料库和 Agent 解析，不删除本地内容；初版不提供 delete API。
+
+### 5.5 Vector Store：语义检索
 
 保存：
 
@@ -226,7 +244,7 @@ Proposal Artifact 使用 `proposal_artifact_v1`，保存 `source_refs`、`target
 
 MVP 可先使用本地确定性风格样本检索：将作者显式提供的风格片段保存到 SQLite，并用项目、POV、语气、对白风格、标签与词汇重叠做稳定排序。真实 embedding 后端（LanceDB / Chroma / pgvector）应作为后续可替换 adapter 接入，不应改变 graph canon 规则。
 
-### 5.5 Event Log：可回滚变更流
+### 5.6 Event Log：可回滚变更流
 
 保存每一次 canon 更新：
 
@@ -967,8 +985,9 @@ Neo4j / SQLite / Vector Store 本地连接
 核心界面模块：
 
 - Project Workspace：项目、卷、章节、场景树；Web/桌面工作台必须从后端 `/projects` 读取真实项目树，不能把前端 fixture 或占位数据当成真实 workspace。
+- Source Library / 资料库：通过同一本地 FastAPI 持久导入、列出、查看和归档项目 Source Document；列表不下发全文，跨项目不可见，Agent 来源默认不选中且只能由作者逐项显式选择。
 - Scene Editor：正文编辑器、版本切换、局部改写、批注。
-- Agent Discussion / Agent 对话：围绕当前场景、草稿选区、本地资料树片段和可选联网搜索与 LLM 讨论；输出只能是 Proposal Store 中的非 canon `scene_rebuild` 或 `scene_draft` 协作提案，不能直接覆盖 Draft Store 或写入 Graph Store。
+- Agent Discussion / Agent 对话：围绕当前场景、草稿选区、作者显式选择的同项目 Source Document 和可选联网搜索与 LLM 讨论；不选择 `source_document_ids` 时不得默认发送任何资料全文。输出只能是 Proposal Store 中的非 canon `scene_rebuild` 或 `scene_draft` 协作提案，不能直接覆盖 Draft Store 或写入 Graph Store。
 - Proposal Workspace / 协作草稿箱：展示、编辑、审阅和提升 `proposal_artifact_v1`；该模块必须来自后端 Proposal Store，不得使用前端 fixture 冒充持久化数据。
 - Context Pack Inspector：写作前上下文包，可查看、锁定、调整硬约束。
 - Agent Run Panel：展示工作流当前节点、事件、检查结果和失败重试；场景工作流按钮应明确包含 `build_context`、`write_draft`、`check_continuity`、`extract_state`、`human_review`。
@@ -988,10 +1007,10 @@ Neo4j / SQLite / Vector Store 本地连接
 - 当前可运行入口是 CLI、FastAPI + React/Vite Web 工作台、面向桌面宿主的持久化后端入口 `python -m apps.api.desktop_server`，以及源码构建的 Tauri 桌面应用。
 - `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。持久化或桌面空 workspace 应先显示项目创建；创建项目后，作者可以导入已有小说/资料，由 Agent 生成非正典 `project_structure_draft`，经作者接受并显式应用后才创建正式 Chapter/Scene 节点。需要默认 demo project 时，仍可调用 `POST /demo/seed`，该路径要求 full 权限并记录 reviewer、rationale 和 source_ref。已初始化的内置 demo 可以通过工作台或 `POST /demo/archive` 归档为非当前 canon 项目，以便回到空项目树。
 - 默认 `apps.api.main:app` 开发入口可用于本地 demo；不传入 settings 时它使用 seeded in-memory stores，不应被描述为完整桌面产品或持久化作者项目入口。
-- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe` 及 Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe.sig`。这些产物是本地源码构建输出，不是已发布签名 release channel。当前验证产物不包含 `nsis.zip`。
+- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、生成 PyInstaller sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe` 及 Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe.sig`。这些产物是本地源码构建输出，不是已发布签名 release channel。当前验证产物不包含 `nsis.zip`。
 - 桌面壳只应复用健康且 `/health.workspace` 与配置工作区一致的本机后端；如果端口被其他工作区的旧后端占用，应在设置页报告冲突，而不是继续加载旧 workspace 的项目树。
 - FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地操作者授权分级，不是身份认证；保存设置页或调用 `/settings/agent` 代表本地操作者显式授权，因此可升降权限并立即生效；CLI 当前不执行同一权限闸门。
-- React/Vite 工作台当前支持本地 `.txt`、`.md`、`.markdown`、`.docx` 文件和文件夹导入到前端资料树/阅读器。默认导入内容只保存在浏览器内存，不写 Proposal Store、Draft Store、StyleSample Store、Candidate Store 或 Graph Store。作者可显式让 Agent 从导入小说生成 `project_structure_draft` 项目结构草稿；该草稿只包含章节/场景结构 JSON，不保存全文，且只有作者接受并应用后才创建 Chapter/Scene 节点。作者也可显式把 ready 文档保存为 Proposal Store 协作草稿、当前场景 Draft Store 草稿、StyleSample Store 风格样本，或让已配置的 OpenAI-compatible LLM 通读资料后生成 `fact_draft` 协作草稿和 CandidateFact 预览；LLM 资料抽取会保存来源 Draft 用作 provenance，但不会直接写 Candidate Store 或 Graph Store。Agent 对话标签页可以把当前 Context Pack、当前草稿编辑器文本、已导入资料树片段和作者显式开启的联网搜索片段发给 LLM，并只生成 `scene_rebuild` 或 `scene_draft` proposal，不覆盖当前草稿、不创建候选事实、不写 canon。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
+- SG-018 持久资料库路径由 `source_document_v1` 约束：React/Vite 与 Tauri 工作台在本地抽取 `.txt`、`.md`、`.markdown`、`.docx` 文本并把 text + metadata JSON 逐个提交到项目 Source Store；初版后端不保存原文件字节。重启后仍可按稳定 ID 与相对路径读取。导入响应和列表只返回 summary；作者打开同项目详情时才取得 `extracted_text`。v0.1.7 的浏览器内存 `local_sources` / `imported_document` 流程可在迁移期兼容，但不得冒充持久资料，新的 Source Store proposal ref 统一使用 `source_document`。作者可显式让 Agent 从单个来源详情生成 `project_structure_draft`；该草稿只包含章节/场景结构 JSON，且只有作者接受并应用后才创建 Chapter/Scene 节点。Agent 对话只解析本次请求中的 `source_document_ids`、显式选择的当前草稿/Context Pack 和作者开启的联网搜索，并只生成 `scene_rebuild` 或 `scene_draft` proposal，不覆盖当前草稿、不创建候选事实、不写 canon。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
 - Web 工作台的项目树、当前场景选择、Graph 预览和 Timeline 预览必须来自后端项目/章节/场景数据；前端占位数据不得被 Context Pack、Draft Store、CandidateFact 或 Graph Store 当成真实 workspace 来源。
 - 设置页保存 API key、base URL 或模型名称不应自动切换到 LLM writer。LLM 写作只有在 scene writer mode 选择 `llm`、设置已保存、权限至少为 `read_generate`、当前项目/场景有效且 Context Pack 可构建时才应运行。
 
@@ -1003,7 +1022,7 @@ Neo4j / SQLite / Vector Store 本地连接
 - 默认使用本地持久化工作区，避免作者误以为内存 demo 是正式项目存储。
 - 保留 CLI 与 API 的可用性，桌面版只是更友好的宿主，不替代后端契约。
 - 打包必须包含 Windows icon/bundle 资源，并记录 clean checkout 上的构建与 smoke test 结果。
-- 文档或文件夹导入内容若进入后端处理，必须先落入 Proposal Store、Draft Store、StyleSample Store 或 pending CandidateFact；仅用于前端阅读器时可停留在浏览器内存，但不得绕过 ReviewService 直接写 Graph Store。Agent 从导入正文生成的章节/场景结构必须先表现为作者可编辑的 `project_structure_draft`，只有作者接受并显式应用后才可创建 Chapter/Scene 节点。LLM 从导入资料抽出的设定必须先表现为作者可编辑的 `fact_draft` 或 pending CandidateFact，不得自动提交 canon。Agent 对话和局部改写只能写 Proposal Store；即使成功把选中段落替换为完整 `scene_draft` proposal，也必须由作者在协作草稿箱中显式接受/提升后才会进入 Draft Store。
+- Source Store 导入本身只写 Source Document；它不得顺带写 Proposal Store、Draft Store、StyleSample Store、Candidate Store、Graph Store 或 Event Log。后续每个转换动作仍需独立、显式、permission-gated 的后端 API。Agent 从来源正文生成的章节/场景结构必须先表现为作者可编辑的 `project_structure_draft`，只有作者接受并显式应用后才可创建 Chapter/Scene 节点。LLM 从资料抽出的设定必须先表现为作者可编辑的 `fact_draft`，并以真实 Draft Store 来源满足 CandidateFact provenance 后才可提交 pending review，不得自动提交 canon。Agent 对话和局部改写只能写 Proposal Store；即使成功把选中段落替换为完整 `scene_draft` proposal，也必须由作者在协作草稿箱中显式接受/提升后才会进入 Draft Store。
 
 边界控制：
 
@@ -1022,7 +1041,7 @@ Neo4j / SQLite / Vector Store 本地连接
 - 场景生成、Proposal Workspace、Context Pack 检查、连续性报告和待审事实流程与 API/CLI 使用同一 contract。
 - 工作台运行 Agent 工作流时清楚呈现 `build_context`、`write_draft`、`check_continuity`、`extract_state`、`human_review`。
 - 接受、编辑接受、拒绝或延后 CandidateFact 后，workflow review pause 状态与 `workflow_run_v1` / `review_payload_v1` 保持一致。
-- 重启软件后，配置为持久化的 workspace 不丢失图谱、协作草稿、草稿、候选事实、工作流运行记录和风格样本。
+- 重启软件后，配置为持久化的 workspace 不丢失图谱、Source Documents、协作草稿、草稿、候选事实、工作流运行记录和风格样本；归档 Source Document 仍保留详情但不得进入 Agent 输入。
 
 ---
 
@@ -1237,10 +1256,24 @@ POST /projects/{project_id}/scenes/{scene_id}/revise
 POST /projects/{project_id}/scenes/{scene_id}/runs/scene-generation
 POST /projects/{project_id}/scenes/{scene_id}/runs/scene-generation { "output_target": "proposal_workspace" }
 POST /projects/{project_id}/scenes/{scene_id}/extract-document-facts
-POST /projects/{project_id}/scenes/{scene_id}/agent-discussion
+POST /projects/{project_id}/scenes/{scene_id}/agent-discussion { "source_document_ids": [] }
 ```
 
-### 14.5 Proposal Workspace
+`source_document_ids` 默认为空；后端只解析作者本次显式选择、属于同项目、`ready` 且未归档的 Source Document。任一 ID 无效时整次请求失败，不静默忽略或跨项目读取。
+
+### 14.5 Source Library
+
+```http
+POST /projects/{project_id}/sources
+GET  /projects/{project_id}/sources
+GET  /projects/{project_id}/sources/{source_document_id}
+POST /projects/{project_id}/sources/{source_document_id}/archive
+POST /projects/{project_id}/sources/{source_document_id}/structure-draft
+```
+
+`POST /sources` 接受本地客户端已抽取的 text + import metadata JSON，并要求至少 `read_generate` permission；响应为 `document` summary 加明确的 `created` / `updated` 布尔值。幂等键是项目、规范化相对路径与原文件 `checksum_sha256`：相同 ready 记录为 no-op，失败记录可原 ID 重试，路径相同但 checksum 改变时创建新稳定 ID。列表不返回 `extracted_text`，详情可以返回；archive 同样要求至少 `read_generate` 且不删除内容。单文档 `structure-draft` 与 Agent discussion 都要求 `read_generate`；前者从路径中的 Source Document ID 解析一个 ready 来源，后者只解析请求中显式多选的 `source_document_ids`，两者都只产出非 canon proposal。完整字段和错误/兼容语义见 `contracts/source_document_v1.md`。
+
+### 14.6 Proposal Workspace
 
 ```http
 POST /projects/{project_id}/proposals
@@ -1256,7 +1289,7 @@ POST /projects/{project_id}/proposals/{proposal_id}/promote/draft
 POST /projects/{project_id}/proposals/{proposal_id}/promote/candidate-facts
 ```
 
-### 14.6 Checking
+### 14.7 Checking
 
 ```http
 POST /projects/{project_id}/scenes/{scene_id}/check-continuity
@@ -1264,7 +1297,7 @@ POST /projects/{project_id}/scenes/{scene_id}/extract-state
 POST /demo/archive
 ```
 
-### 14.7 Review
+### 14.8 Review
 
 ```http
 GET  /projects/{project_id}/facts/pending

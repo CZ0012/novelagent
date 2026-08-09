@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from apps.api.main import create_app
@@ -292,8 +294,14 @@ def test_api_fact_draft_promotion_uses_real_source_draft(tmp_path):
     assert promoted.status_code == 200
     assert promoted.json()["source_draft"]["id"] == draft["id"]
     assert promoted.json()["candidates"][0]["source_draft_id"] == draft["id"]
+    assert promoted.json()["candidates"][0]["source_span"] == {
+        "start_offset": draft["text"].index(marker),
+        "end_offset": draft["text"].index(marker) + len(marker),
+        "quote": marker,
+    }
     assert promoted.json()["candidates"][0]["evidence"][-1]["kind"] == "proposal_artifact"
     assert promoted.json()["proposal"]["derived_refs"][-1]["kind"] == "candidate_fact"
+    assert promoted.json()["already_promoted"] is False
     assert pending.json()["facts"][0]["id"] == "fact_from_proposal"
     assert client.get(f"/projects/{project_id}/graph/preview").json() == graph_before
 
@@ -304,8 +312,8 @@ def test_api_document_fact_extraction_creates_editable_fact_draft(tmp_path, monk
             return LLMResponse(
                 content=(
                     '{"facts":[{"id":"fact_linjin_status",'
-                    '"fact_type":"CharacterState",'
-                    '"subject":"character_linj",'
+                    '"fact_type":"SceneState",'
+                    '"subject":"scene_opening",'
                     '"relation":"HAS_STATE",'
                     '"object":null,'
                     '"operation":"update_node",'
@@ -345,6 +353,30 @@ def test_api_document_fact_extraction_creates_editable_fact_draft(tmp_path, monk
     assert client.get(f"/projects/{project_id}/facts/pending").json()["facts"] == []
     assert client.get(f"/projects/{project_id}/graph/preview").json() == graph_before
 
+    accepted = client.post(
+        f"/projects/{project_id}/proposals/{payload['proposal']['id']}/accept",
+        json={"reviewer": "author", "expected_version": payload["proposal"]["version"]},
+    ).json()
+    promoted = client.post(
+        f"/projects/{project_id}/proposals/{payload['proposal']['id']}/promote/candidate-facts",
+        json={
+            "source_draft_id": payload["source_draft"]["id"],
+            "expected_version": accepted["version"],
+        },
+    )
+
+    assert promoted.status_code == 200
+    assert promoted.json()["candidates"][0]["source_span"] == {
+        "start_offset": 0,
+        "end_offset": len("林瑾正在寻找遗失信件"),
+        "quote": "林瑾正在寻找遗失信件",
+    }
+    assert [
+        fact["id"]
+        for fact in client.get(f"/projects/{project_id}/facts/pending").json()["facts"]
+    ] == ["fact_linjin_status"]
+    assert client.get(f"/projects/{project_id}/graph/preview").json() == graph_before
+
 
 def test_api_extract_state_can_create_fact_draft_proposal_without_candidate_store(tmp_path):
     client = TestClient(create_app(_json_settings(tmp_path)))
@@ -375,6 +407,278 @@ def test_api_extract_state_can_create_fact_draft_proposal_without_candidate_stor
     assert pending.json()["facts"] == []
     assert proposals.json()["proposals"][0]["id"] == response.json()["proposal"]["id"]
     assert client.get(f"/projects/{project_id}/graph/preview").json() == graph_before
+
+
+def test_api_structured_fact_draft_promotion_deduplicates_and_is_idempotent(tmp_path):
+    client = TestClient(create_app(_json_settings(tmp_path)))
+    project_id = _create_project_with_scene(client)
+    marker = (
+        "[[fact:id=fact_structured_roundtrip;fact_type=SceneState;"
+        "subject=scene_opening;relation=HAS_CLUE;value=true;confidence=0.9]]"
+    )
+    draft = client.post(
+        f"/projects/{project_id}/scenes/scene_opening/draft",
+        json={"text": f"结构化提升来源。{marker}", "summary": "结构化事实来源。"},
+    ).json()
+    extracted = client.post(
+        f"/projects/{project_id}/scenes/scene_opening/extract-state",
+        json={"output_target": "proposal_workspace"},
+    ).json()
+    proposal_id = extracted["proposal"]["id"]
+    body = json.loads(extracted["proposal"]["body"])
+    body["candidate_previews"].append(body["candidate_previews"][0])
+    revised = client.patch(
+        f"/projects/{project_id}/proposals/{proposal_id}",
+        json={
+            "body": json.dumps(body, ensure_ascii=False),
+            "body_format": "structured_json",
+            "expected_version": extracted["proposal"]["version"],
+        },
+    ).json()
+    accepted = client.post(
+        f"/projects/{project_id}/proposals/{proposal_id}/accept",
+        json={"reviewer": "author", "expected_version": revised["version"]},
+    ).json()
+    graph_before = client.get(f"/projects/{project_id}/graph/preview").json()
+
+    first = client.post(
+        f"/projects/{project_id}/proposals/{proposal_id}/promote/candidate-facts",
+        json={"source_draft_id": draft["id"], "expected_version": accepted["version"]},
+    )
+    first_payload = first.json()
+    repeated = client.post(
+        f"/projects/{project_id}/proposals/{proposal_id}/promote/candidate-facts",
+        json={
+            "source_draft_id": draft["id"],
+            "expected_version": first_payload["proposal"]["version"],
+        },
+    )
+    stale = client.post(
+        f"/projects/{project_id}/proposals/{proposal_id}/promote/candidate-facts",
+        json={"source_draft_id": draft["id"], "expected_version": accepted["version"]},
+    )
+    pending = client.get(f"/projects/{project_id}/facts/pending").json()["facts"]
+
+    assert first.status_code == 200
+    assert first_payload["already_promoted"] is False
+    assert [item["id"] for item in first_payload["candidates"]] == [
+        "fact_structured_roundtrip"
+    ]
+    assert repeated.status_code == 200
+    assert repeated.json()["already_promoted"] is True
+    assert repeated.json()["proposal"]["version"] == first_payload["proposal"]["version"]
+    assert [item["id"] for item in repeated.json()["candidates"]] == [
+        "fact_structured_roundtrip"
+    ]
+    assert stale.status_code == 409
+    assert [item["id"] for item in pending] == ["fact_structured_roundtrip"]
+    assert client.get(f"/projects/{project_id}/graph/preview").json() == graph_before
+
+
+def test_api_fact_draft_validation_failure_leaves_no_partial_pending_batch(tmp_path):
+    client = TestClient(create_app(_json_settings(tmp_path)))
+    project_id = _create_project_with_scene(client)
+    markers = [
+        (
+            "[[fact:id=fact_atomic_valid;fact_type=SceneState;subject=scene_opening;"
+            "relation=HAS_CLUE;value=first;confidence=0.9]]"
+        ),
+        (
+            "[[fact:id=fact_atomic_invalid;fact_type=SceneState;subject=scene_opening;"
+            "relation=HAS_CLUE;value=second;confidence=0.9]]"
+        ),
+    ]
+    draft = client.post(
+        f"/projects/{project_id}/scenes/scene_opening/draft",
+        json={"text": "\n".join(markers), "summary": "原子提升来源。"},
+    ).json()
+    extracted = client.post(
+        f"/projects/{project_id}/scenes/scene_opening/extract-state",
+        json={"output_target": "proposal_workspace"},
+    ).json()
+    proposal_id = extracted["proposal"]["id"]
+    body = json.loads(extracted["proposal"]["body"])
+    body["candidate_previews"][1]["source_span"] = {
+        "start_offset": 0,
+        "end_offset": 3,
+        "quote": "不存在",
+    }
+    revised = client.patch(
+        f"/projects/{project_id}/proposals/{proposal_id}",
+        json={
+            "body": json.dumps(body, ensure_ascii=False),
+            "body_format": "structured_json",
+            "expected_version": extracted["proposal"]["version"],
+        },
+    ).json()
+    accepted = client.post(
+        f"/projects/{project_id}/proposals/{proposal_id}/accept",
+        json={"reviewer": "author", "expected_version": revised["version"]},
+    ).json()
+    graph_before = client.get(f"/projects/{project_id}/graph/preview").json()
+
+    promoted = client.post(
+        f"/projects/{project_id}/proposals/{proposal_id}/promote/candidate-facts",
+        json={"source_draft_id": draft["id"], "expected_version": accepted["version"]},
+    )
+
+    assert promoted.status_code == 409
+    assert "source span does not match" in promoted.json()["detail"]["message"]
+    assert client.get(f"/projects/{project_id}/facts/pending").json()["facts"] == []
+    assert client.get(f"/projects/{project_id}/graph/preview").json() == graph_before
+
+
+def test_api_structured_fact_draft_rejects_cross_project_batch_atomically(tmp_path):
+    client = TestClient(create_app(_json_settings(tmp_path)))
+    project_id = _create_project_with_scene(client, title="结构化安全项目")
+    other_project_id = _create_project_with_scene(
+        client,
+        title="结构化其他项目",
+        chapter_id="chapter_structured_other",
+        scene_id="scene_structured_other",
+    )
+    markers = [
+        (
+            "[[fact:id=fact_scope_valid;fact_type=SceneState;subject=scene_opening;"
+            "relation=HAS_CLUE;value=valid;confidence=0.9]]"
+        ),
+        (
+            f"[[fact:id=fact_scope_cross;fact_type=ProjectState;subject={other_project_id};"
+            "relation=HAS_STATE;value=mutated;confidence=0.9]]"
+        ),
+    ]
+    draft = client.post(
+        f"/projects/{project_id}/scenes/scene_opening/draft",
+        json={"text": "\n".join(markers), "summary": "结构化项目隔离来源。"},
+    ).json()
+    extracted = client.post(
+        f"/projects/{project_id}/scenes/scene_opening/extract-state",
+        json={"output_target": "proposal_workspace"},
+    ).json()
+    proposal_id = extracted["proposal"]["id"]
+    accepted = client.post(
+        f"/projects/{project_id}/proposals/{proposal_id}/accept",
+        json={
+            "reviewer": "author",
+            "expected_version": extracted["proposal"]["version"],
+        },
+    ).json()
+    first_graph_before = client.get(f"/projects/{project_id}/graph/preview").json()
+    other_graph_before = client.get(f"/projects/{other_project_id}/graph/preview").json()
+
+    promoted = client.post(
+        f"/projects/{project_id}/proposals/{proposal_id}/promote/candidate-facts",
+        json={"source_draft_id": draft["id"], "expected_version": accepted["version"]},
+    )
+
+    assert promoted.status_code == 409
+    assert client.get(f"/projects/{project_id}/facts/pending").json()["facts"] == []
+    assert client.get(f"/projects/{project_id}/graph/preview").json() == first_graph_before
+    assert client.get(f"/projects/{other_project_id}/graph/preview").json() == other_graph_before
+    stored_proposal = client.get(
+        f"/projects/{project_id}/proposals/{proposal_id}"
+    ).json()
+    assert stored_proposal["derived_refs"] == []
+
+
+def test_api_marker_fact_draft_rejects_cross_project_and_missing_subjects(tmp_path):
+    client = TestClient(create_app(_json_settings(tmp_path)))
+    project_id = _create_project_with_scene(client, title="标记安全项目")
+    other_project_id = _create_project_with_scene(
+        client,
+        title="标记其他项目",
+        chapter_id="chapter_marker_other",
+        scene_id="scene_marker_other",
+    )
+    attempts = [
+        (
+            "proposal_marker_cross",
+            f"[[fact:id=fact_marker_cross;fact_type=ProjectState;subject={other_project_id};"
+            "relation=HAS_STATE;value=mutated;confidence=0.9]]",
+        ),
+        (
+            "proposal_marker_missing",
+            "[[fact:id=fact_marker_missing;fact_type=ItemState;subject=item_missing;"
+            "relation=HAS_STATE;value=missing;confidence=0.9]]",
+        ),
+    ]
+    draft = client.post(
+        f"/projects/{project_id}/scenes/scene_opening/draft",
+        json={
+            "text": "\n".join(marker for _, marker in attempts),
+            "summary": "显式标记项目隔离来源。",
+        },
+    ).json()
+    first_graph_before = client.get(f"/projects/{project_id}/graph/preview").json()
+    other_graph_before = client.get(f"/projects/{other_project_id}/graph/preview").json()
+
+    for proposal_id, marker in attempts:
+        created = client.post(
+            f"/projects/{project_id}/proposals",
+            json={
+                "id": proposal_id,
+                "artifact_type": "fact_draft",
+                "title": proposal_id,
+                "body": marker,
+                "target_refs": [{"kind": "draft", "ref": draft["id"]}],
+            },
+        ).json()
+        accepted = client.post(
+            f"/projects/{project_id}/proposals/{proposal_id}/accept",
+            json={"reviewer": "author", "expected_version": created["version"]},
+        ).json()
+        promoted = client.post(
+            f"/projects/{project_id}/proposals/{proposal_id}/promote/candidate-facts",
+            json={
+                "source_draft_id": draft["id"],
+                "expected_version": accepted["version"],
+            },
+        )
+
+        assert promoted.status_code == 409
+        assert client.get(f"/projects/{project_id}/facts/pending").json()["facts"] == []
+        assert client.get(
+            f"/projects/{project_id}/proposals/{proposal_id}"
+        ).json()["derived_refs"] == []
+
+    assert client.get(f"/projects/{project_id}/graph/preview").json() == first_graph_before
+    assert client.get(f"/projects/{other_project_id}/graph/preview").json() == other_graph_before
+
+
+def test_api_direct_candidate_submission_rejects_cross_project_batch_atomically(tmp_path):
+    client = TestClient(create_app(_json_settings(tmp_path)))
+    project_id = _create_project_with_scene(client, title="直接候选安全项目")
+    other_project_id = _create_project_with_scene(
+        client,
+        title="直接候选其他项目",
+        chapter_id="chapter_direct_other",
+        scene_id="scene_direct_other",
+    )
+    markers = [
+        (
+            "[[fact:id=fact_direct_valid;fact_type=SceneState;subject=scene_opening;"
+            "relation=HAS_CLUE;value=valid;confidence=0.9]]"
+        ),
+        (
+            f"[[fact:id=fact_direct_cross;fact_type=ProjectState;subject={other_project_id};"
+            "relation=HAS_STATE;value=mutated;confidence=0.9]]"
+        ),
+    ]
+    client.post(
+        f"/projects/{project_id}/scenes/scene_opening/draft",
+        json={"text": "\n".join(markers), "summary": "直接候选项目隔离来源。"},
+    )
+    first_graph_before = client.get(f"/projects/{project_id}/graph/preview").json()
+    other_graph_before = client.get(f"/projects/{other_project_id}/graph/preview").json()
+
+    extracted = client.post(
+        f"/projects/{project_id}/scenes/scene_opening/extract-state"
+    )
+
+    assert extracted.status_code == 409
+    assert client.get(f"/projects/{project_id}/facts/pending").json()["facts"] == []
+    assert client.get(f"/projects/{project_id}/graph/preview").json() == first_graph_before
+    assert client.get(f"/projects/{other_project_id}/graph/preview").json() == other_graph_before
 
 
 def test_api_promotion_rejects_wrong_status_type_and_permission(tmp_path):

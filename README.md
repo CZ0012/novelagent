@@ -29,7 +29,7 @@ The implementation follows:
 - Local CLI workspace commands for context building, scene drafting, continuity checks, state extraction, workflow runs, and pending fact review.
 - Workflow run checkpoints and projections with API run listing, run event inspection, review-pause resume, proposal-output runs, persisted stores, and optional LangGraph runtime/checkpointer support.
 - FastAPI routes for the authoring workflow plus persisted agent settings for model provider, API key reference, JSON mode, scene writer mode, and API permission level.
-- Chinese-localized React/Vite author workbench for real API-backed project trees, empty-workspace onboarding, chapter/scene metadata editing, scene drafting, selected-text Agent discussion/revision proposals, Proposal Workspace collaboration, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, pending fact review, local txt/md/docx file or folder import, agent settings, and update checks through the API or desktop shell.
+- Chinese-localized React/Vite author workbench for real API-backed project trees, empty-workspace onboarding, chapter/scene metadata editing, scene drafting, selected-text Agent discussion/revision proposals, Proposal Workspace collaboration, Context Pack inspection, continuity QA, workflow events, graph/timeline preview, pending fact review, a persistent project Source Library for txt/md/markdown/docx imports, agent settings, and update checks through the API or desktop shell.
 - Desktop-target FastAPI entrypoint (`apps.api.desktop_server`) that uses a persistent local workspace and the JSON graph backend.
 - Buildable Tauri desktop package under `apps/desktop`, including npm scripts, a Rust entrypoint, hidden PyInstaller backend sidecar packaging, backend start/stop/status commands, system-tray lifecycle handling, Tauri capabilities, signed-updater configuration, a sci-fi app icon, and NSIS installer configuration.
 - Fantasy demo fixture and regression tests for the canon safety loop.
@@ -128,7 +128,7 @@ npm --prefix apps/desktop run build:installer
 The generated installer is:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe
 ```
 
 Other useful desktop commands:
@@ -148,17 +148,17 @@ Verified local build output from `npm --prefix apps/desktop run build:installer`
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe.sig
 ```
 
 The full installer build regenerates the PyInstaller backend sidecar with `--noconsole`, rebuilds the React/Vite workbench, and runs `tauri build`. The Tauri shell also starts the sidecar with Windows `CREATE_NO_WINDOW`, so the packaged app should not show a stray backend terminal window. Closing the main desktop window hides it to the system tray; use the tray menu item `退出 StoryGraph Agent` to stop the managed backend process tree and exit the app. If port 8000 already has a healthy backend with a different workspace, the desktop settings panel reports the conflict instead of treating that process as the current desktop workspace. The generated installer, `setup.exe.sig` updater signature, backend sidecar, and release executables are local outputs, not checked-in release artifacts.
 
 The in-app settings panel includes a `Version & Updates` section. In the Tauri desktop runtime it uses `tauri-plugin-updater` to check the signed endpoint `https://github.com/CZ0012/novelagent/releases/latest/download/latest.json`, stop the managed backend, install the update, and restart the app. In a plain browser runtime it falls back to a GitHub Release check and, when available, links to the Windows installer asset.
 
-Version updates must keep `VERSION`, `pyproject.toml`, `apps/web/package.json`, `apps/web/src/version.ts`, `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, canon, drafts, imported documents, project settings, and review state are not synchronized to GitHub.
+Version updates must keep `VERSION`, `pyproject.toml`, the FastAPI version in `apps/api/main.py`, both Web/Desktop package manifests and root lockfile entries, `apps/web/src/version.ts`, the desktop package entry in `apps/desktop/src-tauri/Cargo.lock`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, Source Store documents, canon, drafts, project settings, and review state are not synchronized to GitHub.
 
-For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.7_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.8_x64-setup.exe.sig`. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 
@@ -207,23 +207,25 @@ The `add-character`, `add-location`, and `add-relation` commands are a separate 
 
 `add-style-sample` writes to the local style sample store (`style_samples.sqlite`). Retrieved style samples are soft P6 context and never mutate graph canon.
 
-## Document And Folder Import
+## Persistent Source Library
 
-The React/Vite workbench can import local `.txt`, `.md`, `.markdown`, and `.docx` files, including a browser-supported folder selection. Imported documents appear in an expandable local library tree and reader. By default this is still a browser-memory reader: imported content does not write drafts, facts, or canon.
+The React/Vite workbench can import local `.txt`, `.md`, `.markdown`, and `.docx` files, including files selected from a browser-supported folder picker. The local client extracts text and import metadata and submits each file separately to the project-scoped Source Store. Each Source Document receives a stable ID and persists in the workspace, so it reappears after the API or desktop app restarts.
 
-From the reader, the author may explicitly send a ready imported document through backend stores:
+The Source Library is a private reference layer, not a browser-memory tree and not Draft Store or canon:
 
-- Save as the current scene draft in Draft Store.
-- Save as a `proposal_artifact_v1` collaboration draft in Proposal Store.
-- Save as a StyleSample Store style sample for P6 soft style retrieval.
-- Use the configured OpenAI-compatible LLM to read imported source material and create an editable `fact_draft` proposal plus CandidateFact previews. This stores a source Draft for provenance, but it does not write canon.
-- Save as the current scene draft and then run state extraction, which can create pending `CandidateFact` records.
+- Import results remain visible per file, so one failed file does not hide successful imports and can be retried.
+- `GET /projects/{project_id}/sources` returns metadata summaries only; it never returns full `extracted_text`.
+- The workbench requests one project-scoped detail only when the author opens or uses that document.
+- Archiving removes a Source Document from normal library views without destructively deleting it or invalidating stable proposal provenance.
+- Import, list, detail, retry, and archive operations do not create Drafts, CandidateFacts, graph nodes, graph relations, or canon events.
 
-Proposal artifacts are non-canon workspace records. Accepted `scene_draft` proposals can be explicitly promoted to Draft Store; accepted `fact_draft` proposals can submit pending CandidateFacts only from a real Draft Store `source_draft_id`. When promoting a `fact_draft`, the backend reads the explicit fact markers from the author-editable proposal body rather than bypassing it. These paths require the normal backend project/scene and permission checks. They still do not write Graph Store canon directly; extracted candidates remain pending until human review accepts or edit-accepts them with provenance.
+Structure analysis is a separate explicit action. `POST /projects/{project_id}/sources/{source_document_id}/structure-draft` reads one ready Source Document and creates only a non-canon, author-editable `project_structure_draft` Proposal Artifact. It does not create Chapter or Scene nodes until the author accepts the proposal and invokes the existing explicit apply action. New proposal provenance uses stable `source_document` refs; old `imported_document` refs remain legacy opaque records rather than persistent Source Store IDs.
+
+The initial Source Library does not support RTF, PDF, OCR, images, or PSD files. Those formats require later importer work and must not be reported as successful text imports today. Import itself never creates another store record. After loading a ready detail, the author may separately and explicitly save that text as a current-scene Draft, a non-canon Proposal, or a Style Sample. This creates the normal target-store boundary; CandidateFacts still require a real Draft Store source and the existing pending human-review path.
 
 ## Agent Discussion And Selected-Text Revision
 
-The Web and desktop-hosted workbench include an `Agent` tab for discussing the current scene with the configured OpenAI-compatible LLM. The author can highlight a draft span, paste a marked passage, ask for a focused discussion, request a selected-span rewrite, or request a full-scene rewrite. The request can include the current Context Pack, the current draft editor text, snippets from files already imported into the local library tree, and optional web search snippets.
+The Web and desktop-hosted workbench include an `Agent` tab for discussing the current scene with the configured OpenAI-compatible LLM. The author can highlight a draft span, paste a marked passage, ask for a focused discussion, request a selected-span rewrite, or request a full-scene rewrite. Source Library documents are unselected by default. Only stable IDs that the author explicitly checks are sent as `source_document_ids`; the backend resolves those ready documents inside the route project. It never silently sends every library document or cached snippets from a previous request. The current Context Pack, current draft text, and optional web search remain separate explicit controls; disabling current-draft inclusion also prevents the editor text from being sent as `base_text`.
 
 `POST /projects/{project_id}/scenes/{scene_id}/agent-discussion` requires `read_generate` permission and LLM credentials. It creates a non-canon `scene_rebuild` or `scene_draft` proposal in Proposal Store and returns the Agent reply, search snippets, and whether a selected-span replacement was applied to produce a full proposal body. It does not overwrite Draft Store, create CandidateFacts, or write Graph Store canon. Authors still review the proposal in `协作草稿箱`; only an explicit accept/promotion action can turn an accepted `scene_draft` proposal into a Draft Store draft.
 
@@ -234,7 +236,7 @@ python -m apps.cli.main add-style-sample --workspace .storygraph-demo --project 
 python -m apps.cli.main write-scene --workspace .storygraph-demo --project project_fantasy_demo --scene scene_003 --text-file .\drafts\scene_003.txt --summary "Author-provided draft."
 ```
 
-These CLI commands read single UTF-8 text files. They do not import a folder tree, split chapters automatically, parse rich document formats, or promote extracted content to canon. Any importer path that creates drafts, style samples, or pending candidate facts must preserve the same safety rule: imported material must not write canon without human review and provenance.
+These CLI commands read single UTF-8 text files. They do not use the project Source Library, import a folder tree, split chapters automatically, parse rich document formats, or promote extracted content to canon. Persistent multi-document import remains a Web/Tauri + FastAPI workflow. Imported material must never write canon without human review and provenance.
 
 ## API Permission Levels
 

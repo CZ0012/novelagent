@@ -29,7 +29,7 @@ StoryGraph Agent 是一个面向长篇小说创作的本地 MVP。它围绕结�
 - 提供 CLI 本地工作区命令，可构建 Context Pack、写场景草稿、做连续性检查、抽取状态、运行场景工作流和审阅待定事实。
 - 提供工作流运行记录、事件查看、review-pause resume、proposal 输出运行、持久化 store，以及可选 LangGraph runtime/checkpointer。
 - 提供 FastAPI 写作工作流接口，并支持持久化 agent settings：模型供应商、API key 引用、JSON mode、scene writer mode 和 API 权限级别。
-- 提供中文本地化的 React/Vite 作者工作台，可显示真实 API 项目树、空 workspace 引导、章节/场景元数据编辑、场景草稿、选中文本 Agent 讨论/修订提案、协作草稿箱、Context Pack 检查、连续性 QA、工作流事件查看、图/时间线预览、待审事实处理、本地 txt/md/docx 文件或文件夹导入、agent settings 管理和更新检查。
+- 提供中文本地化的 React/Vite 作者工作台，可显示真实 API 项目树、空 workspace 引导、章节/场景元数据编辑、场景草稿、选中文本 Agent 讨论/修订提案、协作草稿箱、Context Pack 检查、连续性 QA、工作流事件查看、图/时间线预览、待审事实处理、项目级持久 Source Store（支持 txt/md/markdown/docx）、agent settings 管理和更新检查。
 - 提供桌面目标 FastAPI 入口 `apps.api.desktop_server`，用于持久化本地 workspace 和 JSON graph backend。
 - `apps/desktop` 下已有可构建的 Tauri 桌面包，包括 npm scripts、Rust 入口、隐藏控制台的 PyInstaller 后端 sidecar、后端启动/停止/状态命令、系统托盘生命周期处理、Tauri capability、签名 updater 配置、科幻应用图标和 NSIS 安装器配置。
 - 提供 fantasy demo fixture 和回归测试，覆盖 canon 安全闭环。
@@ -136,7 +136,7 @@ npm --prefix apps/desktop run build:installer
 生成的安装器路径是：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe
 ```
 
 其他常用桌面命令：
@@ -156,17 +156,17 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe.sig
 ```
 
 完整安装器构建会用 `--noconsole` 重新生成 PyInstaller 后端 sidecar，重新构建 React/Vite 工作台，并运行 `tauri build`。Tauri 壳启动 sidecar 时也会使用 Windows `CREATE_NO_WINDOW`，所以打包版不应再出现额外的空后端终端窗口。关闭桌面主窗口会隐藏到系统托盘；使用托盘菜单里的 `退出 StoryGraph Agent` 才会停止受管后端进程树并退出应用。如果 8000 端口上已有健康后端但工作区不同，桌面设置页会提示冲突，不再把该进程当作当前桌面 workspace。这些安装器、`setup.exe.sig` updater 签名、后端 sidecar 和 release exe 是本地输出，不会提交到仓库，也还不是已发布 release。
 
 工作台设置页包含“版本与更新”。在 Tauri 桌面运行时，它使用 `tauri-plugin-updater` 检查签名 endpoint `https://github.com/CZ0012/novelagent/releases/latest/download/latest.json`，安装时会先停止受管后端，再安装更新并重启应用。在普通浏览器运行时，它会降级为 GitHub Release 检查；如果发现新版，会提供 Windows 安装器下载链接。
 
-版本更新必须保持 `VERSION`、`pyproject.toml`、`apps/web/package.json`、`apps/web/src/version.ts`、`apps/desktop/package.json`、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json` 同步。这里的 GitHub 只作为软件发布/更新通道；本地小说 workspace、canon、草稿、导入文档、项目设置和审阅状态不会自动同步到 GitHub。
+版本更新必须保持 `VERSION`、`pyproject.toml`、`apps/api/main.py` 的 FastAPI 版本、Web/桌面 package manifest 与根 lockfile 条目、`apps/web/src/version.ts`、`apps/desktop/src-tauri/Cargo.lock` 的桌面 package 条目、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json` 同步。这里的 GitHub 只作为软件发布/更新通道；本地小说 workspace、Source Store 资料、canon、草稿、项目设置和审阅状态不会自动同步到 GitHub。
 
-当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.7_x64-setup.exe.sig`。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
+当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.8_x64-setup.exe.sig`。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
 
 仍缺失或未验证：
 
@@ -215,23 +215,25 @@ python -m apps.cli.main review-facts --workspace .storygraph-demo --project proj
 
 `add-style-sample` 会写入本地风格样本库 `style_samples.sqlite`。检索到的风格样本只是 P6 软上下文，永远不会改变 graph canon。
 
-## 文档与文件夹导入
+## 持久资料库（Source Library）
 
-React/Vite 工作台可以导入本地 `.txt`、`.md`、`.markdown` 和 `.docx` 文件，也支持浏览器提供的文件夹选择。导入内容会显示在可展开的本地资料树和阅读器中。默认情况下，这仍然只是浏览器内存阅读器：导入内容不会写入草稿、事实或 canon。
+React/Vite 工作台可以导入本地 `.txt`、`.md`、`.markdown` 和 `.docx` 文件，也支持从浏览器文件夹选择器逐项读取文件。本地客户端抽取文本和导入 metadata，再把每个文件分别提交到当前项目的 Source Store。每份 Source Document 都获得稳定 ID 并持久保存在 workspace 中，因此 API 或桌面应用重启后仍会重新出现。
 
-作者可以从阅读器中显式把 ready 文档送入后端 store：
+Source Library 是私有来源资料层，不再只是浏览器内存树，也不是 Draft Store 或 canon：
 
-- 保存为当前场景的 Draft Store 草稿。
-- 保存为 Proposal Store 中的 `proposal_artifact_v1` 协作草稿。
-- 保存为 StyleSample Store 风格样本，作为 P6 软风格参考。
-- 使用已配置的 OpenAI-compatible LLM 读取导入资料，生成可编辑的 `fact_draft` 协作草稿和 CandidateFact 预览；这一步会保存一个来源 Draft 作为 provenance，但不会写 canon。
-- 先保存为当前场景草稿，再运行状态抽取，生成 pending `CandidateFact`。
+- 每个文件都有独立导入结果；部分失败不会遮住已成功文件，失败项可以重试。
+- `GET /projects/{project_id}/sources` 只返回 metadata summary，绝不返回全文 `extracted_text`。
+- 只有作者打开或使用某份资料时，工作台才按需读取同项目详情。
+- 归档只让 Source Document 退出普通资料列表，不会破坏性删除内容，也不会让已有稳定 proposal provenance 失效。
+- 导入、列表、详情、重试和归档都不会创建 Draft、CandidateFact、图节点、图关系或 canon event。
 
-Proposal artifact 是非 canon 的协作记录。已接受的 `scene_draft` proposal 可以显式提升为 Draft Store 草稿；已接受的 `fact_draft` proposal 只有在提供真实 Draft Store `source_draft_id` 时，才能提交 pending CandidateFact。提交 `fact_draft` 时，后端读取作者可编辑过的显式 fact 标记，而不是绕过 proposal 正文。这些路径仍然需要正常的后端项目/场景与权限检查。它们都不会直接写 Graph Store canon；抽取出的候选事实必须保持 pending，直到人工 review 执行 accept 或 edit-accept，并带上 provenance。
+结构分析是另一个显式动作。`POST /projects/{project_id}/sources/{source_document_id}/structure-draft` 读取一份 ready Source Document，只创建非 canon、可编辑的 `project_structure_draft` Proposal Artifact。只有作者接受 proposal 并调用现有显式 apply 动作后，系统才会创建 Chapter/Scene 节点。新 proposal 来源统一使用稳定的 `source_document` ref；旧 `imported_document` 只保留为不解析的 legacy provenance，不等于持久 Source Store ID。
+
+初版 Source Library 不支持 RTF、PDF、OCR、图片或 PSD；这些格式需要后续 importer 工作，目前不得伪装成成功文本导入。导入本身绝不会顺带创建其他 store 记录。作者打开一份 ready 详情后，可以另行显式把正文保存为当前场景 Draft、非 canon Proposal 或 Style Sample；此时走的是对应 store 的正常边界。CandidateFact 仍然必须引用真实 Draft Store 来源，并经过现有 pending 人工审阅路径。
 
 ## Agent 对话与选中文本修订
 
-Web 工作台和桌面宿主工作台提供 `Agent` 标签页，用于和已配置的 OpenAI-compatible LLM 讨论当前场景。作者可以高亮草稿片段、手动粘贴标注段落、提出局部问题，请求 Agent 讨论、改写选中段落，或改写整场草稿。请求可以带上当前 Context Pack、当前草稿编辑器文本、已经导入到本地资料树的文件片段，以及作者显式打开的联网搜索片段。
+Web 工作台和桌面宿主工作台提供 `Agent` 标签页，用于和已配置的 OpenAI-compatible LLM 讨论当前场景。作者可以高亮草稿片段、手动粘贴标注段落、提出局部问题，请求 Agent 讨论、改写选中段落，或改写整场草稿。Source Library 资料默认全部不选中；只有作者本次明确勾选的稳定 ID 才会作为 `source_document_ids` 发送，后端再在当前项目内解析 ready 文档。系统不会静默发送整个资料库，也不会沿用上一次请求缓存的资料片段。当前 Context Pack、当前草稿文本和可选联网搜索仍是相互独立的显式开关；关闭当前草稿后，也不得再通过 `base_text` 发送编辑器正文。
 
 `POST /projects/{project_id}/scenes/{scene_id}/agent-discussion` 需要 `read_generate` 权限和 LLM 凭据。它只会在 Proposal Store 创建非 canon 的 `scene_rebuild` 或 `scene_draft` 协作提案，并返回 Agent 回复、搜索片段和是否成功把选中段落替换为完整提案正文。它不会覆盖 Draft Store，不会创建 CandidateFact，也不会写 Graph Store canon。作者仍需在 `协作草稿箱` 中审阅；只有显式接受并提升后，已接受的 `scene_draft` proposal 才能成为 Draft Store 草稿。
 
@@ -242,7 +244,7 @@ python -m apps.cli.main add-style-sample --workspace .storygraph-demo --project 
 python -m apps.cli.main write-scene --workspace .storygraph-demo --project project_fantasy_demo --scene scene_003 --text-file .\drafts\scene_003.txt --summary "Author-provided draft."
 ```
 
-这些 CLI 命令只读取单个 UTF-8 文本文件。它们不会导入目录树，不会自动切分章节，不会解析富文档格式，也不会把导入内容提升为 canon。任何创建草稿、风格样本或待审候选事实的导入路径，都必须保留同一条安全规则：导入材料不能在没有人工 review 和 provenance 的情况下写入 canon。
+这些 CLI 命令只读取单个 UTF-8 文本文件，不使用项目 Source Library。它们不会导入目录树，不会自动切分章节，不会解析富文档格式，也不会把导入内容提升为 canon。多文档持久导入仍由 Web/Tauri + FastAPI 工作流负责；任何导入材料都不能在没有人工 review 和 provenance 的情况下写入 canon。
 
 ## API 权限分级
 

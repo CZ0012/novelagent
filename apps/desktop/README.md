@@ -21,7 +21,7 @@ Use the project through one of these surfaces:
 - Tauri desktop app for direct local use after a source build.
 - Signed release channel for future end users after a GitHub Release publishes `latest.json`, installer assets, and updater signatures.
 
-GitHub Release is only the software publishing and update-delivery channel. It is not a sync mechanism for local story workspaces, canon, drafts, imported documents, project settings, or review state.
+GitHub Release is only the software publishing and update-delivery channel. It is not a sync mechanism for local story workspaces, Source Store documents, canon, drafts, project settings, or review state.
 
 ## Runtime Behavior
 
@@ -46,11 +46,13 @@ The desktop commands are intentionally narrow: settings load/save, backend statu
 
 Inside the hosted workbench, the project tree comes from the backend `/projects` response. A fresh persistent desktop workspace should show project creation and explicit demo initialization options; frontend placeholders must not be treated as a real workspace. If the bundled demo has already been initialized, the workbench can archive that built-in demo so the project tree returns to an empty author workspace.
 
-Local document import remains a browser-memory reader by default. From the reader, an author can explicitly save a ready document as a Proposal Store collaboration draft, save it as the current scene Draft Store draft, save it as a StyleSample Store style sample, or save it as a draft and then extract pending `CandidateFact` records. None of those paths directly writes Graph Store canon.
+Local document import uses the same project-scoped FastAPI Source Store in browser and Tauri runtimes. The local client extracts supported `.txt`, `.md`, `.markdown`, and `.docx` content and submits each file separately with its metadata. Every Source Document has a stable ID and persists under the desktop workspace across backend/app restarts. Import results remain visible per file, summary lists omit full `extracted_text`, detail is loaded only on demand, and archive is non-destructive. Import/read/archive changes Source Store only; it does not create Drafts, CandidateFacts, graph nodes, graph relations, or canon events.
+
+RTF, PDF, OCR, images, and PSD are not supported by the initial Source Store. They are later importer work and must be shown as skipped/failed rather than silently treated as successful text imports. A ready Source Document may be analyzed through the source-backed structure route, but that action creates only a non-canon `project_structure_draft`; Chapter/Scene creation still requires explicit author acceptance and apply.
 
 The hosted workbench includes `协作草稿箱`, backed by the same FastAPI Proposal Store routes used in the browser. Proposal artifacts are non-canon project data: accepting one does not write canon, and promotion to Draft Store or pending CandidateFacts still goes through backend permission and review boundaries.
 
-The hosted workbench also includes the `Agent` discussion tab. It can send the current scene, highlighted draft text, imported local-library snippets, and optional web-search snippets to the configured OpenAI-compatible LLM through the same FastAPI backend. The result is saved only as a Proposal Store `scene_rebuild` or `scene_draft` artifact; it does not overwrite Draft Store, create CandidateFacts, or write Graph Store canon.
+The hosted workbench also includes the `Agent` discussion tab. Source Store documents are unselected by default. Only documents the author explicitly selects are sent as stable `source_document_ids`; the backend resolves ready text inside the same project. It must not automatically send the whole library or cached snippets, and disabling current-draft inclusion must also omit editor text from `base_text`. Optional web search remains a separate explicit choice. The result is saved only as a Proposal Store `scene_rebuild` or `scene_draft` artifact; it does not overwrite Draft Store, create CandidateFacts, or write Graph Store canon.
 
 ## Build Commands
 
@@ -110,10 +112,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.7_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.7_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.7_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.8_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.8_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.8_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -126,10 +128,12 @@ The backend sidecar is built with PyInstaller from `apps.api.desktop_server` usi
 The repository version source is `VERSION`. It must stay synchronized with:
 
 - `pyproject.toml`
-- `apps/web/package.json`
+- the FastAPI version in `apps/api/main.py`
+- `apps/web/package.json` and its root `package-lock.json` entry
 - `apps/web/src/version.ts`
-- `apps/desktop/package.json`
+- `apps/desktop/package.json` and its root `package-lock.json` entry
 - `apps/desktop/src-tauri/Cargo.toml`
+- the `storygraph-agent-desktop` entry in `apps/desktop/src-tauri/Cargo.lock`
 - `apps/desktop/src-tauri/tauri.conf.json`
 
 The settings panel includes a Chinese-localized `Version & Updates` card. In the Tauri runtime, it uses `@tauri-apps/plugin-updater` and `tauri-plugin-updater` to check the configured signed endpoint:
@@ -167,7 +171,7 @@ Run the persistent desktop-target backend directly:
 python -m apps.api.desktop_server
 ```
 
-That entrypoint starts `apps.api.desktop:app`, uses a persistent StoryGraph workspace, defaults to the JSON graph backend, and does not seed canon automatically. The workbench should guide authors to create a project, import an existing manuscript, generate a non-canon `project_structure_draft`, and apply it only after author review. Use `POST /demo/seed` only when you want to explicitly initialize the bundled fantasy demo for development/onboarding, and use `POST /demo/archive` or the workbench demo removal action to archive the built-in demo without touching real author-created projects.
+That entrypoint starts `apps.api.desktop:app`, uses a persistent StoryGraph workspace, defaults to the JSON graph backend, and does not seed canon automatically. The workbench should guide authors to create a project, persist an existing manuscript in the project Source Store, explicitly run source-backed structure analysis to create a non-canon `project_structure_draft`, and apply it only after author review. Use `POST /demo/seed` only when you want to explicitly initialize the bundled fantasy demo for development/onboarding, and use `POST /demo/archive` or the workbench demo removal action to archive the built-in demo without touching real author-created projects.
 
 Agent settings persist with the backend workspace. Saving the permission level in the Web or desktop settings panel is treated as explicit local operator authorization, so it can lower or raise the backend `permission_level` immediately. Canon-changing routes still require `full` permission plus reviewer/rationale/source provenance, and generated or imported facts still go through CandidateFact review. Saving an API key only stores the credential reference; LLM drafting also requires selecting the LLM writing mode, saving settings, having `read_generate` or `full` permission, and running with a valid project, scene, and Context Pack.
 
@@ -177,7 +181,8 @@ Agent settings persist with the backend workspace. Saving the permission level i
 - Canon writes must still go through backend human seed APIs or CandidateFact review APIs.
 - Generated drafts, summaries, proposal artifacts, imported text, frontend placeholders, and model hypotheses must not be promoted to canon by the desktop process.
 - Web workbench graph/timeline previews must come from backend APIs and must not be treated as the desktop workspace, Context Pack input, Draft Store source, CandidateFact evidence, or Graph Store state unless the backend returned them.
-- Imported documents may become Proposal Store artifacts, Draft Store drafts, StyleSample Store samples, or pending CandidateFacts only through explicit backend actions; review is still required before any extracted fact becomes canon.
+- Source Store import, retry, detail, list, and archive operations must not create Proposal Store artifacts, Draft Store drafts, StyleSample Store samples, CandidateFacts, graph data, or events. Source-backed structure analysis is the explicit exception that may create only a `project_structure_draft` proposal.
+- Import does not implicitly create Drafts or CandidateFacts. A separate author action may save a loaded ready detail through the normal Draft, Proposal, or Style Sample route; any fact flow still requires a real Draft Store source plus pending CandidateFact review provenance before canon can change.
 - Agent discussion and selected-text rewrite output may become Proposal Store artifacts only; accepting and promoting an accepted proposal is still the explicit backend path before Draft Store changes.
 - The Agent workflow run button follows `build_context`, `write_draft`, `check_continuity`, `extract_state`, and `human_review`; the review pause is not itself a canon commit.
 - The desktop layer may orchestrate processes, settings, health checks, logs, workspace selection, and windows.
