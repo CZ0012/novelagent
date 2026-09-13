@@ -206,3 +206,5 @@ Changed areas: Front owns apps/web; Contract/Creation owns preset backend, API a
 Check status: passed (269 Python, 46 Web, 3 Rust tests; packaged backend and signature verified)
 Review status: passed; final English dependency defect fixed and browser resource isolation verified
 Merge target: main / GitHub software repository after validation. Agents must not switch the shared checkout or commit other owners' work.
+
+SG-023 delivery: software commit `95aa11f` synchronized to main and integration branch; public v0.1.12 release verified by downloading all assets and comparing bytes. Follow-up documentation records publication evidence; all SG-023 work is complete.

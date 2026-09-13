@@ -57,6 +57,8 @@ The existing explicit review boundary remains: proposals and imported material c
 
 The 32,270,593-byte installer carries a verified Tauri updater signature. Its SHA256 is `9bcdecdfc94f69f762617b567391dc7a503a1082582842f9ed8b7b1637bc895b`. This is separate from Windows Authenticode signing; the current executable is not Authenticode-signed. The backend archive and NSIS file list were inspected: no author workspace, runtime credentials, private manuscripts, or acceptance scripts were bundled. Local build outputs are not a published update channel until the corresponding GitHub Release assets and signed `latest.json` are uploaded.
 
+Publication verified: [v0.1.12](https://github.com/CZ0012/novelagent/releases/tag/v0.1.12) is the public latest release, targeting software commit `95aa11f002a603853e76b5256efe8ed421d09276`. All three published assets were downloaded again and matched the verified local files byte for byte. The published metadata version, installer URL, and updater signature match. Source changes were synchronized to `main` and the SG-023 integration branch without uploading private workspaces.
+
 ## 中文交付摘要
 
 本次完成分层导航、中英独立语言资源、Agent System prompt 预设、第三方模型发现和精确原稿续写，并修复工作区持久化、编辑器异步覆盖和结构应用冲突问题。真实测试使用经授权的中文章节，生成并修订了 1,217 字符的续写候选稿，原稿和正典均未自动变更。测试文本与密钥仅留在本地；上述表格列出自动检查和安装包验证结果。
