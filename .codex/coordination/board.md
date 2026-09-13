@@ -436,6 +436,6 @@ Acceptance: everyday writing navigation and discoverable advanced features; inde
 
 | ID | Status | Owner | Branch | Goal | Next action |
 | --- | --- | --- | --- | --- | --- |
-| SG-024 | release | Main Agent | `codex/sg-024-safe-desktop-update` | Prevent shell/backend mixed-version installation and repair the confirmed local installation. | Local installation repaired to0.1.13; 7Python/55Web/8Rust and realNSIS guard checks passed. Publish verified fix. |
+| SG-024 | completed | Main Agent | `codex/sg-024-safe-desktop-update` | Prevent shell/backend mixed-version installation and repair the confirmed local installation. | Local installation repaired to 0.1.13; 7 Python/55 Web/8 Rust and 5 real NSIS checks passed; public release assets downloaded and verified. |
 
 Acceptance: installer preflight runs before replacing software; managed backend shutdown failures stop updates; external backends are not killed indiscriminately; version UI checks the connected backend; source/backend/canon data boundaries stay unchanged.

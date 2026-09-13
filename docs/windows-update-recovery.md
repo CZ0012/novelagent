@@ -48,6 +48,8 @@ The reusable Windows PowerShell 5.1 regression command is `npm --prefix apps/des
 
 The v0.1.13 installer signature was independently verified against the configured public key; a tampered copy was rejected. Installer SHA256: `3b3ad297b9a7e3372312050d2a475edddc6d3cf4552f1869f7d0bd05d5cac960`. The existing installation was repaired with this package: desktop version and Windows installation record both read v0.1.13, the installed backend matched the bundled binary, and every file in the original author workspace retained its previous hash.
 
+Publication verified on 2026-09-13: [v0.1.13](https://github.com/CZ0012/novelagent/releases/tag/v0.1.13) is the latest public release at software commit `78c36f7`. All three downloaded release assets match the verified local files. The installed backend was also started in an isolated workspace and reported v0.1.13 with all built-in presets available; the test process tree was stopped afterward.
+
 ## 中文说明
 
 此前的安装器先覆盖桌面主程序，再覆盖后端。后端仍被占用时，安装可能中断，出现“界面版本已更新、后端还是旧版”的情况。旧版“已是最新版”只核对界面版本，不能代表整个应用更新成功。
