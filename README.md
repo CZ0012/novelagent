@@ -4,6 +4,8 @@ StoryGraph Agent is a local MVP for long-form fiction workflows built around str
 
 Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md).
 
+Windows update repair: v0.1.13 checks backend shutdown and file replacement before installation, and reports the connected backend version separately from the desktop version. If an older update showed a backend write error, save your work, quit through the tray menu, and run the latest installer over the same installation directory. A newer interface alone does not prove the backend was updated. See [update recovery](docs/windows-update-recovery.md).
+
 ## Start writing
 
 Use **Write → Sources → Agent → Proposals** for everyday work. **Tools & review** opens workflow runs, context, continuity checks, facts, and settings when needed; the inspector can be closed to make room for prose.
@@ -166,7 +168,7 @@ npm --prefix apps/desktop run build:installer
 The generated installer is:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.13_x64-setup.exe
 ```
 
 Other useful desktop commands:
@@ -186,10 +188,10 @@ Verified local build output from `npm --prefix apps/desktop run build:installer`
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.12_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.12_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.13_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.13_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.13_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.13_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -199,7 +201,7 @@ The in-app settings panel includes a `Version & Updates` section. In the Tauri d
 
 Version updates must keep `VERSION`, `pyproject.toml`, the FastAPI version in `apps/api/main.py`, both Web/Desktop package manifests and root lockfile entries, `apps/web/src/version.ts`, the desktop package entry in `apps/desktop/src-tauri/Cargo.lock`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, Source Store documents, canon, drafts, project settings, and review state are not synchronized to GitHub.
 
-For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.12_x64-setup.exe.sig`, plus the no-space GitHub Release copies and `latest.json`. The backend sidecar is built with pinned PyInstaller 6.21.0. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.13_x64-setup.exe.sig`, plus the no-space GitHub Release copies and `latest.json`. The backend sidecar is built with pinned PyInstaller 6.21.0. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 

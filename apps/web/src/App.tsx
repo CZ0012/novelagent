@@ -151,6 +151,8 @@ import { canHydrateDraftLoad, draftSaveCompletionPolicy, draftScopesMatch, type 
 import { AgentPresets } from "./AgentPresets";
 import { exportAuthorText } from "./exportText";
 import { DEFAULT_API_BASE, loadBrowserApiBase, normalizeApiBase, saveBrowserApiBase } from "./clientPreferences";
+import { backendVersionCompatibility, backendVersionRequestIsCurrent, readBackendVersion, type BackendVersion } from "./backendVersion";
+import { DesktopUpdateFailure, runSafeDesktopUpdate } from "./safeDesktopUpdate";
 import "./styles.css";
 
 type InspectorTab = "context" | "continuity" | "facts" | "settings";
@@ -259,7 +261,7 @@ type AgentDiscussionForm = {
 };
 
 type UpdateStatus = {
-  state: "idle" | "checking" | "current" | "available" | "installing" | "error";
+  state: "idle" | "checking" | "current" | "available" | "downloading" | "awaiting_edits" | "installing" | "error";
   message: () => string;
   technicalDetails?: string;
   channel?: "desktop" | "github";
@@ -455,6 +457,7 @@ export default function App() {
   const [pendingProposalNavigation, setPendingProposalNavigation] =
     useState<PendingProposalNavigation | null>(null);
   const pendingProposalNavigationRef = useRef<ProposalNavigationAction | null>(null);
+  const pendingNavigationCancelRef = useRef<(() => void) | null>(null);
   const proposalEditorSnapshotRef = useRef<ProposalEditorSnapshot | null>(null);
   const selectedProposalStableRef = useRef<ProposalArtifact | null>(null);
   const [run, setRun] = useState<WorkflowRun | null>(null);
@@ -481,6 +484,11 @@ export default function App() {
   const [draftSelection, setDraftSelection] = useState("");
   const draftTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [desktopUpdate, setDesktopUpdate] = useState<TauriUpdate | null>(null);
+  const updateInProgressRef = useRef(false);
+  const [backendVersionState, setBackendVersionState] = useState<{ apiBase: string; value: BackendVersion }>({ apiBase: "", value: { version: null, source: "unknown" } });
+  const backendVersionSequenceRef = useRef(0);
+  const backendVersion = backendVersionState.apiBase === apiBase ? backendVersionState.value : { version: null, source: "unknown" as const };
+  const versionCompatibility = backendVersionCompatibility(APP_VERSION, backendVersion);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
     state: "idle",
     message: () => uiText.runtime.updateIdle
@@ -1181,7 +1189,28 @@ export default function App() {
     setNotice(uiText.notices.settingsSaved);
   }, [agentForm, apiBase, apiKeyInput, clearApiKey]);
 
+  const refreshBackendVersion = useCallback(async () => {
+    const sequence = ++backendVersionSequenceRef.current;
+    const requestApiBase = apiBase;
+    setBackendVersionState({ apiBase: requestApiBase, value: { version: null, source: "unknown" } });
+    const value = await readBackendVersion(async (path) => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 4000);
+      try {
+        const response = await fetch(`${requestApiBase}${path}`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Version metadata HTTP ${response.status}`);
+        return await response.json();
+      } finally { window.clearTimeout(timeout); }
+    });
+    if (backendVersionRequestIsCurrent(sequence, backendVersionSequenceRef.current, requestApiBase, activeApiBaseRef.current)) {
+      setBackendVersionState({ apiBase: requestApiBase, value });
+    }
+    return value;
+  }, [apiBase]);
+
   const checkForUpdates = useCallback(async (silent = false) => {
+    if (updateInProgressRef.current) return;
+    await refreshBackendVersion();
     setDesktopUpdate(null);
     if (!silent) {
       setUpdateStatus({ state: "checking", message: () => uiText.runtime.updateChecking });
@@ -1269,87 +1298,7 @@ export default function App() {
         technicalDetails: toErrorMessage(exc)
       });
     }
-  }, []);
-
-  const installAvailableUpdate = useCallback(async () => {
-    if (!desktopUpdate) {
-      setUpdateStatus({
-        state: "error",
-        channel: "desktop",
-        message: () => uiText.runtime.noInstallableUpdate
-      });
-      return;
-    }
-
-    setUpdateStatus({
-      state: "installing",
-      channel: "desktop",
-      message: () => uiText.runtime.installingUpdate(desktopUpdate.version),
-      latestVersion: desktopUpdate.version,
-      publishedAt: desktopUpdate.date,
-      canInstall: false
-    });
-
-    let updateInstalled = false;
-    try {
-      await invoke("stop_backend").catch(() => undefined);
-      await desktopUpdate.downloadAndInstall();
-      updateInstalled = true;
-      setUpdateStatus({
-        state: "installing",
-        channel: "desktop",
-        message: () => uiText.runtime.installedRestarting,
-        latestVersion: desktopUpdate.version,
-        publishedAt: desktopUpdate.date
-      });
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      await relaunch();
-    } catch (exc) {
-      const failureMessage = technicalErrorMessage(exc);
-      if (updateInstalled) {
-        setUpdateStatus({
-          state: "error",
-          channel: "desktop",
-          message: () => uiText.runtime.installedManualRestart,
-          technicalDetails: failureMessage,
-          latestVersion: desktopUpdate.version,
-          publishedAt: desktopUpdate.date,
-          canInstall: false
-        });
-        return;
-      }
-
-      let backendRecoveryMessage: string;
-      let backendRecoveryDetails: string | null = null;
-      try {
-        const status = await invoke<DesktopBackendStatus>("start_backend");
-        setDesktopBackend(status);
-        setDesktopBackendChecked(true);
-        backendRecoveryDetails = status.error ?? null;
-        if (status.reachable && status.workspaceCompatible) {
-          backendRecoveryMessage = uiText.runtime.backendRecovered;
-        } else if (status.reachable) {
-          backendRecoveryMessage = uiText.runtime.backendRecoveredIncompatible;
-        } else {
-          backendRecoveryMessage = uiText.runtime.backendRecoveryFailed;
-        }
-      } catch (recoveryExc) {
-        setDesktopBackend(null);
-        setDesktopBackendChecked(true);
-        backendRecoveryMessage = uiText.runtime.backendRecoveryFailed;
-        backendRecoveryDetails = technicalErrorMessage(recoveryExc);
-      }
-      setUpdateStatus({
-        state: "error",
-        channel: "desktop",
-        message: () => `${uiText.runtime.updateInstallFailed} ${backendRecoveryMessage}`,
-        technicalDetails: [failureMessage, backendRecoveryDetails].filter(Boolean).join("\n"),
-        latestVersion: desktopUpdate.version,
-        publishedAt: desktopUpdate.date,
-        canInstall: true
-      });
-    }
-  }, [desktopUpdate]);
+  }, [refreshBackendVersion]);
 
   const createProject = useCallback(async () => {
     if (!projectForm.title.trim()) {
@@ -2099,19 +2048,22 @@ export default function App() {
   ]);
 
   const requestProposalNavigation = useCallback(
-    (label: string, action: () => void) => {
-      if (actionInFlightRef.current) return;
+    (label: string, action: () => void, onCancel?: () => void) => {
+      if (actionInFlightRef.current) { onCancel?.(); return; }
       if (!proposalDirty && !draftDirty) {
         action();
         return;
       }
       pendingProposalNavigationRef.current = action;
+      pendingNavigationCancelRef.current = onCancel ?? null;
       setPendingProposalNavigation({ label, kind: proposalDirty ? "proposal" : "draft" });
     },
     [proposalDirty, draftDirty]
   );
 
   const cancelProposalNavigation = useCallback(() => {
+    pendingNavigationCancelRef.current?.();
+    pendingNavigationCancelRef.current = null;
     pendingProposalNavigationRef.current = null;
     setPendingProposalNavigation(null);
   }, []);
@@ -2123,6 +2075,7 @@ export default function App() {
     }
     const action = pendingProposalNavigationRef.current;
     pendingProposalNavigationRef.current = null;
+    pendingNavigationCancelRef.current = null;
     setPendingProposalNavigation(null);
     action?.();
   }, [pendingProposalNavigation]);
@@ -2158,6 +2111,79 @@ export default function App() {
       () => { action?.(); }
     );
   }, [finishEditorNavigation, pendingProposalNavigation, runAction, saveDraft, saveProposal]);
+
+  const installAvailableUpdate = useCallback(async () => {
+    if (updateInProgressRef.current || actionInFlightRef.current) return;
+    const update = desktopUpdate;
+    if (!update) {
+      setUpdateStatus({ state: "error", channel: "desktop", message: () => uiText.runtime.noInstallableUpdate });
+      return;
+    }
+    updateInProgressRef.current = true;
+    let installed = false;
+    let managedBeforePrepare = false;
+    const unlockAction = () => { actionInFlightRef.current = false; setBusy(null); };
+    try {
+      const result = await runSafeDesktopUpdate({
+        download: async () => {
+          actionInFlightRef.current = true;
+          setBusy("update-download");
+          setUpdateStatus({ state: "downloading", channel: "desktop", message: () => uiText.runtime.updateDownloading(update.version), latestVersion: update.version });
+          try { await update.download(); }
+          finally { unlockAction(); }
+        },
+        confirmSaved: () => {
+          setUpdateStatus({ state: "awaiting_edits", channel: "desktop", message: () => uiText.runtime.updateAwaitingEdits, latestVersion: update.version });
+          return new Promise<boolean>((resolve) => {
+            requestProposalNavigation(uiText.runtime.updateInstallDestination, () => resolve(true), () => resolve(false));
+          });
+        },
+        prepare: async () => {
+          if (actionInFlightRef.current) throw new Error("Another workspace action is still running.");
+          actionInFlightRef.current = true;
+          setBusy("update-install");
+          setUpdateStatus({ state: "installing", channel: "desktop", message: () => uiText.runtime.installingUpdate(update.version), latestVersion: update.version });
+          const status = await invoke<DesktopBackendStatus>("backend_status");
+          managedBeforePrepare = status.managed;
+          await invoke("prepare_backend_update");
+        },
+        install: () => update.install(),
+        cancel: () => invoke<void>("cancel_backend_update"),
+        get restoreManagedBackend() {
+          return managedBeforePrepare ? async () => {
+            const status = await invoke<DesktopBackendStatus>("start_backend");
+            setDesktopBackend(status);
+            setDesktopBackendChecked(true);
+            if (!status.reachable || !status.workspaceCompatible) throw new Error(status.error ?? "Managed backend recovery did not become ready.");
+          } : null;
+        }
+      });
+      if (result === "cancelled") {
+        setUpdateStatus({ state: "available", channel: "desktop", message: () => uiText.runtime.updateDownloaded(update.version), latestVersion: update.version, canInstall: true });
+        return;
+      }
+      installed = true;
+      setUpdateStatus({ state: "installing", channel: "desktop", message: () => uiText.runtime.installedRestarting, latestVersion: update.version });
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
+    } catch (error) {
+      if (installed) {
+        setUpdateStatus({ state: "error", channel: "desktop", message: () => uiText.runtime.installedManualRestart, technicalDetails: technicalErrorMessage(error), latestVersion: update.version, canInstall: false });
+        return;
+      }
+      const failure = error instanceof DesktopUpdateFailure ? error : null;
+      setUpdateStatus({
+        state: "error", channel: "desktop", latestVersion: update.version,
+        message: () => `${uiText.runtime.updateInstallFailed} ${failure?.recovery === "restored" ? uiText.runtime.backendRecovered : failure?.recovery === "restore_failed" ? uiText.runtime.backendRecoveryFailed : failure?.recovery === "cancel_failed" ? uiText.runtime.updateCancelFailed : failure?.recovery === "external_untouched" ? uiText.runtime.updateExternalUntouched : ""}`.trim(),
+        technicalDetails: [technicalErrorMessage(failure?.cause ?? error), failure?.recoveryError ? technicalErrorMessage(failure.recoveryError) : null].filter(Boolean).join("\n"),
+        canInstall: failure?.recovery !== "cancel_failed"
+      });
+      void refreshBackendVersion();
+    } finally {
+      updateInProgressRef.current = false;
+      unlockAction();
+    }
+  }, [desktopUpdate, refreshBackendVersion, requestProposalNavigation]);
 
   const submitProposalReview = useCallback(async () => {
     if (!selectedProposal || !projectId) throw new Error(uiText.errors.selectProposal);
@@ -2630,6 +2656,10 @@ export default function App() {
     checkForUpdates(true).catch(() => undefined);
   }, [checkForUpdates]);
 
+  useEffect(() => {
+    if (desktopBackend?.reachable) void refreshBackendVersion();
+  }, [desktopBackend?.reachable, desktopBackend?.pid, refreshBackendVersion]);
+
   const missingCritical = contextPack?.missing_context.some((gap) => gap.severity === "critical");
   const permission = agentSettings?.permission_level ?? "full";
   const canGenerate = permission === "read_generate" || permission === "full";
@@ -2771,6 +2801,7 @@ export default function App() {
           <StatusDot label={backendStatusLabel} tone={backendStatusTone} />
           <StatusDot label={permissionLabels[agentSettings?.permission_level ?? "full"]} tone={permissionTone(agentSettings?.permission_level)} />
           <StatusDot label={`v${APP_VERSION}`} tone="neutral" />
+          <StatusDot label={`${uiText.navigation.backendVersion}: ${backendVersion.version ?? uiText.common.notSet}`} tone={versionCompatibility === "mismatch" ? "danger" : versionCompatibility === "match" ? "good" : "warning"} />
           <button className="icon-button" title={uiText.tabs.settings} type="button" onClick={() => setActiveTab("settings")}>
             <Settings size={17} />
           </button>
@@ -2935,6 +2966,8 @@ export default function App() {
             <span>{workspaceTab === "workflow" ? uiText.navigation.workflowHelp : uiText.navigation[`${workspaceTab === "write" ? "write" : workspaceTab === "sources" ? "sources" : workspaceTab === "agent" ? "agent" : "proposals"}Help`]}</span>
             {!llmConfigured && <button type="button" onClick={() => setActiveTab("settings")}><KeyRound size={14} /> {uiText.navigation.setupModel}</button>}
           </div>
+
+          {versionCompatibility === "mismatch" && <div className="message error" role="alert"><AlertTriangle size={16} /><span>{uiText.navigation.backendVersionMismatch(APP_VERSION, backendVersion.version!)}</span></div>}
 
           {(error || notice) && (
             <div className={`message ${error ? "error" : "notice"}`}>
@@ -3369,8 +3402,9 @@ export default function App() {
               onBackendStop={() => runAction("desktop-backend", stopDesktopBackend)}
               onRefresh={() => runAction("settings", refreshAgentSettings)}
               onSave={() => runAction("settings", saveAgentSettings)}
-              onInstallUpdate={() => runAction("update-install", installAvailableUpdate)}
+              onInstallUpdate={() => { void installAvailableUpdate(); }}
               onUpdateCheck={() => runAction("update-check", () => checkForUpdates(false))}
+              backendVersion={backendVersion}
               settings={agentSettings}
               onSettingsChange={setAgentSettings}
               updateStatus={updateStatus}
@@ -5728,7 +5762,8 @@ function AgentSettingsInspector({
   onUpdateCheck,
   settings,
   onSettingsChange,
-  updateStatus
+  updateStatus,
+  backendVersion
 }: {
   apiBase: string;
   onApiBaseChange: (value: string) => void;
@@ -5754,6 +5789,7 @@ function AgentSettingsInspector({
   settings: AgentSettings | null;
   onSettingsChange: (settings: AgentSettings) => void;
   updateStatus: UpdateStatus;
+  backendVersion: BackendVersion;
 }) {
   const [connectionInput, setConnectionInput] = useState(apiBase);
   useEffect(() => { setConnectionInput(apiBase); }, [apiBase]);
@@ -5959,6 +5995,10 @@ function AgentSettingsInspector({
       <section className="settings-block">
         <div className="settings-title"><Download size={15} /> {uiText.settings.versionSection}</div>
         <MetricRow label={uiText.settings.currentVersion} value={`v${APP_VERSION}`} />
+        <MetricRow label={uiText.navigation.backendVersion} value={backendVersion.version ?? uiText.navigation.backendVersionUnknown} />
+        {backendVersion.source === "openapi" && <small>{uiText.navigation.backendVersionLegacy}</small>}
+        {backendVersionCompatibility(APP_VERSION, backendVersion) === "mismatch" && <p className="preset-error" role="alert">{uiText.navigation.backendVersionMismatch(APP_VERSION, backendVersion.version!)}</p>}
+        {backendVersionCompatibility(APP_VERSION, backendVersion) === "unknown" && <small>{uiText.navigation.backendVersionUnknownHelp}</small>}
         <div className={`update-card ${updateStatus.state}`}>
           <span>{updateStatus.message()}</span>
           {updateStatus.technicalDetails && (
@@ -5973,7 +6013,7 @@ function AgentSettingsInspector({
           {updateStatus.channel === "desktop" && (
             <small>{uiText.settings.desktopUpdateNote}</small>
           )}
-          {updateStatus.state === "available" && updateStatus.canInstall && (
+          {["available", "error"].includes(updateStatus.state) && updateStatus.canInstall && (
             <button
               className="inline-update-button"
               onClick={onInstallUpdate}
@@ -5995,7 +6035,7 @@ function AgentSettingsInspector({
         <button onClick={onRefresh} type="button" disabled={busy !== null}>
           <RefreshCw size={15} /> {uiText.settings.refreshSettings}
         </button>
-        <button onClick={onUpdateCheck} type="button" disabled={busy !== null}>
+        <button onClick={onUpdateCheck} type="button" disabled={busy !== null || ["downloading", "awaiting_edits", "installing"].includes(updateStatus.state)}>
           <RefreshCw size={15} /> {uiText.settings.checkUpdates}
         </button>
         <button className="primary" onClick={onSave} type="button" disabled={busy !== null}>

@@ -208,3 +208,9 @@ Review status: passed; final English dependency defect fixed and browser resourc
 Merge target: main / GitHub software repository after validation. Agents must not switch the shared checkout or commit other owners' work.
 
 SG-023 delivery: software commit `95aa11f` synchronized to main and integration branch; public v0.1.12 release verified by downloading all assets and comparing bytes. Follow-up documentation records publication evidence; all SG-023 work is complete.
+
+## SG-024 branch strategy
+
+Branch: `codex/sg-024-safe-desktop-update`; base: clean SG-023 delivery commit `8632d81`.
+Root owns Web version diagnostics, API health version, docs, version bump and local installation repair. Creation owns desktop lifecycle/NSIS preflight and native tests. Review independently audits lifecycle and packaging. Shared checkout; no agent switches or commits.
+Check/review: passed native lifecycle, Web ordering/version diagnostics, generated NSIS hook and executable lock/scope fixtures. Merge target: main; signed0.1.13 local installation and workspace-preservation checks passed.

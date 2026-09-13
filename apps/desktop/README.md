@@ -143,10 +143,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.12_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.12_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.13_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.13_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.13_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.13_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -173,7 +173,11 @@ The settings panel includes a zh-CN/en-US localized `Version & Updates` card. In
 https://github.com/CZ0012/novelagent/releases/latest/download/latest.json
 ```
 
-When a signed update is available, the UI can stop the managed backend, download and install the update, and restart the app. In a plain browser runtime, the UI falls back to a GitHub Release check and links to the Windows installer asset when one exists.
+When a signed update is available, the UI downloads it first, protects unsaved author text, and prepares the managed backend for replacement before installing. Shutdown or file-access failure stops installation; the update gate prevents a concurrent backend restart. On Windows the updater launches NSIS and exits, so the installer must enforce its own pre-install checks even when invoked by an older desktop version. In a plain browser runtime, the UI falls back to a GitHub Release check and links to the Windows installer asset when one exists.
+
+v0.1.13 introduces an NSIS pre-install hook that checks the target installation before copying any application files. Backend process cleanup is limited to the exact executable path in that installation, not every process with the same name. An access failure aborts before replacing the main executable. The version card separately reports the connected backend, using `/health.version` and the legacy `/openapi.json` fallback; mismatched or unverified versions must not be presented as a fully current installation. See [Windows update recovery](../../docs/windows-update-recovery.md). This guard prevents the identified predictable file-lock failure; it does not claim atomic installation across power loss or arbitrary disk failures.
+
+After building the installer, run `npm --prefix apps/desktop run test:update-guard` to execute the real NSIS hook in isolated fixtures. It uses Windows PowerShell 5.1, the cached NSIS compiler, generated Tauri utilities and `rustc`, and checks hook ordering, locked and missing backend files, exact process-path scope, and install paths with spaces. Generated test files stay in ignored `.storygraph/update-repair/` directories; the harness does not modify the actual product installation record.
 
 For published updates, the GitHub Release must include the NSIS setup executable, the matching `setup.exe.sig` Tauri updater signature, and a valid `latest.json` matching Tauri's static JSON format. Source-built local outputs, updater artifacts, and a published signed release channel are separate states. Do not document a `nsis.zip` artifact unless the build actually produces one.
 

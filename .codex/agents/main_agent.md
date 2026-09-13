@@ -92,3 +92,7 @@ Unblock condition:
 - Keep Web language catalogs independently loaded and desktop native labels/errors in separate JSON resources; never translate custom prompts or author content during UI locale changes.
 - Preserve full API/project/scene editor scope, unsaved text, in-flight typing, and failed-load locks. An explicit persistent API workspace defaults to JSON graph persistence; only no-settings development/explicit memory uses an in-memory graph.
 - Preflight every project-structure graph target before applying accepted structure; repeat requests may reuse verified complete derived refs, but documentation must not claim cross-store hard-crash recovery.
+
+## SG-024 update consistency
+
+Coordinate Windows installer preflight and managed-backend update gate fixes with both Web and native owners. A desktop version alone is not proof of complete installation; require backend runtime version and real installer-lock acceptance. See docs/windows-update-recovery.md.

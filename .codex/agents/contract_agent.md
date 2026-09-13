@@ -60,3 +60,7 @@ Own module protocols, versioned contracts, API/schema boundaries, and cross-modu
 - Do not describe GitHub Release/update metadata as story workspace synchronization.
 
 SG-023 structure application: preserve the preflight conflict and verified completed-operation retry boundary in `proposal_artifact_v1`; do not describe this as hard-crash atomicity across graph and SQLite. Explicit API workspaces default to persistent JSON, while demo/memory fixtures must request their backend deliberately.
+
+## SG-024 update consistency
+
+The read-only /health.version field is the running FastAPI app version and is diagnostic metadata, not an author setting or canon field. Legacy missing version may be read via OpenAPI info.version; do not silently infer that an unknown backend matches the UI.

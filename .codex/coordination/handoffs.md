@@ -56,3 +56,9 @@ Status: closed; independently checked and integrated. Owner: Contract/Creation A
 Status: closed. Code, acceptance, GitHub source synchronization and v0.1.12 publication complete; remote assets match the locally verified installer/signature/metadata.
 
 The persistent-workspace factory mismatch, stale editor load/save scope, predictable structure-apply partial writes, and English catalog runtime dependency are fixed. Automated checks, production browser validation, private chapter continuation/revision/restart, hidden packaged backend startup, updater signature verification and in-memory tamper rejection passed. Private text stays outside tracked files. Scope and unverified browser download completion are recorded in `docs/acceptance-0.1.12.md`; no hard-crash cross-store transaction or whole-novel benchmark claim is made.
+
+## SG-024 — Partial Windows update repair
+
+Status: implementation and local repair complete; software publication pending Main Agent.
+
+Review reproduced the main-before-backend-before-registry failure path and destructor-cleanup gap in pinned Windows updater. Native prepare/cancel gate, bounded managed process shutdown, exclusive replacement probe and exact-install-path NSIS preflight now guard updates. Web uses download/dirty-guard/prepare/install and reports legacy/current/unknown backend versions separately. Check ran 5 maintained installer checks including real lock failure and unrelated same-name process preservation; 8 Rust and 55 Web tests passed, plus 7 API/version regressions. Main verified Chinese/English browser diagnostics, installed0.1.13 binary/runtime/installation-record consistency, updater signature and untouched author workspace files. Evidence: `docs/windows-update-recovery.md`. No private installation paths or workspace contents enter software release.

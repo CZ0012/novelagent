@@ -431,3 +431,11 @@ Next action:
 | SG-023D | completed | Main Agent | shared SG-023 integration branch | Exercise private chapter continuation, document behavior, package and synchronize software. | Front, Backend, Check, Review | Private chapter checks passed; v0.1.12 software and updater assets synchronized, private workspaces excluded. |
 
 Acceptance: everyday writing navigation and discoverable advanced features; independently loaded zh-CN/en-US with parity; persistent editable/selectable presets including concise Chinese; source-backed continuation remains a non-canon Proposal; no private text or credentials in software assets. Evidence and scope: `docs/acceptance-0.1.12.md`.
+
+## SG-024 — Repair partial Windows updates (2026-09-13)
+
+| ID | Status | Owner | Branch | Goal | Next action |
+| --- | --- | --- | --- | --- | --- |
+| SG-024 | release | Main Agent | `codex/sg-024-safe-desktop-update` | Prevent shell/backend mixed-version installation and repair the confirmed local installation. | Local installation repaired to0.1.13; 7Python/55Web/8Rust and realNSIS guard checks passed. Publish verified fix. |
+
+Acceptance: installer preflight runs before replacing software; managed backend shutdown failures stop updates; external backends are not killed indiscriminately; version UI checks the connected backend; source/backend/canon data boundaries stay unchanged.

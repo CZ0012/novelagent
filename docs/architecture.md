@@ -1089,7 +1089,7 @@ Neo4j / SQLite / Vector Store 本地连接
 - 当前可运行入口是 CLI、FastAPI + React/Vite Web 工作台、面向桌面宿主的持久化后端入口 `python -m apps.api.desktop_server`，以及源码构建的 Tauri 桌面应用。
 - `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。持久化或桌面空 workspace 应先显示项目创建；创建项目后，作者可以导入已有小说/资料，由 Agent 生成非正典 `project_structure_draft`，经作者接受并显式应用后才创建正式 Chapter/Scene 节点。需要默认 demo project 时，仍可调用 `POST /demo/seed`，该路径要求 full 权限并记录 reviewer、rationale 和 source_ref。已初始化的内置 demo 可以通过工作台或 `POST /demo/archive` 归档为非当前 canon 项目，以便回到空项目树。
 - 默认 `apps.api.main:app` 开发入口可用于本地 demo；不传入 settings 时它使用 seeded in-memory stores，不应被描述为完整桌面产品或持久化作者项目入口。
-- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、使用固定的 PyInstaller 6.21.0 生成 backend sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe`、Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe.sig`、用于 GitHub Release 的无空格副本及 `latest.json`。这些产物是本地源码构建输出；只有上传并发布后才构成签名 release channel。当前验证产物不包含 `nsis.zip`。
+- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、使用固定的 PyInstaller 6.21.0 生成 backend sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.13_x64-setup.exe`、Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.13_x64-setup.exe.sig`、用于 GitHub Release 的无空格副本及 `latest.json`。这些产物是本地源码构建输出；只有上传并发布后才构成签名 release channel。当前验证产物不包含 `nsis.zip`。
 - 桌面壳只应复用健康且 `/health.workspace` 与配置工作区一致的本机后端；如果端口被其他工作区的旧后端占用，应在设置页报告冲突，而不是继续加载旧 workspace 的项目树。
 - FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地操作者授权分级，不是身份认证；保存设置页或调用 `/settings/agent` 代表本地操作者显式授权，因此可升降权限并立即生效；CLI 当前不执行同一权限闸门。
 - SG-018 持久资料库路径由 `source_document_v1` 约束：React/Vite 与 Tauri 工作台在本地抽取 `.txt`、`.md`、`.markdown`、`.docx` 文本并把 text + metadata JSON 逐个提交到项目 Source Store；初版后端不保存原文件字节。重启后仍可按稳定 ID 与相对路径读取。导入响应和列表只返回 summary；作者打开同项目详情时才取得 `extracted_text`。v0.1.7 的浏览器内存 `local_sources` / `imported_document` 流程可在迁移期兼容，但不得冒充持久资料，新的 Source Store proposal ref 统一使用 `source_document`。作者可显式让 Agent 从单个来源详情生成 `project_structure_draft`；该草稿只包含章节/场景结构 JSON，且只有作者接受并应用后才创建 Chapter/Scene 节点。Agent 对话只解析本次请求中的 `source_document_ids`、由 `included_draft_id` 精确固定且作用域匹配的已保存 Draft、显式选择的 Context Pack 和作者开启的联网搜索，并只生成 `scene_rebuild` 或 `scene_draft` proposal，不覆盖当前草稿、不创建候选事实、不写 canon。旧客户端省略 additive Draft ID 时可兼容读取 latest，但工作台不得使用该回退。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
@@ -1857,3 +1857,11 @@ StoryGraph Agent 的核心不是“更长上下文”，而是：
 - 结构提案应用在写入前检查所有章节、场景和关系 ID 冲突；同一 API 进程串行应用。已完整验证的 derived graph refs 支持丢失响应后携带原版本号重试，不能重复创建节点。该预检查不宣称跨 SQLite/Neo4j 的硬崩溃事务恢复已经完成。
 
 验收与限制见 `docs/acceptance-0.1.12.md`；本地化扩展见 `docs/localization.md`。源码构建输出、Tauri updater 签名、GitHub 发布资产与 Windows Authenticode 签名继续分开表述。GitHub 只同步软件与更新通道，测试原稿、续写、工作区、密钥均保留本地。
+
+## 24. v0.1.13 Windows 更新一致性
+
+桌面主程序版本与连接的后端版本必须分别验证。`/health` 增加只读 `version`，取自运行的 FastAPI application version；旧后端可以通过 OpenAPI 的 `info.version` 诊断。未知或不一致的后端不能被“桌面已是最新版本”掩盖，该诊断不改变工作区或 Agent 配置。
+
+更新先下载签名安装包，再保护未保存编辑，调用 `prepare_backend_update` 锁住后端启动并等待受管进程退出。退出或文件访问失败必须阻止安装；失败恢复通过 `cancel_backend_update` 解除锁定，并仅恢复本次停止的受管后端。Windows updater 会直接退出进程，不能依赖 Rust Drop 完成更新前清理。
+
+NSIS 安装器必须在覆盖主程序前执行独立 pre-install 检查，兼容旧 updater 调用新安装器。清理后端只允许匹配当前安装目录内的确切可执行路径；任何无法确认可写的状态均在覆盖前中止。该检查修复已知进程占用导致的部分更新，不宣称断电或任意磁盘故障下的原子安装。完整恢复说明见 `docs/windows-update-recovery.md`。安装目录与小说工作区继续保持独立。

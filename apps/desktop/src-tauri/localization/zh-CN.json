@@ -36,6 +36,11 @@
     "write_settings": "无法写入桌面设置：{error}",
     "open_log": "无法打开后端日志文件：{error}",
     "unknown_workspace": "未知工作区",
-    "workspace_mismatch": "检测到 {backend_url} 上已有后端在运行，但它的工作区是“{actual}”，不是当前桌面工作区“{expected_workspace_path}”。请停止占用该端口的旧后端，或在桌面设置中改用其他本机 API 地址。"
+    "workspace_mismatch": "检测到 {backend_url} 上已有后端在运行，但它的工作区是“{actual}”，不是当前桌面工作区“{expected_workspace_path}”。请停止占用该端口的旧后端，或在桌面设置中改用其他本机 API 地址。",
+    "backend_update_locked": "后端程序文件暂时无法替换：{path}。请退出 StoryGraph 后重试安装。{error}",
+    "stop_backend": "无法停止应用管理的后端：{error}",
+    "stop_backend_tree": "未能停止应用管理的后端进程树，更新已取消。",
+    "stop_backend_timeout": "应用管理的后端未能及时退出，更新已取消。",
+    "backend_update_in_progress": "正在安装更新，后端启动已暂停。"
   }
 }

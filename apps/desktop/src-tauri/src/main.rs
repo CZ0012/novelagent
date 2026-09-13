@@ -31,12 +31,15 @@ const MAIN_TRAY_ID: &str = "storygraph-main-tray";
 const TRAY_MENU_SHOW: &str = "show-main-window";
 const TRAY_MENU_QUIT: &str = "quit-storygraph-agent";
 
+mod backend_update;
 mod localization;
+use backend_update::{check_replacement_ready, kill_child_tree};
 use localization::{native_message, NativeLabels, NativeLocale};
 
 struct BackendProcess {
     child: Mutex<Option<Child>>,
     shutting_down: AtomicBool,
+    updating: AtomicBool,
 }
 
 impl Default for BackendProcess {
@@ -44,6 +47,7 @@ impl Default for BackendProcess {
         Self {
             child: Mutex::new(None),
             shutting_down: AtomicBool::new(false),
+            updating: AtomicBool::new(false),
         }
     }
 }
@@ -52,7 +56,7 @@ impl Drop for BackendProcess {
     fn drop(&mut self) {
         if let Ok(mut guard) = self.child.lock() {
             if let Some(mut child) = guard.take() {
-                kill_child_tree(&mut child);
+                let _ = kill_child_tree(&mut child);
             }
         }
     }
@@ -142,9 +146,7 @@ fn backend_status(state: tauri::State<'_, BackendProcess>) -> Result<BackendStat
 
 #[tauri::command]
 fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatus, String> {
-    if state.shutting_down.load(Ordering::SeqCst) {
-        return Err(native_message("shutting_down", &[]));
-    }
+    ensure_backend_start_allowed(&state)?;
 
     let settings = read_settings()?;
     let current = status_for(&settings, &state);
@@ -156,9 +158,7 @@ fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatu
         .child
         .lock()
         .map_err(|_| native_message("process_lock", &[]))?;
-    if state.shutting_down.load(Ordering::SeqCst) {
-        return Err(native_message("shutting_down", &[]));
-    }
+    ensure_backend_start_allowed(&state)?;
     if let Some(child) = guard.as_mut() {
         if child
             .try_wait()
@@ -199,7 +199,7 @@ fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatu
 
     if state.shutting_down.load(Ordering::SeqCst) {
         if let Some(child) = guard.as_mut() {
-            kill_child_tree(child);
+            kill_child_tree(child)?;
         }
         *guard = None;
         drop(guard);
@@ -262,9 +262,55 @@ fn stop_managed_backend(state: &BackendProcess) -> Result<(), String> {
         .child
         .lock()
         .map_err(|_| native_message("process_lock", &[]))?;
-    if let Some(mut child) = guard.take() {
-        kill_child_tree(&mut child);
+    if let Some(child) = guard.as_mut() {
+        kill_child_tree(child)?;
+        *guard = None;
     }
+    Ok(())
+}
+
+fn ensure_backend_start_allowed(state: &BackendProcess) -> Result<(), String> {
+    if state.shutting_down.load(Ordering::SeqCst) {
+        return Err(native_message("shutting_down", &[]));
+    }
+    if state.updating.load(Ordering::SeqCst) {
+        return Err(native_message("backend_update_in_progress", &[]));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn prepare_backend_update(state: tauri::State<'_, BackendProcess>) -> Result<(), String> {
+    prepare_backend_update_with(&state, || {
+        stop_managed_backend(&state)?;
+        if let Some(path) = sidecar_backend_path() {
+            check_replacement_ready(&path)?;
+        }
+        Ok(())
+    })
+}
+
+fn prepare_backend_update_with(
+    state: &BackendProcess,
+    prepare: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if state
+        .updating
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err(native_message("backend_update_in_progress", &[]));
+    }
+    let result = prepare();
+    if result.is_err() {
+        state.updating.store(false, Ordering::SeqCst);
+    }
+    result
+}
+
+#[tauri::command]
+fn cancel_backend_update(state: tauri::State<'_, BackendProcess>) -> Result<(), String> {
+    state.updating.store(false, Ordering::SeqCst);
     Ok(())
 }
 
@@ -325,7 +371,9 @@ fn main() {
             save_desktop_settings,
             set_native_locale,
             start_backend,
-            stop_backend
+            stop_backend,
+            prepare_backend_update,
+            cancel_backend_update
         ])
         .run(tauri::generate_context!())
         .expect(&native_message("run_shell", &[]));
@@ -626,23 +674,6 @@ fn normalize_path_for_compare(path: &str) -> String {
     }
 }
 
-fn kill_child_tree(child: &mut Child) {
-    #[cfg(windows)]
-    {
-        let pid = child.id().to_string();
-        let mut command = Command::new("taskkill");
-        command
-            .args(["/PID", pid.as_str(), "/T", "/F"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        command.creation_flags(CREATE_NO_WINDOW);
-        let _ = command.status();
-    }
-
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
 fn settings_path() -> PathBuf {
     app_data_dir().join("desktop-settings.json")
 }
@@ -692,7 +723,24 @@ fn project_root() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{NativeLocale, TRAY_MENU_QUIT, TRAY_MENU_SHOW};
+    use super::{
+        ensure_backend_start_allowed, prepare_backend_update_with, BackendProcess, NativeLocale,
+        TRAY_MENU_QUIT, TRAY_MENU_SHOW,
+    };
+
+    #[test]
+    fn update_preparation_blocks_start_and_preserves_stop_failure() {
+        let state = BackendProcess::default();
+        let failed = prepare_backend_update_with(&state, || {
+            assert!(ensure_backend_start_allowed(&state).is_err());
+            Err("stop failed".to_string())
+        });
+        assert_eq!(failed, Err("stop failed".to_string()));
+        assert!(ensure_backend_start_allowed(&state).is_ok());
+        prepare_backend_update_with(&state, || Ok(())).unwrap();
+        assert!(ensure_backend_start_allowed(&state).is_err());
+        assert!(prepare_backend_update_with(&state, || panic!("duplicate update ran")).is_err());
+    }
 
     #[test]
     fn native_locale_accepts_only_supported_exact_tags() {

@@ -1,6 +1,6 @@
 {
   "name": "@storygraph/desktop",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "build:web": "npm --prefix ../web run build",
     "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-backend-sidecar.ps1",
     "build:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
+    "test:update-guard": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-update-guard.ps1",
     "build:with-web": "npm run build:installer",
     "build:tauri-only": "tauri build",
     "build": "npm run build:installer",

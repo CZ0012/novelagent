@@ -36,6 +36,11 @@
     "write_settings": "Could not save desktop settings: {error}",
     "open_log": "Could not open the backend log file: {error}",
     "unknown_workspace": "Unknown workspace",
-    "workspace_mismatch": "A backend is already running at {backend_url} with workspace “{actual}”, while this desktop app uses “{expected_workspace_path}”. Stop that backend or choose another local API address in desktop settings."
+    "workspace_mismatch": "A backend is already running at {backend_url} with workspace “{actual}”, while this desktop app uses “{expected_workspace_path}”. Stop that backend or choose another local API address in desktop settings.",
+    "backend_update_locked": "The backend executable cannot be replaced: {path}. Close StoryGraph and retry the installer. {error}",
+    "stop_backend": "Could not stop the managed backend: {error}",
+    "stop_backend_tree": "The managed backend process tree could not be stopped. The update was cancelled.",
+    "stop_backend_timeout": "The managed backend did not exit in time. The update was cancelled.",
+    "backend_update_in_progress": "An update is being installed; backend startup is paused."
   }
 }

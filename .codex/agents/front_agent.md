@@ -65,3 +65,7 @@ Own frontend UI design and interaction flow for the React/Vite workbench and Tau
 - Follow `agent_runtime_v1` for preset create/edit/select/delete and explicit provider model discovery. Localize built-in display labels through separately loaded catalogs, preserve custom prompt content, never auto-switch models, and send a saved exact `included_draft_id` for `continue_scene`; display the resulting appended Proposal for author review.
 - Load locale catalogs through `localeRegistry` lazy imports and await bootstrap/content catalogs before rendering them. Keep the browser backend URL as a local UI preference distinct from provider configuration and desktop backend management. Preserve Draft scope/revision gates across navigation, reads and saves; author-text exports are client-only downloads.
 - Do not persist diff hunks or dirty flags into Proposal/Draft/Source records, and do not offer promotion to a Scene that conflicts with a proposal's unique declared target.
+
+## SG-024 update consistency
+
+Keep connected backend version distinct from desktop version, with /health.version and legacy OpenAPI fallback; unknown/mismatch must not read as fully current. Download before stopping the backend, reuse dirty edit guards, call prepare_backend_update before install, and cancel the gate before restoring only a previously managed backend.

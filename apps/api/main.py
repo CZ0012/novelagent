@@ -499,7 +499,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.12")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.13")
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -746,6 +746,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     def health() -> dict:
         return {
             "status": "ok",
+            "version": app.version,
             "persistent_stores": use_persistent_stores,
             "workspace": str(settings.workspace_dir),
             "graph_backend": configured_graph.backend,

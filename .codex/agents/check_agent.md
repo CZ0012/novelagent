@@ -70,3 +70,7 @@ Maintain code compliance, contract discipline, tests, lint/build health, and saf
 ## SG-023 startup and editor acceptance
 
 Check explicit workspace API restart without graph environment flags, full API/project/scene editor ownership and failed-load recovery, and prewrite validation of every project-structure node/relation conflict. Keep native locale catalog key/placeholder tests and independent Web locale chunk verification in release checks. A verified complete structure retry may carry its original expected version; partial/mismatched structure must fail without new writes.
+
+## SG-024 update consistency
+
+For Windows updater changes, test preparation failure prevents installation, backend restart is gated, exact-install-path cleanup preserves unrelated same-name processes, and locked-file failure leaves the old main binary intact. Run the actual NSIS-hook fixture and check generated production hook order; verify health/OpenAPI version diagnostics and version manifests.

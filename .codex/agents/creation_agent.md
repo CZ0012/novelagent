@@ -72,3 +72,7 @@ Create a handoff entry instead of guessing when:
 - Do not force-push, reset, or discard unrelated user changes.
 
 SG-023 structure application: preserve the preflight conflict and verified completed-operation retry boundary in `proposal_artifact_v1`; do not describe this as hard-crash atomicity across graph and SQLite. Explicit API workspaces default to persistent JSON, while demo/memory fixtures must request their backend deliberately.
+
+## SG-024 update consistency
+
+Windows update replacement must preflight before any application binary write, stop only retained managed processes or an exact target-install executable path, and preserve stop errors. The updater can exit without Drop; do not rely on destructor cleanup. Do not touch author workspaces or indiscriminately stop image names.

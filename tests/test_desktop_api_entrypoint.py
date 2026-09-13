@@ -20,6 +20,18 @@ def test_desktop_settings_uses_local_appdata_workspace_without_seeding_canon(
     assert settings.graph_backend == "json"
 
 
+def test_health_reports_running_backend_version_without_touching_canon(tmp_path):
+    settings = _json_settings(tmp_path)
+    client = TestClient(create_app(settings))
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["version"] == client.get("/openapi.json").json()["info"]["version"]
+    assert response.json()["persistent_stores"] is True
+    assert not settings.graph_path.exists()
+
+
 def test_desktop_json_runtime_seeds_demo_only_by_explicit_full_permission_request(tmp_path):
     settings = _json_settings(tmp_path)
     client = TestClient(create_app(settings))

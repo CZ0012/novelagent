@@ -65,3 +65,7 @@ Review whether the project result meets the user's intended goal, the StoryGraph
 - Do not mark a task done while related handoffs or blockers remain unresolved without an explicit Main Agent decision.
 
 SG-023 structure application: preserve the preflight conflict and verified completed-operation retry boundary in `proposal_artifact_v1`; do not describe this as hard-crash atomicity across graph and SQLite. Explicit API workspaces default to persistent JSON, while demo/memory fixtures must request their backend deliberately.
+
+## SG-024 update consistency
+
+Review partial-update recovery against actual binary/runtime/installation-record versions. Require proof that locked backend aborts before the main binary changes, and that an unrelated same-named backend stays alive. Preserve the distinction between predictable lock preflight and power-loss atomicity.
