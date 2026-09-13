@@ -22,13 +22,19 @@ from typing import Literal
 
 from storygraph.core.agent_config import (
     AgentPermissionLevel,
+    AgentPreset,
+    AgentPresetInput,
+    DEFAULT_AGENT_PRESET_ID,
     AgentRuntimeConfig,
     AgentRuntimeConfigUpdate,
     apply_agent_config,
+    agent_preset_provenance,
+    agent_preset_snapshot,
     config_response,
     has_permission,
     load_agent_config,
     save_agent_config,
+    selected_agent_preset,
     update_agent_config,
 )
 from storygraph.core.config import StoryGraphSettings
@@ -381,7 +387,7 @@ class AgentDiscussionSourceRequest(BaseModel):
 
 class AgentDiscussionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["discuss", "revise_selection", "revise_scene"] = "discuss"
+    mode: Literal["discuss", "revise_selection", "revise_scene", "continue_scene"] = "discuss"
     instruction: str = Field(..., min_length=1)
     selected_text: str | None = None
     base_text: str | None = None
@@ -405,6 +411,10 @@ class AgentDiscussionRequest(BaseModel):
             raise ValueError(
                 "included_draft_id requires include_latest_draft to be enabled"
             )
+        if self.mode == "continue_scene" and (
+            not self.include_latest_draft or self.included_draft_id is None
+        ):
+            raise ValueError("continue_scene requires an explicit included_draft_id")
         return self
 
 
@@ -489,7 +499,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.11")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.12")
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -522,11 +532,12 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     if use_persistent_stores:
         settings.ensure_workspace()
     agent_config = load_agent_config(settings)
+    agent_config_lock = RLock()
     apply_agent_config(settings, agent_config)
     configured_graph = open_configured_graph_store(
         settings,
-        default_backend="memory",
-        seed_demo=True,
+        default_backend="json" if use_persistent_stores else "memory",
+        seed_demo=not use_persistent_stores,
     )
     graph = configured_graph.graph
 
@@ -750,12 +761,96 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
 
     @app.put("/settings/agent")
     def put_agent_settings(request: AgentRuntimeConfigUpdate) -> dict:
+        with agent_config_lock:
+            try:
+                updated = update_agent_config(agent_config, request)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="Selected Agent preset is invalid") from exc
+            return persist_agent_settings(updated)
+
+    @app.get("/settings/agent/models")
+    def get_agent_models() -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        current_model = agent_config.llm_model
+        try:
+            _require_llm_configured(settings)
+            provider = create_llm_provider(settings)
+            provider.timeout_seconds = min(provider.timeout_seconds, 15)
+            models = provider.list_models()
+            return {
+                "models": models,
+                "current_model": current_model,
+                "current_model_available": any(item["id"] == current_model for item in models),
+                "status": "ok",
+                "error": None,
+            }
+        except HTTPException:
+            error_message = "Configure the provider address, API key, and model first."
+        except (RuntimeError, ValueError) as exc:
+            error_message = str(exc)
+        return {
+            "models": [], "current_model": current_model, "current_model_available": None,
+            "status": "unavailable", "error": error_message,
+        }
+
+    def persist_agent_settings(updated: AgentRuntimeConfig) -> dict:
         nonlocal agent_config
-        agent_config = update_agent_config(agent_config, request)
-        apply_agent_config(settings, agent_config)
         if use_persistent_stores:
-            save_agent_config(settings, agent_config)
+            save_agent_config(settings, updated)
+        apply_agent_config(settings, updated)
+        agent_config = updated
         return _agent_settings_payload(agent_config)
+
+    @app.post("/settings/agent/presets")
+    def create_agent_preset(request: AgentPresetInput) -> dict:
+        with agent_config_lock:
+            require_permission(AgentPermissionLevel.READ_GENERATE)
+            if len(agent_config.custom_presets) >= 100:
+                raise HTTPException(status_code=409, detail="Agent preset limit reached (100)")
+            preset = AgentPreset(id=new_id("custom"), **request.model_dump())
+            updated = AgentRuntimeConfig.model_validate({
+                **agent_config.model_dump(),
+                "custom_presets": [*agent_config.custom_presets, preset],
+            })
+            return persist_agent_settings(updated)
+
+    def require_custom_preset(preset_id: str) -> AgentPreset:
+        if any(preset.id == preset_id for preset in config_response(agent_config).agent_presets
+               if preset.builtin):
+            raise HTTPException(status_code=409, detail="Built-in Agent presets cannot be changed")
+        preset = next((p for p in agent_config.custom_presets if p.id == preset_id), None)
+        if preset is None:
+            raise HTTPException(status_code=404, detail="Agent preset not found")
+        return preset
+
+    @app.put("/settings/agent/presets/{preset_id}")
+    def edit_agent_preset(preset_id: str, request: AgentPresetInput) -> dict:
+        with agent_config_lock:
+            require_permission(AgentPermissionLevel.READ_GENERATE)
+            require_custom_preset(preset_id)
+            preset = AgentPreset(id=preset_id, **request.model_dump())
+            updated = AgentRuntimeConfig.model_validate({
+                **agent_config.model_dump(),
+                "custom_presets": [
+                    preset if item.id == preset_id else item for item in agent_config.custom_presets
+                ],
+            })
+            return persist_agent_settings(updated)
+
+    @app.delete("/settings/agent/presets/{preset_id}")
+    def delete_agent_preset(preset_id: str) -> dict:
+        with agent_config_lock:
+            require_permission(AgentPermissionLevel.READ_GENERATE)
+            require_custom_preset(preset_id)
+            updated = AgentRuntimeConfig.model_validate({
+                **agent_config.model_dump(),
+                "custom_presets": [p for p in agent_config.custom_presets if p.id != preset_id],
+                "selected_preset_id": (
+                    DEFAULT_AGENT_PRESET_ID if agent_config.selected_preset_id == preset_id
+                    else agent_config.selected_preset_id
+                ),
+            })
+            return persist_agent_settings(updated)
 
     @app.post("/projects")
     def create_project(request: CreateProjectRequest) -> dict:
@@ -1384,11 +1479,14 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             current_language = resolve_project_output_language(graph, project_id)
             body = request.body
             title = request.title
+            generation_preset = None
             if body is None:
                 _ensure_proposal_artifact_type(existing, "scene_draft")
                 target_scene_id = _proposal_target_scene_id(existing)
                 context_pack = context_builder.build(project_id=project_id, scene_id=target_scene_id)
-                body = create_scene_writer(settings, draft_store).draft(context_pack).text
+                writer = create_scene_writer(settings, draft_store)
+                body = writer.draft(context_pack).text
+                generation_preset = getattr(writer, "agent_preset", None)
                 current_language = context_pack.output_language
                 if existing.content_language != current_language and title is None:
                     title = localized(
@@ -1414,7 +1512,10 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 body_format=request.body_format,
                 target_refs=request.target_refs,
                 source_refs=request.source_refs,
-                note=request.note,
+                note=(
+                    (request.note or "")[:800] + agent_preset_provenance(generation_preset)
+                    if generation_preset else request.note
+                ),
                 expected_version=request.expected_version,
                 status="agent_revised",
             )
@@ -1704,16 +1805,33 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         proposal_id: str,
         request: ProposalApplyProjectStructureRequest,
     ) -> dict:
+        with scene_draft_promotion_lock:
+            return apply_project_structure_proposal_locked(project_id, proposal_id, request)
+
+    def apply_project_structure_proposal_locked(
+        project_id: str,
+        proposal_id: str,
+        request: ProposalApplyProjectStructureRequest,
+    ) -> dict:
         require_permission(AgentPermissionLevel.FULL)
         try:
             proposal = proposal_store.get(proposal_id)
             _ensure_proposal_project(proposal, project_id)
-            _ensure_proposal_promotable(proposal, request.expected_version)
+            _ensure_proposal_accepted(proposal)
             _ensure_proposal_artifact_type(proposal, "project_structure_draft")
             if proposal.body_format != "structured_json":
                 raise HTTPException(status_code=409, detail="项目结构草稿必须使用 structured_json。")
             output_language = _require_proposal_content_language(proposal)
             outline = _project_structure_from_proposal(proposal)
+            already_applied = _validate_project_structure_targets(
+                graph,
+                project_id=project_id,
+                proposal=proposal,
+                outline=outline,
+                output_language=output_language,
+            )
+            if not already_applied:
+                _ensure_proposal_expected_version(proposal, request.expected_version)
             source_ref = request.source_ref or f"proposal:{proposal.id}@v{proposal.version}"
             chapters: list[dict] = []
             scenes: list[dict] = []
@@ -2159,6 +2277,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             service = AgentDiscussionService(
                 provider=create_llm_provider(settings),
                 model=settings.llm_model,
+                agent_preset=selected_agent_preset(agent_config),
             )
             selected_source_documents = resolve_discussion_source_documents(
                 project_id,
@@ -2198,7 +2317,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 provenance=ProposalProvenance(
                     created_by="agent",
                     created_via="llm",
-                    model_ref=settings.llm_model,
+                    model_ref=service.model,
                     note=localized(
                         output_language,
                         zh=(
@@ -2210,7 +2329,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                             "author-selected context; "
                             f"cross_language_policy={request.cross_language_policy}."
                         ),
-                    ),
+                    ) + agent_preset_provenance(service.agent_preset),
                 ),
                 version=1,
                 created_at=now,
@@ -2230,6 +2349,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 ],
                 "truncated_sources": result.truncated_sources,
                 "replacement_applied": result.replacement_applied,
+                "agent_preset": agent_preset_snapshot(service.agent_preset),
                 "output_language": output_language,
                 "cross_language_policy": request.cross_language_policy,
             }
@@ -3076,13 +3196,14 @@ def _existing_project_structure_node(
     expected_type: str,
 ):
     try:
-        node = graph.get_node(node_id)
+        node = graph.get_node(node_id, include_non_canon=True)
     except GraphStoreError as exc:
         if exc.category == "not_found":
             return None
         raise
     if (
-        node.type == expected_type
+        node.status == "CANON"
+        and node.type == expected_type
         and node.properties.get("project_id") == project_id
         and node.properties.get("source_structure_proposal_id") == proposal.id
         and _structure_source_version_matches(
@@ -3094,6 +3215,81 @@ def _existing_project_structure_node(
     raise ContractError(
         f"{expected_type} id already exists outside this project structure proposal: {node_id}"
     )
+
+
+def _validate_project_structure_targets(
+    graph,
+    *,
+    project_id: str,
+    proposal: ProposalArtifact,
+    outline: dict,
+    output_language: str,
+) -> bool:
+    """Reject every predictable target conflict before the first author seed write."""
+    _ensure_project_exists(graph, project_id)
+    expected_nodes: set[str] = set()
+    existing_nodes: set[str] = set()
+    previous_scene_id: str | None = None
+
+    def validate_node(node_id: str, node_type: str):
+        if node_id in expected_nodes:
+            raise ContractError("Project structure contains duplicate target IDs.")
+        expected_nodes.add(node_id)
+        node = _existing_project_structure_node(
+            graph,
+            node_id=node_id,
+            project_id=project_id,
+            proposal=proposal,
+            expected_type=node_type,
+        )
+        if node is not None:
+            existing_nodes.add(node_id)
+        return node
+
+    def validate_relation(source_id: str, relation_type: str, target_id: str) -> None:
+        relation_id = slug_id("rel", f"{source_id}_{relation_type}_{target_id}")
+        try:
+            relation = graph.get_relationship(relation_id, include_non_canon=True)
+        except GraphStoreError as exc:
+            if exc.category != "not_found":
+                raise
+            if target_id in existing_nodes:
+                raise ContractError("Applied project structure is missing an expected relation.")
+            return
+        if (
+            target_id not in existing_nodes
+            or relation.status != "CANON"
+            or relation.type != relation_type
+            or relation.source_id != source_id
+            or relation.target_id != target_id
+            or relation.properties.get("project_id") != project_id
+        ):
+            raise ContractError("Project structure relationship ID belongs to another relation.")
+
+    for chapter_index, chapter in enumerate(outline["chapters"], start=1):
+        title = _structure_text(chapter.get("title")) or localized(
+            output_language, zh=f"第 {chapter_index} 章", en=f"Chapter {chapter_index}"
+        )
+        chapter_id = slug_id("chapter", f"{project_id}_{chapter_index}_{title}")
+        validate_node(chapter_id, "Chapter")
+        validate_relation(project_id, "HAS_CHAPTER", chapter_id)
+        for scene_index, scene in enumerate(chapter.get("scenes", []), start=1):
+            title = _structure_text(scene.get("title")) or localized(
+                output_language, zh=f"场景 {scene_index}", en=f"Scene {scene_index}"
+            )
+            scene_id = slug_id("scene", f"{project_id}_{chapter_index}_{scene_index}_{title}")
+            node = validate_node(scene_id, "Scene")
+            if node is not None and (
+                node.properties.get("chapter_id") != chapter_id
+                or node.properties.get("previous_scene_id") != previous_scene_id
+            ):
+                raise ContractError("Applied project structure Scene references do not match.")
+            validate_relation(chapter_id, "HAS_SCENE", scene_id)
+            if previous_scene_id:
+                validate_relation(previous_scene_id, "NEXT_SCENE", scene_id)
+            previous_scene_id = scene_id
+    recorded_nodes = {ref.ref for ref in proposal.derived_refs if ref.kind == "graph_node"}
+    return expected_nodes == existing_nodes == recorded_nodes
 
 
 def _structure_source_version_matches(source_version, current_version: int) -> bool:

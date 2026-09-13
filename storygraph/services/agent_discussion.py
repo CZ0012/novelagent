@@ -9,6 +9,7 @@ from typing import Any
 from urllib import parse, request
 
 from storygraph.core.errors import ContractError
+from storygraph.core.agent_config import AgentPreset, agent_preset_system_message
 from storygraph.models.context import ContextPack
 from storygraph.models.draft import Draft
 from storygraph.models.proposal import ProposalArtifactType, ProposalBodyFormat, ProposalRef
@@ -116,6 +117,7 @@ class AgentDiscussionService:
         max_source_chars: int = 12000,
         max_local_source_chars: int = 5000,
         temperature: float = 0.2,
+        agent_preset: AgentPreset | None = None,
     ) -> None:
         self.provider = provider
         self.model = model
@@ -124,6 +126,7 @@ class AgentDiscussionService:
         self.max_source_chars = max_source_chars
         self.max_local_source_chars = max_local_source_chars
         self.temperature = temperature
+        self.agent_preset = agent_preset.model_copy(deep=True) if agent_preset else None
 
     def discuss(
         self,
@@ -145,7 +148,7 @@ class AgentDiscussionService:
         instruction = instruction.strip()
         if not instruction:
             raise ContractError("Agent discussion requires an author instruction.")
-        if mode not in {"discuss", "revise_selection", "revise_scene"}:
+        if mode not in {"discuss", "revise_selection", "revise_scene", "continue_scene"}:
             raise ContractError("Unknown agent discussion mode.")
         if context_pack is not None and (
             context_pack.project_id != project_id
@@ -179,8 +182,10 @@ class AgentDiscussionService:
         base_text = base_text if base_text is not None else latest_draft.text if latest_draft else ""
         if mode == "revise_selection" and not selected_text:
             raise ContractError("revise_selection requires selected_text.")
-        if mode in {"revise_selection", "revise_scene"} and not base_text.strip():
+        if mode in {"revise_selection", "revise_scene", "continue_scene"} and not base_text.strip():
             raise ContractError("Revision modes require base_text or a latest scene draft.")
+        if mode == "continue_scene" and latest_draft is None:
+            raise ContractError("Scene continuation requires a validated saved Draft.")
 
         web_results = (
             self.web_search_client.search(web_search_query or instruction)
@@ -201,6 +206,7 @@ class AgentDiscussionService:
             local_sources=local_sources or [],
             web_results=web_results,
         )
+        preset_message = agent_preset_system_message(self.agent_preset)
         response = self.provider.generate(
             LLMRequest(
                 model=self.model,
@@ -208,6 +214,7 @@ class AgentDiscussionService:
                 max_tokens=4096,
                 messages=[
                     LLMMessage(role="system", content=self.prompt_path.read_text(encoding="utf-8")),
+                    *([LLMMessage(role="system", content=preset_message)] if preset_message else []),
                     LLMMessage(
                         role="system",
                         content=authoritative_language_message(output_language),
@@ -257,7 +264,11 @@ class AgentDiscussionService:
         local_sources: list[DiscussionSource],
         web_results: list[WebSearchResult],
     ) -> tuple[dict[str, Any], list[str]]:
-        base_slice, base_truncated = _clip(base_text, self.max_source_chars)
+        if mode == "continue_scene":
+            base_slice = base_text[-self.max_source_chars:]
+            base_truncated = len(base_text) > len(base_slice)
+        else:
+            base_slice, base_truncated = _clip(base_text, self.max_source_chars)
         truncated_sources = ["base_text"] if base_truncated else []
         clipped_sources = []
         for source in local_sources:
@@ -285,6 +296,7 @@ class AgentDiscussionService:
             "selected_text": selected_text,
             "base_text": base_slice,
             "base_text_truncated": base_truncated,
+            "base_text_excerpt": "tail" if mode == "continue_scene" else "head",
             "latest_draft": (
                 {
                     "id": latest_draft.id,
@@ -328,6 +340,7 @@ class AgentDiscussionService:
         )
         proposal_body = _optional_str(parsed.get("proposal_body"))
         replacement_text = _optional_str(parsed.get("replacement_text"))
+        continuation_text = _optional_str(parsed.get("continuation_text"))
         validate_generated_output_language(
             output_language=output_language,
             fields={
@@ -335,6 +348,7 @@ class AgentDiscussionService:
                 "proposal_title": proposal_title,
                 "proposal_body": proposal_body,
                 "replacement_text": replacement_text,
+                "continuation_text": continuation_text,
             },
         )
 
@@ -352,6 +366,19 @@ class AgentDiscussionService:
                 "proposal_body": body,
                 "artifact_type": "scene_rebuild",
                 "body_format": "markdown",
+                "replacement_applied": False,
+            }
+
+        if mode == "continue_scene":
+            if not continuation_text:
+                raise ContractError("continue_scene response requires non-empty continuation_text.")
+            separator = "" if base_text.endswith("\n\n") else "\n" if base_text.endswith("\n") else "\n\n"
+            return {
+                "reply": reply,
+                "proposal_title": proposal_title,
+                "proposal_body": base_text + separator + continuation_text,
+                "artifact_type": "scene_draft",
+                "body_format": "plain_text",
                 "replacement_applied": False,
             }
 

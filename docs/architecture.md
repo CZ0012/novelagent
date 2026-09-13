@@ -1089,7 +1089,7 @@ Neo4j / SQLite / Vector Store 本地连接
 - 当前可运行入口是 CLI、FastAPI + React/Vite Web 工作台、面向桌面宿主的持久化后端入口 `python -m apps.api.desktop_server`，以及源码构建的 Tauri 桌面应用。
 - `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。持久化或桌面空 workspace 应先显示项目创建；创建项目后，作者可以导入已有小说/资料，由 Agent 生成非正典 `project_structure_draft`，经作者接受并显式应用后才创建正式 Chapter/Scene 节点。需要默认 demo project 时，仍可调用 `POST /demo/seed`，该路径要求 full 权限并记录 reviewer、rationale 和 source_ref。已初始化的内置 demo 可以通过工作台或 `POST /demo/archive` 归档为非当前 canon 项目，以便回到空项目树。
 - 默认 `apps.api.main:app` 开发入口可用于本地 demo；不传入 settings 时它使用 seeded in-memory stores，不应被描述为完整桌面产品或持久化作者项目入口。
-- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、使用固定的 PyInstaller 6.21.0 生成 backend sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe`、Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe.sig`、用于 GitHub Release 的无空格副本及 `latest.json`。这些产物是本地源码构建输出；只有上传并发布后才构成签名 release channel。当前验证产物不包含 `nsis.zip`。
+- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、使用固定的 PyInstaller 6.21.0 生成 backend sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe`、Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe.sig`、用于 GitHub Release 的无空格副本及 `latest.json`。这些产物是本地源码构建输出；只有上传并发布后才构成签名 release channel。当前验证产物不包含 `nsis.zip`。
 - 桌面壳只应复用健康且 `/health.workspace` 与配置工作区一致的本机后端；如果端口被其他工作区的旧后端占用，应在设置页报告冲突，而不是继续加载旧 workspace 的项目树。
 - FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地操作者授权分级，不是身份认证；保存设置页或调用 `/settings/agent` 代表本地操作者显式授权，因此可升降权限并立即生效；CLI 当前不执行同一权限闸门。
 - SG-018 持久资料库路径由 `source_document_v1` 约束：React/Vite 与 Tauri 工作台在本地抽取 `.txt`、`.md`、`.markdown`、`.docx` 文本并把 text + metadata JSON 逐个提交到项目 Source Store；初版后端不保存原文件字节。重启后仍可按稳定 ID 与相对路径读取。导入响应和列表只返回 summary；作者打开同项目详情时才取得 `extracted_text`。v0.1.7 的浏览器内存 `local_sources` / `imported_document` 流程可在迁移期兼容，但不得冒充持久资料，新的 Source Store proposal ref 统一使用 `source_document`。作者可显式让 Agent 从单个来源详情生成 `project_structure_draft`；该草稿只包含章节/场景结构 JSON，且只有作者接受并应用后才创建 Chapter/Scene 节点。Agent 对话只解析本次请求中的 `source_document_ids`、由 `included_draft_id` 精确固定且作用域匹配的已保存 Draft、显式选择的 Context Pack 和作者开启的联网搜索，并只生成 `scene_rebuild` 或 `scene_draft` proposal，不覆盖当前草稿、不创建候选事实、不写 canon。旧客户端省略 additive Draft ID 时可兼容读取 latest，但工作台不得使用该回退。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
@@ -1844,3 +1844,16 @@ StoryGraph Agent 的核心不是“更长上下文”，而是：
 - 当前场景应该推动什么变化。
 
 图数据库适合成为这个系统的核心，因为小说世界本质上就是一个动态变化的关系网络。
+
+## 23. v0.1.12 作者工作台与运行配置
+
+- 日常入口为写作、资料、智能体对话、协作草稿；工作流、上下文、质检、事实和设置放入可收起的工具与检查面板。章节/场景维护默认折叠，正文编辑区域占据可用高度；当前草稿和所选提案可导出纯文本。
+- Web 的中英文 catalog 使用动态 import 分别打包，启动前加载完整语言包，失败保留原有完整语言。新增语言由显式注册表与完整性测试约束。桌面原生窗口、托盘和错误消息使用独立 JSON 语言资源，按当前 locale 解析缓存。
+- `agent_runtime_v1` 定义本地配置、预设 CRUD、第三方模型列表和 `continue_scene`。预设是额外 System prompt 偏好，不改变语言、JSON、正典或人工审阅权限。内置中文简练预设要求中文少用状语；自定义预设保存在工作区，CLI/API/桌面共用。运行只保存预设 ID 与内容哈希，不把密钥或完整提示词复制到正文 provenance。
+- `continue_scene` 必须固定已保存的同项目同场景 Draft ID。服务端以完整原稿加新增正文构造独立 scene_draft Proposal；长稿可只发送结尾片段，但不能截断持久原稿。提案编辑、接受和转为草稿保持现有边界，事实进入正典仍需人工审阅。
+- 第三方模型列表只反映配置端点返回的模型标识，不能据此断定真实厂商或底层模型。列表不支持、模型下线和调用超时都有明确失败反馈，不能自动更换模型；外部错误正文和网络原因不得泄露密钥或原稿。
+- 传入 `StoryGraphSettings(workspace)` 的 API 工厂默认使用空的持久 JSON 图谱，避免 SQLite 草稿已持久化但项目图谱仍在内存。显式 memory backend 和无 settings 开发 demo 保持兼容。桌面仍使用同一持久后端；CLI 读取保存的模型与预设配置。
+- 编辑器读取与保存按 API 地址、项目、场景和请求序号隔离；切换危险目标前保护未保存内容，保存响应不能覆盖期间新输入的文字，读取失败时禁止把旧缓存写入新目标。浏览器 API 地址是独立非秘密客户端偏好，桌面宿主保留其原生连接配置。
+- 结构提案应用在写入前检查所有章节、场景和关系 ID 冲突；同一 API 进程串行应用。已完整验证的 derived graph refs 支持丢失响应后携带原版本号重试，不能重复创建节点。该预检查不宣称跨 SQLite/Neo4j 的硬崩溃事务恢复已经完成。
+
+验收与限制见 `docs/acceptance-0.1.12.md`；本地化扩展见 `docs/localization.md`。源码构建输出、Tauri updater 签名、GitHub 发布资产与 Windows Authenticode 签名继续分开表述。GitHub 只同步软件与更新通道，测试原稿、续写、工作区、密钥均保留本地。

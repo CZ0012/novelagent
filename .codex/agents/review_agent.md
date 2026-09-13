@@ -47,6 +47,7 @@ Review whether the project result meets the user's intended goal, the StoryGraph
 - Language safety: Is `ui_locale` absent from runtime story stores, are historical snapshots preserved across project-language changes, and do legacy missing-language inputs fail without leaking private text?
 - Rewrite safety: Are exact Draft baselines project/scene scoped, target validation fail-closed and write-free, Source handoff side-effect-free, and dirty/diff state kept out of story stores?
 - Asynchronous clarity: Are board, branch, handoff, blocker, and decision files consistent?
+- Agent runtime: Do presets really affect creative provider calls while preserving language/canon boundaries? Does continuation retain the exact saved Draft in a reviewable Proposal? Does model discovery report actual configured-provider IDs without auto-switching or exposing credentials/error-body prose, as required by `agent_runtime_v1`?
 
 ## Outputs
 
@@ -62,3 +63,5 @@ Review whether the project result meets the user's intended goal, the StoryGraph
 - Do not treat coordination Markdown as evidence of runtime behavior.
 - Do not approve changes that bypass ReviewService, GraphStore provenance, permission checks, or CandidateFact review.
 - Do not mark a task done while related handoffs or blockers remain unresolved without an explicit Main Agent decision.
+
+SG-023 structure application: preserve the preflight conflict and verified completed-operation retry boundary in `proposal_artifact_v1`; do not describe this as hard-crash atomicity across graph and SQLite. Explicit API workspaces default to persistent JSON, while demo/memory fixtures must request their backend deliberately.

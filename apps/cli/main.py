@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from storygraph.core.config import StoryGraphSettings
+from storygraph.core.agent_config import apply_agent_config, load_agent_config
 from storygraph.core.errors import ContractError
 from storygraph.core.ids import new_id, slug_id
 from storygraph.core.time import utc_now
@@ -74,6 +75,7 @@ class CliRuntime:
 def _runtime(workspace: str | Path | None = None) -> CliRuntime:
     settings = StoryGraphSettings(workspace)
     settings.ensure_workspace()
+    apply_agent_config(settings, load_agent_config(settings))
     configured_graph = open_configured_graph_store(settings)
     draft_store = SQLiteDraftStore(settings.draft_store_path)
     candidate_store = SQLiteCandidateStore(settings.candidate_store_path)

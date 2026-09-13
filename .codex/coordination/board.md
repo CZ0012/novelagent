@@ -419,3 +419,15 @@ Non-goals:
 Verification:
 Next action:
 ```
+
+## SG-023 — Complete author workbench (2026-09-13)
+
+| ID | Status | Owner | Branch | Goal | Required agents | Next action |
+| --- | --- | --- | --- | --- | --- | --- |
+| SG-023 | release | Main Agent | `codex/sg-023-complete-author-workbench` | Deliver an approachable bilingual author application, reusable Agent System prompt presets, and a verified real-manuscript continuation workflow. | Front, Contract/Creation, Check, Review | Checks and signed package complete; publish verified software release. |
+| SG-023A | completed | Front Agent | shared SG-023 integration branch | Simplify navigation, independently load locale catalogs, complete bilingual UX and preset controls. | Backend, Check | 46 tests and production browser checks passed; final review cleared. |
+| SG-023B | completed | Contract/Creation Agent | shared SG-023 integration branch | Persist reusable Agent presets, exact continuation and generic model discovery. | Front, Check | 19 new feature regressions plus full backend suite passed. |
+| SG-023C | completed | Check Agent | shared SG-023 integration branch | Fix concrete lifecycle/safety defects and validate independently. | Main, Review | 269 Python tests, 46 Web tests, 3 Rust tests; updater signature verified, tamper rejected. |
+| SG-023D | release | Main Agent | shared SG-023 integration branch | Exercise private chapter continuation, document behavior, package and synchronize software. | Front, Backend, Check, Review | Private continuation/revision/restart checks and packaged backend smoke passed; publish v0.1.12. |
+
+Acceptance: everyday writing navigation and discoverable advanced features; independently loaded zh-CN/en-US with parity; persistent editable/selectable presets including concise Chinese; source-backed continuation remains a non-canon Proposal; no private text or credentials in software assets. Evidence and scope: `docs/acceptance-0.1.12.md`.

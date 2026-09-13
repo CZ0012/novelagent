@@ -79,6 +79,7 @@ def test_api_scene_generation_can_output_scene_draft_proposal():
 def test_api_workflow_runs_persist_across_app_instances(tmp_path):
     settings = StoryGraphSettings(tmp_path)
     first_client = TestClient(create_app(settings))
+    assert first_client.post("/demo/seed").status_code == 200
     run_response = first_client.post(
         f"/projects/{PROJECT_ID}/scenes/{SCENE_ID}/runs/scene-generation"
     )

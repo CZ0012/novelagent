@@ -50,6 +50,7 @@ Maintain code compliance, contract discipline, tests, lint/build health, and saf
 - Reviewable-rewrite boundaries: exact historical Draft reads are project+scene scoped; proposal baselines and targets are unambiguous; repeated promotion does not duplicate Drafts; diff/dirty state remains transient.
 - Language boundaries: `ui_locale` is local display state only; project output is `zh-CN` or `en-US`; Source uses valid BCP 47 metadata; no implicit translation; provider-call count is zero for rejected language inputs.
 - Version synchronization across `VERSION`, Python, Web, and Tauri files when versioning is touched.
+- Agent runtime boundaries (`agent_runtime_v1`): preset persistence, immutable built-ins, partial-update credential retention, permission checks, actual provider System message use, authoritative language priority, extraction isolation, prompt hash provenance, safe model discovery/errors, and complete original-Draft preservation in `continue_scene` proposals.
 
 ## Outputs
 
@@ -65,3 +66,7 @@ Maintain code compliance, contract discipline, tests, lint/build health, and saf
 - Do not weaken tests to make a build pass.
 - Do not accept fixture or sampleData paths as real project, canon, draft, or review state.
 - Do not claim a desktop artifact is signed, published, or auto-update-ready unless the signed release channel exists and is verified.
+
+## SG-023 startup and editor acceptance
+
+Check explicit workspace API restart without graph environment flags, full API/project/scene editor ownership and failed-load recovery, and prewrite validation of every project-structure node/relation conflict. Keep native locale catalog key/placeholder tests and independent Web locale chunk verification in release checks. A verified complete structure retry may carry its original expected version; partial/mismatched structure must fail without new writes.

@@ -106,3 +106,54 @@ def test_api_json_backend_persists_project_create(monkeypatch, tmp_path):
     project_id = response.json()["project_id"]
     graph = load_json_graph(settings.graph_path)
     assert graph.get_node(project_id).properties["title"] == "Persisted API Project"
+
+
+def test_api_workspace_settings_persist_graph_and_draft_across_restart(monkeypatch, tmp_path):
+    monkeypatch.delenv("STORYGRAPH_GRAPH_BACKEND", raising=False)
+    client = TestClient(create_app(StoryGraphSettings(tmp_path)))
+    assert client.get("/projects").json()["projects"] == []
+    project_id = client.post("/projects", json={"title": "Restart-safe workspace"}).json()[
+        "project_id"
+    ]
+    provenance = {
+        "reviewer": "test_author",
+        "rationale": "Create synthetic restart fixture.",
+        "source_ref": "test:restart",
+    }
+    chapter = client.post(
+        f"/projects/{project_id}/chapters",
+        json={"id": "chapter_restart", "title": "Chapter", **provenance},
+    )
+    assert chapter.status_code == 200
+    scene = client.post(
+        f"/projects/{project_id}/chapters/chapter_restart/scenes",
+        json={"id": "scene_restart", "title": "Scene", **provenance},
+    )
+    assert scene.status_code == 200
+    draft = client.post(
+        f"/projects/{project_id}/scenes/scene_restart/draft",
+        json={"text": "Synthetic saved manuscript."},
+    ).json()
+
+    reopened = TestClient(create_app(StoryGraphSettings(tmp_path)))
+
+    assert [project["id"] for project in reopened.get("/projects").json()["projects"]] == [
+        project_id
+    ]
+    assert reopened.get(f"/projects/{project_id}/outline").json()["chapters"][0]["scenes"][
+        0
+    ]["id"] == "scene_restart"
+    assert reopened.get(f"/projects/{project_id}/scenes/scene_restart/draft").json()[
+        "draft"
+    ] == {**draft, "language_inferred": False}
+
+
+def test_api_workspace_honors_explicit_memory_backend(monkeypatch, tmp_path):
+    monkeypatch.setenv("STORYGRAPH_GRAPH_BACKEND", "memory")
+    settings = StoryGraphSettings(tmp_path)
+    client = TestClient(create_app(settings))
+    assert client.get("/projects").json()["projects"] == []
+    assert client.post("/projects", json={"title": "Explicitly ephemeral"}).status_code == 200
+    assert not settings.graph_path.exists()
+    reopened = TestClient(create_app(StoryGraphSettings(tmp_path)))
+    assert reopened.get("/projects").json()["projects"] == []

@@ -37,3 +37,22 @@ Contract boundary: `proposal_artifact_v1` remains non-canon; promotions must rec
 Verification: API tests prove proposal create/revise/review does not mutate Graph/Draft/Candidate stores, while explicit promotion routes mutate only their intended stores with required permission gates.
 Resolution: Added accepted `scene_draft` proposal promotion to Draft Store, accepted `fact_draft` proposal promotion to pending CandidateFacts from a real source draft, and `scene_generation` `output_target=proposal_workspace`.
 Status: closed
+
+## SG-023B — Presets, exact continuation, and provider discovery
+
+Status: closed; independently checked and integrated. Owner: Contract/Creation Agent.
+
+- Added `agent_runtime_v1` and additive Proposal/workflow provenance clarifications.
+- Settings persist custom System prompt presets with immutable built-ins and partial-update compatibility; named Chinese concise, balanced, and English precise choices affect creative provider calls only.
+- Added `continue_scene`: explicit scoped Draft ID, bounded trailing input excerpt, complete original Draft prefix retained server-side, new reviewable Proposal only.
+- Added configured third-party model discovery without automatic switching; provider errors omit raw response bodies and network reasons.
+- CLI loads the same workspace provider and preset settings. Existing direct local CLI permissions remain distinct from API permission controls.
+- Verification: 35 focused Python tests passed (including 18 new preset/provider/continuation tests); Ruff passed for changed runtime and test files.
+- Root owns README, architecture, desktop docs, live private-source testing, release and GitHub delivery. Front Agent owns localized UI controls and explicit continuation action. Check Agent owns independent full-suite validation.
+- No private manuscript or credentials were copied into tracked files or coordination.
+
+## SG-023 final integration
+
+Status: code and acceptance complete; release publication owned by Main Agent.
+
+The persistent-workspace factory mismatch, stale editor load/save scope, predictable structure-apply partial writes, and English catalog runtime dependency are fixed. Automated checks, production browser validation, private chapter continuation/revision/restart, hidden packaged backend startup, updater signature verification and in-memory tamper rejection passed. Private text stays outside tracked files. Scope and unverified browser download completion are recorded in `docs/acceptance-0.1.12.md`; no hard-crash cross-store transaction or whole-novel benchmark claim is made.

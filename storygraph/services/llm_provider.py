@@ -84,19 +84,7 @@ class OpenAICompatibleProvider:
             },
             method="POST",
         )
-        try:
-            with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
-                response_body = response.read().decode("utf-8")
-        except error.HTTPError as exc:
-            response_body = exc.read().decode("utf-8", errors="replace")
-            detail = response_body[:500].replace("\n", " ")
-            raise RuntimeError(
-                f"LLM provider request failed with HTTP {exc.code}: {detail}"
-            ) from exc
-        except error.URLError as exc:
-            raise RuntimeError(f"LLM provider request failed: {exc.reason}") from exc
-
-        parsed = json.loads(response_body)
+        parsed = self._read_json_response(http_request)
         try:
             content = parsed["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
@@ -105,7 +93,66 @@ class OpenAICompatibleProvider:
             raise RuntimeError("LLM provider content must be a string")
         return LLMResponse(content=content, raw=parsed)
 
+    def list_models(self) -> list[dict[str, str]]:
+        base = self.base_url.removesuffix("/chat/completions")
+        http_request = request.Request(
+            f"{base}/models",
+            headers={"Authorization": f"Bearer {self.api_key}", "Accept": "application/json"},
+            method="GET",
+        )
+        parsed = self._read_json_response(http_request)
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("data"), list):
+            raise RuntimeError("LLM provider [invalid_response]: Model listing is unsupported.")
+        identifiers = {
+            item["id"] for item in parsed["data"]
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+            and 0 < len(item["id"]) <= 200 and not any(ord(c) < 32 for c in item["id"])
+            and self.api_key not in item["id"]
+        }
+        if len(identifiers) > 1000:
+            raise RuntimeError("LLM provider [invalid_response]: Model listing exceeds 1000 entries.")
+        return [{"id": identifier} for identifier in sorted(identifiers)]
+
+    def _read_json_response(self, http_request: request.Request) -> Any:
+        try:
+            with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
+                response_body = response.read().decode("utf-8")
+        except error.HTTPError as exc:
+            # Provider bodies and error reasons may echo credentials or private prose.
+            category, guidance = _http_error_guidance(exc.code)
+            exc.close()
+            raise RuntimeError(
+                f"LLM provider HTTP {exc.code} [{category}]: {guidance}"
+            ) from None
+        except (error.URLError, TimeoutError, OSError):
+            raise RuntimeError(
+                "LLM provider [connection_error]: Check the provider address, network, "
+                "and timeout settings, then retry."
+            ) from None
+        except UnicodeError:
+            raise RuntimeError("LLM provider [invalid_response]: Response is not valid UTF-8.") from None
+
+        try:
+            parsed = json.loads(response_body)
+        except json.JSONDecodeError:
+            raise RuntimeError("LLM provider [invalid_response]: Response is not valid JSON.") from None
+        return parsed
+
     def _chat_completions_url(self) -> str:
         if self.base_url.endswith("/chat/completions"):
             return self.base_url
         return f"{self.base_url}/chat/completions"
+
+
+def _http_error_guidance(status: int) -> tuple[str, str]:
+    if status in {401, 403}:
+        return "invalid_credentials", "Check your provider API key and model access."
+    if status == 429:
+        return "rate_limit", "Check provider quota or wait before retrying."
+    if status == 404:
+        return "endpoint_not_found", "Check the provider base URL and configured model identifier."
+    if status in {400, 413, 422}:
+        return "invalid_request", "Check model support, JSON mode, and the selected context size."
+    if status >= 500:
+        return "provider_unavailable", "The provider is unavailable; retry later."
+    return "request_failed", "Check provider settings and retry."

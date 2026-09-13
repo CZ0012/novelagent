@@ -235,7 +235,7 @@ export type ProjectStructureApplyResult = {
   already_applied: boolean;
 };
 
-export type AgentDiscussionMode = "discuss" | "revise_selection" | "revise_scene";
+export type AgentDiscussionMode = "discuss" | "revise_selection" | "revise_scene" | "continue_scene";
 
 export type AgentDiscussionSource = {
   kind: string;
@@ -459,6 +459,8 @@ export type SceneRunResult = {
 export type AgentPermissionLevel = "read_only" | "read_generate" | "full";
 
 export type AgentSettings = {
+  selected_preset_id: string;
+  agent_presets: AgentPreset[];
   scene_writer: "rule_based" | "llm";
   provider_label: string;
   llm_base_url: string;
@@ -471,6 +473,7 @@ export type AgentSettings = {
 };
 
 export type AgentSettingsUpdate = {
+  selected_preset_id?: string;
   scene_writer: "rule_based" | "llm";
   provider_label: string;
   llm_base_url: string;
@@ -479,6 +482,24 @@ export type AgentSettingsUpdate = {
   clear_api_key?: boolean;
   llm_json_mode: boolean;
   permission_level: AgentPermissionLevel;
+};
+
+export type AgentPreset = {
+  id: string;
+  name: string;
+  description: string;
+  system_prompt: string;
+  builtin: boolean;
+};
+
+export type AgentPresetInput = Pick<AgentPreset, "name" | "description" | "system_prompt">;
+
+export type AgentModels = {
+  models: Array<{ id: string }>;
+  current_model: string;
+  current_model_available: boolean | null;
+  status: "ok" | "unavailable";
+  error: string | null;
 };
 
 export type DemoSeedResult = {
@@ -540,6 +561,10 @@ export async function apiPatch<T>(
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   return parseResponse<T>(response);
+}
+
+export async function apiDelete<T>(baseUrl: string, path: string): Promise<T> {
+  return parseResponse<T>(await fetch(`${baseUrl}${path}`, { method: "DELETE" }));
 }
 
 export class ApiRequestError extends Error {

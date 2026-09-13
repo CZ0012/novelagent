@@ -29,6 +29,7 @@ Own module protocols, versioned contracts, API/schema boundaries, and cross-modu
 - Own Proposal-to-Draft review boundaries: exact project/scene-scoped historical Draft reads, `included_draft_id` pinning from manifest through provider input and Proposal ref, unique recorded Draft baselines, target-safe/idempotent `scene_draft` promotion, legacy latest-Draft compatibility, and the rule that diff/dirty presentation state does not change `proposal_artifact_v1`.
 - Keep Source-to-Agent handoff selection-only: stable Source Document ID plus navigation, with no text copy, store mutation, provider call, or automatic cross-language-policy change.
 - Record durable contract decisions in `.codex/coordination/decisions.md`.
+- Own `agent_runtime_v1`: keep workspace preset CRUD and partial-settings compatibility explicit, preserve generic provider/model discovery, restrict creative System prompts below canon/language/schema requirements, retain non-secret ID/hash provenance, and require exact pinned-Draft server append for `continue_scene`.
 
 ## Change Protocol
 
@@ -57,3 +58,5 @@ Own module protocols, versioned contracts, API/schema boundaries, and cross-modu
 - Do not let a client substitute current/latest Draft for a missing or ambiguous recorded proposal baseline, or let promotion ignore declared Scene targets or invalid existing derived Draft refs.
 - Do not weaken canon safety to simplify API flow.
 - Do not describe GitHub Release/update metadata as story workspace synchronization.
+
+SG-023 structure application: preserve the preflight conflict and verified completed-operation retry boundary in `proposal_artifact_v1`; do not describe this as hard-crash atomicity across graph and SQLite. Explicit API workspaces default to persistent JSON, while demo/memory fixtures must request their backend deliberately.

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 
 from storygraph.core.errors import ContractError
+from storygraph.core.agent_config import AgentPreset, agent_preset_system_message
 from storygraph.models.context import ContextPack
 from storygraph.models.draft import Draft
 from storygraph.models.project import localized
@@ -113,12 +114,14 @@ class LLMSceneWriter:
         draft_store: SQLiteDraftStore | None = None,
         temperature: float = 0.2,
         prompt_path: Path | None = None,
+        agent_preset: AgentPreset | None = None,
     ) -> None:
         self.provider = provider
         self.model = model
         self.draft_store = draft_store
         self.temperature = temperature
         self.prompt_path = prompt_path or Path(__file__).parents[1] / "prompts" / "scene_writer.md"
+        self.agent_preset = agent_preset.model_copy(deep=True) if agent_preset else None
 
     def draft(self, context_pack: ContextPack) -> DraftResult:
         _validate_context_pack_for_drafting(context_pack)
@@ -155,8 +158,10 @@ class LLMSceneWriter:
             "output_language": context_pack.output_language,
             "context_pack": context_pack.model_dump(),
         }
+        preset_message = agent_preset_system_message(self.agent_preset)
         return [
             LLMMessage(role="system", content=prompt_contract),
+            *([LLMMessage(role="system", content=preset_message)] if preset_message else []),
             LLMMessage(
                 role="system",
                 content=authoritative_language_message(context_pack.output_language),

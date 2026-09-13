@@ -37,6 +37,7 @@ Escalation triggers:
 - Prefer real API-backed behavior over demo-only shortcuts when the task is part of demo cleanup.
 - Add or update focused tests when behavior changes.
 - Summarize commands run and verification results for Check Agent.
+- Follow `agent_runtime_v1` for reusable System prompt presets and provider discovery: persist settings before applying them, preserve omitted credentials/settings, freeze creative prompt selection, keep extraction untouched, and sanitize arbitrary provider failures. `continue_scene` must append validated new prose to the complete exact pinned Draft in a Proposal only.
 
 ## Escalation Triggers
 
@@ -69,3 +70,5 @@ Create a handoff entry instead of guessing when:
 - Do not substitute current/latest Draft for missing or ambiguous Proposal provenance, or create a replacement when an existing derived Draft ref is missing, ambiguous, or out of scope.
 - Do not remove demos or fixtures without confirming whether tests, docs, or onboarding still need an explicit sample initialization path.
 - Do not force-push, reset, or discard unrelated user changes.
+
+SG-023 structure application: preserve the preflight conflict and verified completed-operation retry boundary in `proposal_artifact_v1`; do not describe this as hard-crash atomicity across graph and SQLite. Explicit API workspaces default to persistent JSON, while demo/memory fixtures must request their backend deliberately.

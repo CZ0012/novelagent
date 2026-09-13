@@ -2,6 +2,12 @@
 
 This directory contains the Tauri v2 desktop package for the StoryGraph Workbench.
 
+The desktop hosts the same bilingual author workflow and preset APIs as the browser. It does not add a separate canon-writing path. Web catalogs load as separate chunks; native labels and errors use separate JSON catalogs embedded for offline builds. The browser's saved local API address preference is distinct from the desktop host's native workspace/backend settings.
+
+v0.1.12 将日常操作集中到写作、资料、智能体对话、协作草稿，把工作流和检查收进可关闭的次级面板。中英文 Web 语言包按需加载；原生窗口、托盘和错误提示分别来自 `src-tauri/localization/zh-CN.json`、`en-US.json`。新增语言步骤见 [本地化说明](../../docs/localization.md)。
+
+设置页和 Agent 面板支持持久化 System prompt 预设；中文简练预设包含“中文写作时少用状语”。模型列表来自用户保存的第三方兼容服务，不代表底层模型来源验证。保存草稿后可发起续写，新增段落先进入独立协作提案，原稿与正典保持不变。CLI 也读取同一工作区的模型与预设配置。
+
 ## Current Status
 
 The desktop shell is a buildable source-level Tauri project. It includes npm scripts, a Rust crate, Tauri capabilities, a sci-fi Windows icon, hidden backend sidecar packaging, backend process commands, system-tray lifecycle handling, Tauri signed-updater configuration, and NSIS bundle configuration.
@@ -137,10 +143,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.11_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.11_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.12_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.12_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 

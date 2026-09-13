@@ -26,6 +26,7 @@ Return only a JSON object with these fields:
 - `proposal_title`: short title in the authoritative output language.
 - `proposal_body`: required for `revise_scene`; optional for `discuss`.
 - `replacement_text`: required for `revise_selection`; optional otherwise.
+- `continuation_text`: required for `continue_scene`; only the new prose to append.
 - `self_check`: array of short strings confirming canon safety and scope.
 
 Mode behavior:
@@ -35,6 +36,12 @@ Mode behavior:
 - `revise_selection`: rewrite only the selected text in `replacement_text`.
   Preserve the selected span's narrative function, POV, tense, and constraints.
 - `revise_scene`: return a full revised scene draft in `proposal_body`.
+- `continue_scene`: continue directly after the saved Draft's final passage.
+  Return only new prose in `continuation_text`. Do not repeat, summarize, replace,
+  or reformat the existing Draft. When `base_text_truncated` is true, `base_text`
+  contains the ending excerpt; use the saved Draft summary and Context Pack for
+  earlier context. The server preserves the complete exact Draft and appends
+  the continuation as a reviewable proposal.
 
 The Proposal Store will save your output as non-canon collaboration data. The
 author must explicitly accept or promote it before it affects drafts or review

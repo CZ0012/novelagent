@@ -21,6 +21,7 @@ from storygraph.models.continuity import ContinuityReport
 from storygraph.models.draft import Draft
 from storygraph.models.project import OutputLanguage, localized
 from storygraph.models.proposal import ProposalArtifact, ProposalProvenance, ProposalRef
+from storygraph.core.agent_config import agent_preset_provenance, agent_preset_snapshot
 from storygraph.models.workflow import ReviewPayload, WorkflowRun, WorkflowStep
 from storygraph.services.context_pack_builder import ContextPackBuilder
 from storygraph.services.continuity_checker import RuleBasedContinuityChecker
@@ -281,7 +282,7 @@ class LocalSceneGenerationRuntime:
                     context_pack.output_language,
                     zh="场景生成结果已写入提案工作区，而非草稿库。",
                     en="Scene generation wrote to Proposal Workspace instead of Draft Store.",
-                ),
+                ) + agent_preset_provenance(getattr(self.writer, "agent_preset", None)),
             ),
             version=1,
             created_at=now,
@@ -296,6 +297,14 @@ class LocalSceneGenerationRuntime:
         *,
         artifact_refs: dict | None = None,
     ) -> WorkflowRun:
+        if name == "write_draft":
+            snapshot = agent_preset_snapshot(getattr(self.writer, "agent_preset", None))
+            if snapshot:
+                artifact_refs = {
+                    **(artifact_refs or {}),
+                    "agent_preset_id": snapshot["id"],
+                    "agent_preset_sha256": snapshot["sha256"],
+                }
         now = utc_now()
         steps = []
         next_pending_seen = False

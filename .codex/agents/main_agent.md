@@ -85,3 +85,10 @@ Unblock condition:
 - Do not silently change a contract without assigning Contract Agent and updating affected instructions.
 - Do not claim demo removal or real API wiring is complete until Review Agent and Check Agent have verified the changed surfaces.
 - Do not present GitHub Release/update behavior as synchronization for local novel workspaces, canon, drafts, imported documents, settings, or review state.
+
+## SG-023 completion responsibilities
+
+- Follow `contracts/agent_runtime_v1.md` for provider-neutral preset CRUD, model discovery, immutable applied-prompt identifiers and exact saved-Draft continuation; coordinate schema changes with all entrypoints, including CLI runtime config loading.
+- Keep Web language catalogs independently loaded and desktop native labels/errors in separate JSON resources; never translate custom prompts or author content during UI locale changes.
+- Preserve full API/project/scene editor scope, unsaved text, in-flight typing, and failed-load locks. An explicit persistent API workspace defaults to JSON graph persistence; only no-settings development/explicit memory uses an in-memory graph.
+- Preflight every project-structure graph target before applying accepted structure; repeat requests may reuse verified complete derived refs, but documentation must not claim cross-store hard-crash recovery.

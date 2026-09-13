@@ -193,3 +193,13 @@ compensated so a rejected request leaves no new Draft or derived ref. Proposal
 acceptance or Draft promotion never writes CandidateFact, Graph Store canon, or
 canon Event Log. Rich-document import and long-document chunking remain separate
 future work.
+
+## 2026-09-13 — SG-023B Agent runtime preferences and continuation
+
+Reusable Agent presets are workspace-local author settings, with immutable built-ins and bounded custom System prompt text. Selection is a default for subsequent creative calls and is frozen per service; extraction/structure/continuity logic does not receive these style preferences. Existing settings requests preserve omitted provider/credential/preset values. Audit markers store only stable preset ID plus prompt SHA256.
+
+A new `continue_scene` mode requires the exact saved Draft ID. The provider sees a bounded ending excerpt; the server appends validated continuation text to the complete original Draft in a separate scene-draft Proposal. Review and promotion remain explicit existing operations. Model discovery uses only the configured generic provider's actual model-list results and never changes the saved model automatically. Error bodies and connection reasons are excluded from surfaced diagnostics because third-party responses can echo private inputs.
+
+## 2026-09-13 — SG-023 author UX and persistence boundaries
+
+Use four everyday writing tabs with an optional tools/review inspector. Web catalogs must not import another locale at runtime; desktop native strings use separate JSON catalogs. UI locale remains independent from story output language and author content. Explicit settings select a persistent empty graph by default; memory/demo behavior must be requested explicitly in such workspaces. Structure application preflights predictable conflicts and verifies completed derived refs on retries, without claiming hard-crash transactions across graph and SQLite. A real authorized chapter was tested in an isolated ignored workspace through third-party identifiers from the configured endpoint, without changing the author's original model configuration or accepting generated canon.

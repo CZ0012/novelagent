@@ -1,39 +1,54 @@
-import { zhCN } from "./zh-CN";
-import { enUS } from "./en-US";
 import type { LocaleCatalog } from "./schema";
 
-export type AppLocale = "zh-CN" | "en-US";
 export const UI_LOCALE_STORAGE_KEY = "storygraph.ui_locale.v1";
-export const SUPPORTED_UI_LOCALES: readonly AppLocale[] = ["zh-CN", "en-US"];
-
-const catalogs: Record<AppLocale, LocaleCatalog> = {
-  "zh-CN": zhCN,
-  "en-US": enUS
+// Add a catalog and one registry entry to introduce another display language.
+// The type-only schema import never includes the reference catalog at runtime.
+export const localeRegistry = {
+  "zh-CN": { label: "简体中文", load: () => import("./zh-CN").then((module) => module.zhCN) },
+  "en-US": { label: "English", load: () => import("./en-US").then((module) => module.enUS) }
 };
+export type AppLocale = keyof typeof localeRegistry;
+export const SUPPORTED_UI_LOCALES = Object.keys(localeRegistry) as AppLocale[];
+const catalogs = new Map<AppLocale, Promise<LocaleCatalog>>();
 
-let activeLocale: LocaleCatalog = zhCN;
+// Vite can reevaluate this module while React preserves the mounted app. Keep
+// the last complete catalog available during that transition; fresh launches
+// still await the asynchronous bootstrap in main.tsx.
+let activeLocale = import.meta.hot?.data.activeLocale as LocaleCatalog;
+if (import.meta.hot) {
+  import.meta.hot.dispose((data) => { data.activeLocale = activeLocale; });
+}
 
-export let APP_LOCALE = activeLocale.locale;
-export let appText = activeLocale.app;
-export let uiText = activeLocale.ui;
-export let localizedTerms = activeLocale.terms;
-export let permissionLabels = activeLocale.permissions.labels;
-export let defaultPermissionDescriptions = activeLocale.permissions.descriptions;
-export let proposalTypeLabels = activeLocale.proposalTypes;
-export let proposalStatusLabels = activeLocale.proposalStatuses;
-export let stepLabels = activeLocale.steps;
-export let reviewActionLabels = activeLocale.reviewActions;
+export let APP_LOCALE: string = activeLocale?.locale;
+export let appText: LocaleCatalog["app"] = activeLocale?.app;
+export let uiText: LocaleCatalog["ui"] = activeLocale?.ui;
+export let localizedTerms: LocaleCatalog["terms"] = activeLocale?.terms;
+export let permissionLabels: LocaleCatalog["permissions"]["labels"] = activeLocale?.permissions.labels;
+export let defaultPermissionDescriptions: LocaleCatalog["permissions"]["descriptions"] = activeLocale?.permissions.descriptions;
+export let proposalTypeLabels: LocaleCatalog["proposalTypes"] = activeLocale?.proposalTypes;
+export let proposalStatusLabels: LocaleCatalog["proposalStatuses"] = activeLocale?.proposalStatuses;
+export let stepLabels: LocaleCatalog["steps"] = activeLocale?.steps;
+export let reviewActionLabels: LocaleCatalog["reviewActions"] = activeLocale?.reviewActions;
 
 export function normalizeAppLocale(value: string | null | undefined): AppLocale {
-  return value === "en-US" ? "en-US" : "zh-CN";
+  return value && Object.prototype.hasOwnProperty.call(localeRegistry, value) ? value as AppLocale : "zh-CN";
 }
 
-export function getLocaleCatalog(locale: string | null | undefined): LocaleCatalog {
-  return catalogs[normalizeAppLocale(locale)];
+export function loadLocaleCatalog(locale: string | null | undefined): Promise<LocaleCatalog> {
+  const key = normalizeAppLocale(locale);
+  let pending = catalogs.get(key);
+  if (!pending) {
+    pending = localeRegistry[key].load().catch((error) => {
+      catalogs.delete(key);
+      throw error;
+    });
+    catalogs.set(key, pending);
+  }
+  return pending;
 }
 
-export function activateLocale(locale: AppLocale): LocaleCatalog {
-  activeLocale = catalogs[locale];
+export async function activateLocale(locale: AppLocale): Promise<LocaleCatalog> {
+  activeLocale = await loadLocaleCatalog(locale);
   APP_LOCALE = activeLocale.locale;
   appText = activeLocale.app;
   uiText = activeLocale.ui;

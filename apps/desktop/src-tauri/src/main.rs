@@ -31,48 +31,8 @@ const MAIN_TRAY_ID: &str = "storygraph-main-tray";
 const TRAY_MENU_SHOW: &str = "show-main-window";
 const TRAY_MENU_QUIT: &str = "quit-storygraph-agent";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NativeLocale {
-    ZhCn,
-    EnUs,
-}
-
-impl NativeLocale {
-    fn parse(locale: &str) -> Result<Self, String> {
-        match locale {
-            "zh-CN" => Ok(Self::ZhCn),
-            "en-US" => Ok(Self::EnUs),
-            _ => Err(format!(
-                "不支持的桌面语言“{locale}”；仅支持 zh-CN 或 en-US。"
-            )),
-        }
-    }
-
-    fn labels(self) -> NativeLabels {
-        match self {
-            Self::ZhCn => NativeLabels {
-                window_title: "StoryGraph 写作台",
-                tray_tooltip: "StoryGraph 写作台正在运行",
-                show_menu: "显示主界面",
-                quit_menu: "退出 StoryGraph 写作台",
-            },
-            Self::EnUs => NativeLabels {
-                window_title: "StoryGraph Writing Desk",
-                tray_tooltip: "StoryGraph Writing Desk is running",
-                show_menu: "Show Main Window",
-                quit_menu: "Quit StoryGraph Writing Desk",
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct NativeLabels {
-    window_title: &'static str,
-    tray_tooltip: &'static str,
-    show_menu: &'static str,
-    quit_menu: &'static str,
-}
+mod localization;
+use localization::{native_message, NativeLabels, NativeLocale};
 
 struct BackendProcess {
     child: Mutex<Option<Child>>,
@@ -152,10 +112,10 @@ fn load_desktop_settings() -> Result<DesktopSettings, String> {
 #[tauri::command]
 fn save_desktop_settings(settings: DesktopSettings) -> Result<DesktopSettings, String> {
     if settings.backend_url.trim().is_empty() {
-        return Err("后端 API 地址不能为空。".to_string());
+        return Err(native_message("empty_backend", &[]));
     }
     if settings.workspace_path.trim().is_empty() {
-        return Err("工作区路径不能为空。".to_string());
+        return Err(native_message("empty_workspace", &[]));
     }
     write_settings(&settings)?;
     Ok(settings)
@@ -183,7 +143,7 @@ fn backend_status(state: tauri::State<'_, BackendProcess>) -> Result<BackendStat
 #[tauri::command]
 fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatus, String> {
     if state.shutting_down.load(Ordering::SeqCst) {
-        return Err("StoryGraph Agent 正在退出，已取消启动后端。".to_string());
+        return Err(native_message("shutting_down", &[]));
     }
 
     let settings = read_settings()?;
@@ -195,9 +155,9 @@ fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatu
     let mut guard = state
         .child
         .lock()
-        .map_err(|_| "后端进程锁已损坏。".to_string())?;
+        .map_err(|_| native_message("process_lock", &[]))?;
     if state.shutting_down.load(Ordering::SeqCst) {
-        return Err("StoryGraph Agent 正在退出，已取消启动后端。".to_string());
+        return Err(native_message("shutting_down", &[]));
     }
     if let Some(child) = guard.as_mut() {
         if child
@@ -211,9 +171,10 @@ fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatu
     }
 
     fs::create_dir_all(&settings.workspace_path)
-        .map_err(|error| format!("无法创建工作区目录：{error}"))?;
+        .map_err(|error| native_message("create_workspace", &[("error", &error.to_string())]))?;
     let log_dir = app_data_dir().join("logs");
-    fs::create_dir_all(&log_dir).map_err(|error| format!("无法创建日志目录：{error}"))?;
+    fs::create_dir_all(&log_dir)
+        .map_err(|error| native_message("create_logs", &[("error", &error.to_string())]))?;
     let stdout = log_file(&log_dir, "backend.log")?;
     let stderr = log_file(&log_dir, "backend.err.log")?;
 
@@ -233,7 +194,7 @@ fn start_backend(state: tauri::State<'_, BackendProcess>) -> Result<BackendStatu
 
     let child = command
         .spawn()
-        .map_err(|error| format!("无法启动 FastAPI 后端：{error}"))?;
+        .map_err(|error| native_message("start_backend", &[("error", &error.to_string())]))?;
     *guard = Some(child);
 
     if state.shutting_down.load(Ordering::SeqCst) {
@@ -300,7 +261,7 @@ fn stop_managed_backend(state: &BackendProcess) -> Result<(), String> {
     let mut guard = state
         .child
         .lock()
-        .map_err(|_| "后端进程锁已损坏。".to_string())?;
+        .map_err(|_| native_message("process_lock", &[]))?;
     if let Some(mut child) = guard.take() {
         kill_child_tree(&mut child);
     }
@@ -367,7 +328,7 @@ fn main() {
             stop_backend
         ])
         .run(tauri::generate_context!())
-        .expect("StoryGraph Agent 桌面壳运行失败");
+        .expect(&native_message("run_shell", &[]));
 }
 
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
@@ -376,7 +337,7 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let mut tray = TrayIconBuilder::with_id(MAIN_TRAY_ID)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip(labels.tray_tooltip);
+        .tooltip(labels.tray_tooltip.as_str());
 
     if let Some(icon) = app.default_window_icon().cloned() {
         tray = tray.icon(icon);
@@ -387,34 +348,35 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
 }
 
 fn apply_native_locale(app: &AppHandle, locale: NativeLocale) -> Result<(), String> {
+    locale.activate();
     let labels = locale.labels();
-    let menu =
-        native_tray_menu(app, labels).map_err(|error| format!("无法更新桌面托盘菜单：{error}"))?;
+    let menu = native_tray_menu(app, labels)
+        .map_err(|error| native_message("update_menu", &[("error", &error.to_string())]))?;
     let window = app
         .get_webview_window(MAIN_WINDOW_LABEL)
-        .ok_or_else(|| "找不到 StoryGraph 主窗口。".to_string())?;
+        .ok_or_else(|| native_message("window_missing", &[]))?;
     let tray = app
         .tray_by_id(MAIN_TRAY_ID)
-        .ok_or_else(|| "找不到 StoryGraph 托盘图标。".to_string())?;
+        .ok_or_else(|| native_message("tray_missing", &[]))?;
 
     window
-        .set_title(labels.window_title)
-        .map_err(|error| format!("无法更新桌面窗口标题：{error}"))?;
-    tray.set_tooltip(Some(labels.tray_tooltip))
-        .map_err(|error| format!("无法更新桌面托盘提示：{error}"))?;
+        .set_title(labels.window_title.as_str())
+        .map_err(|error| native_message("update_title", &[("error", &error.to_string())]))?;
+    tray.set_tooltip(Some(labels.tray_tooltip.as_str()))
+        .map_err(|error| native_message("update_tooltip", &[("error", &error.to_string())]))?;
     tray.set_menu(Some(menu))
-        .map_err(|error| format!("无法更新桌面托盘菜单：{error}"))?;
+        .map_err(|error| native_message("update_menu", &[("error", &error.to_string())]))?;
     Ok(())
 }
 
 fn native_tray_menu<R: Runtime, M: Manager<R>>(
     manager: &M,
-    labels: NativeLabels,
+    labels: &NativeLabels,
 ) -> tauri::Result<Menu<R>> {
     MenuBuilder::new(manager)
-        .text(TRAY_MENU_SHOW, labels.show_menu)
+        .text(TRAY_MENU_SHOW, labels.show_menu.as_str())
         .separator()
-        .text(TRAY_MENU_QUIT, labels.quit_menu)
+        .text(TRAY_MENU_QUIT, labels.quit_menu.as_str())
         .build()
 }
 
@@ -513,12 +475,12 @@ fn fetch_health(base_url: &str) -> Result<Value, String> {
     let endpoint = parse_local_http_url(base_url)?;
     let mut addrs = (endpoint.host.as_str(), endpoint.port)
         .to_socket_addrs()
-        .map_err(|error| format!("无法解析后端主机：{error}"))?;
+        .map_err(|error| native_message("resolve_host", &[("error", &error.to_string())]))?;
     let addr = addrs
         .next()
-        .ok_or_else(|| "后端主机没有解析到可用地址。".to_string())?;
+        .ok_or_else(|| native_message("no_address", &[]))?;
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(500))
-        .map_err(|error| format!("无法连接后端：{error}"))?;
+        .map_err(|error| native_message("connect_backend", &[("error", &error.to_string())]))?;
     stream
         .set_read_timeout(Some(Duration::from_millis(1200)))
         .map_err(|error| error.to_string())?;
@@ -531,22 +493,23 @@ fn fetch_health(base_url: &str) -> Result<Value, String> {
     );
     stream
         .write_all(request.as_bytes())
-        .map_err(|error| format!("无法请求后端健康检查：{error}"))?;
+        .map_err(|error| native_message("request_health", &[("error", &error.to_string())]))?;
 
     let mut response = String::new();
     stream
         .read_to_string(&mut response)
-        .map_err(|error| format!("无法读取后端健康检查响应：{error}"))?;
+        .map_err(|error| native_message("read_health", &[("error", &error.to_string())]))?;
     let (head, body) = response
         .split_once("\r\n\r\n")
-        .ok_or_else(|| "后端返回了无效的 HTTP 响应。".to_string())?;
+        .ok_or_else(|| native_message("invalid_http", &[]))?;
     if !head.starts_with("HTTP/1.1 200") && !head.starts_with("HTTP/1.0 200") {
-        return Err(format!(
-            "后端健康检查返回非 200 状态：{}",
-            head.lines().next().unwrap_or("unknown")
+        return Err(native_message(
+            "health_status",
+            &[("status", head.lines().next().unwrap_or("unknown"))],
         ));
     }
-    serde_json::from_str(body.trim()).map_err(|error| format!("后端健康检查不是 JSON：{error}"))
+    serde_json::from_str(body.trim())
+        .map_err(|error| native_message("health_json", &[("error", &error.to_string())]))
 }
 
 struct LocalHttpEndpoint {
@@ -558,7 +521,7 @@ struct LocalHttpEndpoint {
 fn parse_local_http_url(base_url: &str) -> Result<LocalHttpEndpoint, String> {
     let rest = base_url
         .strip_prefix("http://")
-        .ok_or_else(|| "桌面版只支持本机 http:// 后端地址。".to_string())?;
+        .ok_or_else(|| native_message("local_http", &[]))?;
     let (host_port, base_path) = match rest.split_once('/') {
         Some((host_port, path)) => (host_port, format!("/{path}")),
         None => (rest, String::new()),
@@ -567,13 +530,13 @@ fn parse_local_http_url(base_url: &str) -> Result<LocalHttpEndpoint, String> {
         Some((host, port)) => {
             let port = port
                 .parse::<u16>()
-                .map_err(|_| "后端 API 地址端口必须是数字。".to_string())?;
+                .map_err(|_| native_message("invalid_port", &[]))?;
             (host.to_string(), port)
         }
         None => (host_port.to_string(), 80),
     };
     if !matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1") {
-        return Err("桌面版后端 API 地址必须指向 localhost。".to_string());
+        return Err(native_message("localhost_only", &[]));
     }
     let prefix = base_path.trim_end_matches('/');
     let path = if prefix.is_empty() {
@@ -591,19 +554,22 @@ fn read_settings() -> Result<DesktopSettings, String> {
         write_settings(&settings)?;
         return Ok(settings);
     }
-    let content =
-        fs::read_to_string(&path).map_err(|error| format!("无法读取桌面设置：{error}"))?;
-    serde_json::from_str(&content).map_err(|error| format!("无法解析桌面设置：{error}"))
+    let content = fs::read_to_string(&path)
+        .map_err(|error| native_message("read_settings", &[("error", &error.to_string())]))?;
+    serde_json::from_str(&content)
+        .map_err(|error| native_message("parse_settings", &[("error", &error.to_string())]))
 }
 
 fn write_settings(settings: &DesktopSettings) -> Result<(), String> {
     let path = settings_path();
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| format!("无法创建桌面设置目录：{error}"))?;
+        fs::create_dir_all(parent)
+            .map_err(|error| native_message("create_settings", &[("error", &error.to_string())]))?;
     }
     let payload = serde_json::to_string_pretty(settings)
-        .map_err(|error| format!("无法序列化桌面设置：{error}"))?;
-    fs::write(path, format!("{payload}\n")).map_err(|error| format!("无法写入桌面设置：{error}"))
+        .map_err(|error| native_message("serialize_settings", &[("error", &error.to_string())]))?;
+    fs::write(path, format!("{payload}\n"))
+        .map_err(|error| native_message("write_settings", &[("error", &error.to_string())]))
 }
 
 fn log_file(dir: &Path, file_name: &str) -> Result<File, String> {
@@ -611,7 +577,7 @@ fn log_file(dir: &Path, file_name: &str) -> Result<File, String> {
         .create(true)
         .append(true)
         .open(dir.join(file_name))
-        .map_err(|error| format!("无法打开后端日志文件：{error}"))
+        .map_err(|error| native_message("open_log", &[("error", &error.to_string())]))
 }
 
 fn extract_health_workspace(health: &Value) -> Option<String> {
@@ -626,9 +592,15 @@ fn workspace_mismatch_message(
     health_workspace_path: Option<&str>,
     expected_workspace_path: &str,
 ) -> String {
-    let actual = health_workspace_path.unwrap_or("未知工作区");
-    format!(
-        "检测到 {backend_url} 上已有后端在运行，但它的工作区是“{actual}”，不是当前桌面工作区“{expected_workspace_path}”。请停止占用该端口的旧后端，或在桌面设置中改用其他本机 API 地址。"
+    let unknown = native_message("unknown_workspace", &[]);
+    let actual = health_workspace_path.unwrap_or(&unknown);
+    native_message(
+        "workspace_mismatch",
+        &[
+            ("backend_url", backend_url),
+            ("actual", actual),
+            ("expected_workspace_path", expected_workspace_path),
+        ],
     )
 }
 

@@ -47,6 +47,7 @@ import {
   AgentDiscussionResult,
   AgentPermissionLevel,
   AgentSettings,
+  AgentModels,
   AgentSettingsUpdate,
   ApiRequestError,
   CandidateFact,
@@ -95,7 +96,9 @@ import {
   formatRefKind,
   formatSeverity,
   formatStatus,
-  getLocaleCatalog,
+  loadLocaleCatalog,
+  localeRegistry,
+  SUPPORTED_UI_LOCALES,
   localizedTerms,
   localizeSystemValue,
   permissionLabels,
@@ -144,6 +147,10 @@ import {
   sourceCanHandoff,
   sourceAgentEligibility
 } from "./reviewPolicies";
+import { canHydrateDraftLoad, draftSaveCompletionPolicy, draftScopesMatch, type DraftScope } from "./draftProtection";
+import { AgentPresets } from "./AgentPresets";
+import { exportAuthorText } from "./exportText";
+import { DEFAULT_API_BASE, loadBrowserApiBase, normalizeApiBase, saveBrowserApiBase } from "./clientPreferences";
 import "./styles.css";
 
 type InspectorTab = "context" | "continuity" | "facts" | "settings";
@@ -178,6 +185,7 @@ type ExactDraftLookup =
 
 type PendingProposalNavigation = {
   label: string;
+  kind: "proposal" | "draft";
 };
 
 type ProposalNavigationAction = () => void;
@@ -401,18 +409,26 @@ const defaultAgentDiscussionForm: AgentDiscussionForm = {
 
 export default function App() {
   const [uiLocale, setUiLocale] = useState<AppLocale>(() => loadUiLocale());
-  activateLocale(uiLocale);
-  const [apiBase, setApiBase] = useState("http://127.0.0.1:8000");
+  const [localeLoading, setLocaleLoading] = useState(false);
+  const localeRequestRef = useRef(0);
+  const [apiBase, setApiBase] = useState(() => isDesktopRuntime() ? DEFAULT_API_BASE : loadBrowserApiBase());
   const [projects, setProjects] = useState<ProjectOutline[]>([]);
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
+  const [workspaceLoadError, setWorkspaceLoadError] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [sceneId, setSceneId] = useState("");
-  const [activeTab, setActiveTab] = useState<InspectorTab>("context");
+  const [activeTab, setInspectorTab] = useState<InspectorTab>("context");
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const setActiveTab = useCallback((tab: InspectorTab) => {
+    setInspectorTab(tab);
+    setInspectorOpen(true);
+  }, []);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("write");
   const [contextPack, setContextPack] = useState<ContextPack | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draftText, setDraftText] = useState("");
   const [draftSummary, setDraftSummary] = useState("");
+  const [draftLoading, setDraftLoading] = useState(false);
   const [proposals, setProposals] = useState<ProposalArtifact[]>([]);
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [creatingNewProposal, setCreatingNewProposal] = useState(false);
@@ -503,6 +519,9 @@ export default function App() {
   );
   const sourceListRequestSequenceRef = useRef(0);
   const draftRequestSequenceRef = useRef(0);
+  const draftEditRevisionRef = useRef(0);
+  const draftEditorScopeRef = useRef<DraftScope | null>(null);
+  const draftDirtyRef = useRef(false);
   const proposalListRequestSequenceRef = useRef(0);
   const activeApiBaseRef = useRef(apiBase);
   const activeProjectIdRef = useRef(projectId);
@@ -515,6 +534,21 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [technicalError, setTechnicalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const changeUiLocale = useCallback(async (locale: AppLocale) => {
+    const request = ++localeRequestRef.current;
+    setLocaleLoading(true);
+    try {
+      await loadLocaleCatalog(locale);
+      if (request !== localeRequestRef.current) return;
+      await activateLocale(locale);
+      setUiLocale(locale);
+    } catch {
+      setError(uiText.errors.requestFailed);
+    } finally {
+      if (request === localeRequestRef.current) setLocaleLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     // Ephemeral messages contain the catalog value that was active when the
@@ -643,6 +677,7 @@ export default function App() {
     () => draftIsDirty(draft, draftText, draftSummary),
     [draft, draftSummary, draftText]
   );
+  draftDirtyRef.current = draftDirty;
   const proposalTarget = useMemo(
     () => promotionTargetPolicy(selectedProposal?.target_refs ?? [], sceneId),
     [sceneId, selectedProposal]
@@ -725,7 +760,7 @@ export default function App() {
     hydrateProposalEditor(null);
   }, [hydrateProposalEditor]);
 
-  const runAction = useCallback(async (label: string, action: () => Promise<void>) => {
+  const runAction = useCallback(async (label: string, action: () => Promise<unknown>) => {
     if (actionInFlightRef.current) return;
     actionInFlightRef.current = true;
     setBusy(label);
@@ -942,7 +977,15 @@ export default function App() {
 
   const refreshWorkspace = useCallback(
     async (preferredProjectId?: string, preferredSceneId?: string) => {
-      const payload = await apiGet<{ projects: ProjectOutline[] }>(apiBase, "/projects");
+      setWorkspaceLoadError(false);
+      let payload: { projects: ProjectOutline[] };
+      try {
+        payload = await apiGet<{ projects: ProjectOutline[] }>(apiBase, "/projects");
+      } catch (error) {
+        if (activeApiBaseRef.current === apiBase) { setWorkspaceLoadError(true); setWorkspaceLoaded(false); }
+        throw error;
+      }
+      if (activeApiBaseRef.current !== apiBase) return { projectId: activeProjectIdRef.current, sceneId: activeSceneIdRef.current };
       const nextProjects = payload.projects;
       setProjects(nextProjects);
       setWorkspaceLoaded(true);
@@ -1017,6 +1060,7 @@ export default function App() {
     async (targetProjectId = projectId, targetSceneId = sceneId) => {
       const requestSequence = ++draftRequestSequenceRef.current;
       const requestApiBase = apiBase;
+      const request = { scope: { apiBase, projectId: targetProjectId, sceneId: targetSceneId }, sequence: requestSequence, editorRevision: draftEditRevisionRef.current };
       const requestIsCurrent = () =>
         requestSequence === draftRequestSequenceRef.current &&
         activeApiBaseRef.current === requestApiBase &&
@@ -1031,6 +1075,7 @@ export default function App() {
         return;
       }
       let payload: { draft: Draft | null };
+      setDraftLoading(true);
       try {
         payload = await apiGet<{ draft: Draft | null }>(
           requestApiBase,
@@ -1039,8 +1084,14 @@ export default function App() {
       } catch (exc) {
         if (!requestIsCurrent()) return;
         throw exc;
+      } finally {
+        if (requestIsCurrent()) setDraftLoading(false);
       }
-      if (!requestIsCurrent()) return;
+      if (!canHydrateDraftLoad(request, {
+        scope: { apiBase: activeApiBaseRef.current, projectId: activeProjectIdRef.current, sceneId: activeSceneIdRef.current },
+        sequence: draftRequestSequenceRef.current, editorRevision: draftEditRevisionRef.current
+      }, draftEditorScopeRef.current, draftDirtyRef.current)) return;
+      draftEditorScopeRef.current = request.scope;
       setDraft(payload.draft);
       setDraftText(payload.draft?.text ?? "");
       setDraftSummary(payload.draft?.summary ?? "");
@@ -1306,12 +1357,12 @@ export default function App() {
     }
     const result = await apiPost<{ project_id: string }>(apiBase, "/projects", {
       title: projectForm.title.trim(),
-      genre: projectForm.genre.trim() || getLocaleCatalog(projectForm.language).contentDefaults.genre,
+      genre: projectForm.genre.trim() || (await loadLocaleCatalog(projectForm.language)).contentDefaults.genre,
       language: normalizeAppLocale(projectForm.language),
       target_length: projectForm.target_length.trim() || null,
       narrative_pov:
         projectForm.narrative_pov.trim() ||
-        getLocaleCatalog(projectForm.language).contentDefaults.narrativePov
+        (await loadLocaleCatalog(projectForm.language)).contentDefaults.narrativePov
     });
     setProjectForm(defaultProjectForm);
     await refreshWorkspace(result.project_id);
@@ -1554,8 +1605,10 @@ export default function App() {
       const sourceText = requireReadySourceText(document);
       const saved = await apiPost<Draft>(apiBase, `${endpoint}/draft`, {
         text: sourceText,
-        summary: `${getLocaleCatalog(selectedProject?.language).ui.library.importedDraftSummaryPrefix}${document.title}`
+        summary: `${(await loadLocaleCatalog(selectedProject?.language)).ui.library.importedDraftSummaryPrefix}${document.title}`
       });
+      draftEditorScopeRef.current = { apiBase, projectId, sceneId };
+      draftEditRevisionRef.current += 1;
       setDraft(saved);
       setDraftText(saved.text);
       setDraftSummary(saved.summary ?? "");
@@ -1578,7 +1631,7 @@ export default function App() {
         tone: contextPack?.style_constraints.tone ?? null,
         dialogue_style: contextPack?.style_constraints.dialogue_style ?? null,
         tags: ["source_document"],
-        summary: `${getLocaleCatalog(selectedProject?.language).ui.library.importedStyleSummaryPrefix}${document.title}`
+        summary: `${(await loadLocaleCatalog(selectedProject?.language)).ui.library.importedStyleSummaryPrefix}${document.title}`
       });
       setNotice(uiText.notices.sourceSavedAsStyle(document.title));
     },
@@ -1644,13 +1697,13 @@ export default function App() {
         `/projects/${projectId}/proposals`,
         {
           artifact_type: "scene_draft",
-          title: `${getLocaleCatalog(selectedProject?.language).ui.library.importedProposalTitlePrefix}${document.title}`,
+          title: `${(await loadLocaleCatalog(selectedProject?.language)).ui.library.importedProposalTitlePrefix}${document.title}`,
           body: sourceText,
           target_refs: [{ kind: "scene", ref: sceneId }],
           source_refs: [{ kind: "source_document", ref: document.id, note: document.title }],
           created_by: "author",
           created_via: "import",
-          provenance_note: `${getLocaleCatalog(selectedProject?.language).ui.library.importedProposalNotePrefix}${document.title}`
+          provenance_note: `${(await loadLocaleCatalog(selectedProject?.language)).ui.library.importedProposalNotePrefix}${document.title}`
         }
       );
       await refreshProposals(projectId);
@@ -1733,17 +1786,29 @@ export default function App() {
   }, [apiBase, endpoint]);
 
   const saveDraft = useCallback(async () => {
+    if (draftLoading || !draftEditorScopeRef.current || !draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId })) throw new Error(uiText.errors.agentDraftScopeMismatch);
     if (!endpoint) throw new Error(uiText.errors.selectScene);
+    const request = { scope: { apiBase, projectId, sceneId }, sequence: ++draftRequestSequenceRef.current, editorRevision: draftEditRevisionRef.current };
     const saved = await apiPost<Draft>(apiBase, `${endpoint}/draft`, {
       text: draftText,
       summary: draftSummary
     });
+    const completion = draftSaveCompletionPolicy(request, {
+      scope: { apiBase: activeApiBaseRef.current, projectId: activeProjectIdRef.current, sceneId: activeSceneIdRef.current },
+      sequence: draftRequestSequenceRef.current, editorRevision: draftEditRevisionRef.current
+    });
+    if (!completion.applySavedDraft) return false;
+    draftEditorScopeRef.current = request.scope;
     setDraft(saved);
-    setDraftText(saved.text);
-    setDraftSummary(saved.summary ?? "");
-    setNotice(uiText.runtime.draftSaved(saved.version));
+    if (completion.replaceEditor) {
+      setDraftText(saved.text);
+      setDraftSummary(saved.summary ?? "");
+      draftDirtyRef.current = false;
+    }
+    setNotice(completion.replaceEditor ? uiText.runtime.draftSaved(saved.version) : uiText.navigation.editsDuringSave);
     setWorkspaceTab("write");
-  }, [apiBase, draftSummary, draftText, endpoint]);
+    return completion.continueNavigation;
+  }, [apiBase, draftLoading, draftSummary, draftText, endpoint, projectId, sceneId]);
 
   const readDraftSelection = useCallback((target: HTMLTextAreaElement | null) => {
     if (!target) {
@@ -1764,16 +1829,21 @@ export default function App() {
   }, [readDraftSelection]);
 
   const handleDraftTextChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    draftEditRevisionRef.current += 1;
+    draftDirtyRef.current = true;
     setDraftText(event.target.value);
     setDraftSelection(readDraftSelection(event.target));
   }, [readDraftSelection]);
 
   const handleDraftSummaryChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    draftEditRevisionRef.current += 1;
+    draftDirtyRef.current = true;
     setDraftSummary(event.target.value);
   }, []);
 
   const restoreSavedDraft = useCallback(() => {
     if (!draft || !window.confirm(uiText.agentDiscussion.restoreDraftConfirm)) return;
+    draftEditRevisionRef.current += 1;
     setDraftText(draft.text);
     setDraftSummary(draft.summary ?? "");
     setDraftSelection("");
@@ -1892,6 +1962,8 @@ export default function App() {
     const saved = await apiPost<Draft>(apiBase, `${endpoint}/draft`);
     const pack = await apiPost<ContextPack>(apiBase, `${endpoint}/context-pack`);
     setContextPack(pack);
+    draftEditorScopeRef.current = { apiBase, projectId, sceneId };
+    draftEditRevisionRef.current += 1;
     setDraft(saved);
     setDraftText(saved.text);
     setDraftSummary(saved.summary ?? "");
@@ -1909,6 +1981,8 @@ export default function App() {
       throw new Error(uiText.errors.workflowMissingDraft);
     }
     setContextPack(result.context_pack);
+    draftEditorScopeRef.current = { apiBase, projectId, sceneId };
+    draftEditRevisionRef.current += 1;
     setDraft(result.draft);
     setDraftText(result.draft.text);
     setDraftSummary(result.draft.summary ?? "");
@@ -1925,8 +1999,10 @@ export default function App() {
     setNotice(uiText.runtime.workflowStatus(formatStatus(result.workflow_run.status)));
   }, [apiBase, endpoint, refreshFacts]);
 
-  const startNewProposal = useCallback(() => {
+  const startNewProposal = useCallback(async () => {
     const contentLanguage = outputLanguageOrNull(selectedProject?.language);
+    const contentCatalog = await loadLocaleCatalog(contentLanguage);
+    if (activeProjectIdRef.current !== projectId) return;
     proposalEditorSnapshotRef.current = null;
     selectedProposalStableRef.current = null;
     setCreatingNewProposal(true);
@@ -1934,12 +2010,12 @@ export default function App() {
     setProposalArtifactType("scene_draft");
     setProposalTitle(
       selectedScene && contentLanguage
-        ? `${selectedScene.title} ${getLocaleCatalog(contentLanguage).contentDefaults.proposalSuffix}`
+        ? `${selectedScene.title} ${contentCatalog.contentDefaults.proposalSuffix}`
         : ""
     );
     setProposalText("");
     setProposalSourceDraftId(draft?.id ?? "");
-  }, [draft, selectedProject, selectedScene]);
+  }, [draft, projectId, selectedProject, selectedScene]);
 
   const saveProposal = useCallback(async () => {
     if (!projectId) throw new Error(uiText.errors.selectProjectOrCreate);
@@ -1947,7 +2023,7 @@ export default function App() {
     if (!contentLanguage) throw new Error(uiText.errors.projectLanguageRequired);
     const title =
       proposalTitle.trim() ||
-      getLocaleCatalog(contentLanguage).contentDefaults.untitledProposal;
+      (await loadLocaleCatalog(contentLanguage)).contentDefaults.untitledProposal;
     const body = proposalText;
     if (selectedProposal) {
       if (!proposalActionPolicy(
@@ -2024,14 +2100,15 @@ export default function App() {
 
   const requestProposalNavigation = useCallback(
     (label: string, action: () => void) => {
-      if (!proposalDirty) {
+      if (actionInFlightRef.current) return;
+      if (!proposalDirty && !draftDirty) {
         action();
         return;
       }
       pendingProposalNavigationRef.current = action;
-      setPendingProposalNavigation({ label });
+      setPendingProposalNavigation({ label, kind: proposalDirty ? "proposal" : "draft" });
     },
-    [proposalDirty]
+    [proposalDirty, draftDirty]
   );
 
   const cancelProposalNavigation = useCallback(() => {
@@ -2039,33 +2116,48 @@ export default function App() {
     setPendingProposalNavigation(null);
   }, []);
 
-  const discardProposalAndNavigate = useCallback(() => {
+  const finishEditorNavigation = useCallback(() => {
+    if (pendingProposalNavigation?.kind === "proposal" && draftDirtyRef.current) {
+      setPendingProposalNavigation((current) => current ? { ...current, kind: "draft" } : null);
+      return;
+    }
     const action = pendingProposalNavigationRef.current;
     pendingProposalNavigationRef.current = null;
     setPendingProposalNavigation(null);
-    hydrateProposalEditor(selectedProposal);
-    setCreatingNewProposal(false);
     action?.();
-  }, [hydrateProposalEditor, selectedProposal]);
+  }, [pendingProposalNavigation]);
+
+  const discardProposalAndNavigate = useCallback(() => {
+    if (pendingProposalNavigation?.kind === "draft") {
+      draftEditRevisionRef.current += 1;
+      draftDirtyRef.current = false;
+      setDraftText(draft?.text ?? "");
+      setDraftSummary(draft?.summary ?? "");
+    } else {
+      hydrateProposalEditor(selectedProposal);
+      setCreatingNewProposal(false);
+    }
+    finishEditorNavigation();
+  }, [draft, finishEditorNavigation, hydrateProposalEditor, pendingProposalNavigation, selectedProposal]);
 
   const saveProposalAndNavigate = useCallback(async () => {
-    const action = pendingProposalNavigationRef.current;
+    const action = finishEditorNavigation;
     await continueAfterSuccessfulSave(
       async () => {
         let saved = false;
         await runAction("proposal-save-navigation", async () => {
-          await saveProposal();
-          saved = true;
+          if (pendingProposalNavigation?.kind === "draft") {
+            saved = await saveDraft();
+          } else {
+            await saveProposal();
+            saved = true;
+          }
         });
         return saved;
       },
-      () => {
-        pendingProposalNavigationRef.current = null;
-        setPendingProposalNavigation(null);
-        action?.();
-      }
+      () => { action?.(); }
     );
-  }, [runAction, saveProposal]);
+  }, [finishEditorNavigation, pendingProposalNavigation, runAction, saveDraft, saveProposal]);
 
   const submitProposalReview = useCallback(async () => {
     if (!selectedProposal || !projectId) throw new Error(uiText.errors.selectProposal);
@@ -2137,6 +2229,8 @@ export default function App() {
       { scene_id: sceneId, expected_version: selectedProposal.version }
     );
     draftRequestSequenceRef.current += 1;
+    draftEditorScopeRef.current = { apiBase, projectId, sceneId };
+    draftEditRevisionRef.current += 1;
     setDraft(result.draft);
     setDraftText(result.draft.text);
     setDraftSummary(result.draft.summary ?? "");
@@ -2276,17 +2370,17 @@ export default function App() {
   useEffect(() => {
     if (isDesktopRuntime() && !desktopBackendChecked) return;
     if (isDesktopRuntime() && !desktopBackend) {
-      setWorkspaceLoaded(true);
+      setWorkspaceLoadError(true);
       return;
     }
     if (isDesktopRuntime() && desktopBackend && !desktopBackend.workspaceCompatible) {
-      setWorkspaceLoaded(true);
+      setWorkspaceLoadError(true);
       setError(uiText.runtime.backendWorkspaceConflict);
       setTechnicalError(desktopBackend.error ?? null);
       return;
     }
     refreshWorkspace().catch((exc) => {
-      setWorkspaceLoaded(true);
+      setWorkspaceLoaded(false);
       setError(uiText.errors.requestFailed);
       setTechnicalError(technicalErrorMessage(exc));
     });
@@ -2311,7 +2405,10 @@ export default function App() {
   }, [projectId, refreshStoryBibleRefs]);
 
   useEffect(() => {
-    refreshLatestDraft().catch(() => undefined);
+    refreshLatestDraft().catch((exc) => {
+      setError(uiText.errors.requestFailed);
+      setTechnicalError(technicalErrorMessage(exc));
+    });
   }, [refreshLatestDraft]);
 
   useEffect(() => {
@@ -2343,11 +2440,13 @@ export default function App() {
     setSelectedAgentSourceIds(new Set());
     setCrossLanguagePolicy("project_only");
     setDraftSelection("");
+    draftEditorScopeRef.current = null;
+    draftDirtyRef.current = false;
     setDraft(null);
     setDraftText("");
     setDraftSummary("");
     setAgentDiscussionForm((current) => ({ ...current, selectedText: "" }));
-  }, [projectId, sceneId]);
+  }, [apiBase, projectId, sceneId]);
 
   useEffect(() => {
     if (!projectId || !selectedSourceDocumentId) {
@@ -2506,14 +2605,14 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    if (!proposalDirty) return;
+    if (!proposalDirty && !draftDirty) return;
     const preventUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", preventUnload);
     return () => window.removeEventListener("beforeunload", preventUnload);
-  }, [proposalDirty]);
+  }, [proposalDirty, draftDirty]);
 
   useEffect(() => {
     const firstChapterId = selectedProject?.chapters[0]?.id ?? "";
@@ -2627,8 +2726,8 @@ export default function App() {
       document.execCommand(command);
     }
   }, []);
-  const backendStatusLabel = desktopBackend ? formatDesktopBackendLabel(desktopBackend) : localizedTerms.fastApi;
-  const backendStatusTone = desktopBackend ? desktopBackendTone(desktopBackend) : "good";
+  const backendStatusLabel = desktopBackend ? formatDesktopBackendLabel(desktopBackend) : workspaceLoadError ? uiText.navigation.connectionFailed : localizedTerms.fastApi;
+  const backendStatusTone = desktopBackend ? desktopBackendTone(desktopBackend) : workspaceLoadError ? "danger" : workspaceLoaded ? "good" : "neutral";
 
   return (
     <div className="workbench">
@@ -2641,14 +2740,6 @@ export default function App() {
           </div>
         </div>
         <div className="command-bar" aria-label={uiText.commandBar.ariaLabel}>
-          <button
-            type="button"
-            onClick={() => runAction("save", saveDraft)}
-            disabled={!canGenerate || !hasScene || busy !== null}
-            title={uiText.commandBar.saveDraftTitle}
-          >
-            <Save size={15} /> {uiText.common.save}
-          </button>
           <button type="button" onClick={() => runEditCommand("undo")} title={uiText.commandBar.undoTitle}>
             <Undo2 size={15} /> {uiText.common.undo}
           </button>
@@ -2661,7 +2752,8 @@ export default function App() {
               uiText.proposals.navigateRefresh,
               () => {
                 void runAction("workspace", async () => {
-                  await refreshWorkspace(projectId, sceneId);
+                  const refreshed = await refreshWorkspace(projectId, sceneId);
+                  await refreshLatestDraft(refreshed.projectId, refreshed.sceneId);
                 });
               }
             )}
@@ -2670,35 +2762,12 @@ export default function App() {
           >
             <RefreshCw size={15} /> {uiText.common.refresh}
           </button>
-          <button type="button" onClick={() => setWorkspaceTab("sources")} title={uiText.commandBar.sourcesTitle}>
-            <Library size={15} /> {uiText.tabs.sources}
-          </button>
-          <button type="button" onClick={() => setWorkspaceTab("proposals")} title={uiText.commandBar.proposalsTitle}>
-            <SplitSquareVertical size={15} /> {uiText.proposals.title}
-          </button>
-          <button type="button" onClick={() => setWorkspaceTab("agent")} title={uiText.commandBar.agentTitle}>
-            <MessageSquare size={15} /> {uiText.tabs.agent}
-          </button>
-          <button
-            type="button"
-            onClick={() => runAction("run", runScene)}
-            disabled={!canRunScene || busy !== null}
-            title={uiText.commandBar.runTitle}
-          >
-            <Play size={15} /> {uiText.common.writing}
-          </button>
         </div>
-        <label className="api-control">
-          <Database size={15} />
-          <input
-            value={apiBase}
-            onChange={(event) => setApiBase(event.target.value)}
-            aria-label={uiText.runtime.apiAddressAria}
-            disabled={proposalDirty}
-            title={proposalDirty ? uiText.proposals.dirtyActionHelp : undefined}
-          />
-        </label>
         <div className="top-actions">
+          <select className="locale-switch" value={uiLocale} disabled={localeLoading || busy !== null}
+            aria-label={uiText.language.uiLocaleLabel} onChange={(event) => { void changeUiLocale(normalizeAppLocale(event.target.value)); }}>
+            {SUPPORTED_UI_LOCALES.map((locale) => <option key={locale} value={locale}>{localeRegistry[locale].label}</option>)}
+          </select>
           <StatusDot label={backendStatusLabel} tone={backendStatusTone} />
           <StatusDot label={permissionLabels[agentSettings?.permission_level ?? "full"]} tone={permissionTone(agentSettings?.permission_level)} />
           <StatusDot label={`v${APP_VERSION}`} tone="neutral" />
@@ -2708,11 +2777,11 @@ export default function App() {
         </div>
       </header>
 
-      <div className="layout">
+      <div className={`layout ${inspectorOpen ? "with-inspector" : "focus-writing"}`}>
         <aside className="sidebar">
           <ProjectSidebar
             busy={busy}
-            canReview={canReview}
+            canReview={canReview && !workspaceLoadError}
             chapterForm={chapterForm}
             characterForm={characterForm}
             currentChapterId={currentChapterId}
@@ -2744,7 +2813,8 @@ export default function App() {
                 uiText.proposals.navigateRefresh,
                 () => {
                   void runAction("workspace", async () => {
-                    await refreshWorkspace(projectId, sceneId);
+                    const refreshed = await refreshWorkspace(projectId, sceneId);
+                  await refreshLatestDraft(refreshed.projectId, refreshed.sceneId);
                   });
                 }
               )
@@ -2798,6 +2868,7 @@ export default function App() {
             storyCharacters={storyCharacters}
             storyLocations={storyLocations}
             workspaceLoaded={workspaceLoaded}
+            workspaceLoadError={workspaceLoadError}
             worldRuleForm={worldRuleForm}
           />
         </aside>
@@ -2807,7 +2878,7 @@ export default function App() {
             <div>
               <h1>
                 {selectedScene?.title ||
-                  (hasWorkspace ? uiText.workspace.importedStructureTitle : uiText.workspace.emptyWorkspaceTitle)}
+                  (hasWorkspace ? uiText.workspace.importedStructureTitle : uiText.navigation.welcomeTitle)}
               </h1>
               <p>
                 {hasScene
@@ -2817,39 +2888,15 @@ export default function App() {
                     : uiText.workspace.noSceneEmptyWorkspace}
               </p>
             </div>
-            <div className="toolbar-actions">
-              <button
-                onClick={() => runAction("context", buildContext)}
-                type="button"
-                disabled={!hasScene}
-              >
-                <RefreshCw size={16} /> {uiText.editor.contextButton}
-              </button>
-              <button
-                onClick={() => runAction("save", saveDraft)}
-                type="button"
-                disabled={!canGenerate || !hasScene}
-              >
+            {workspaceTab === "write" && <div className="toolbar-actions">
+              <button className="primary" onClick={() => runAction("save", saveDraft)} type="button" disabled={!canGenerate || !hasScene || busy !== null}>
                 <Save size={16} /> {uiText.editor.saveButton}
               </button>
-              <button
-                onClick={() => runAction("draft", generateDraft)}
-                type="button"
-                disabled={missingCritical || !canRunScene}
-                title={uiText.editor.generateDraftTitle}
-              >
-                <FileText size={16} /> {uiText.editor.generateDraftButton}
+              <button onClick={() => { setAgentDiscussionForm((current) => ({ ...current, mode: "continue_scene", includeLatestDraft: true, selectedText: "" })); setWorkspaceTab("agent"); }}
+                type="button" disabled={!hasScene} title={uiText.navigation.agentHelp}>
+                <Wand2 size={16} /> {uiText.navigation.continueScene}
               </button>
-              <button
-                className="primary"
-                onClick={() => runAction("run", runScene)}
-                type="button"
-                disabled={!canRunScene}
-                title={uiText.editor.runWorkflowTitle}
-              >
-                <Play size={16} /> {uiText.editor.runWorkflowButton}
-              </button>
-            </div>
+            </div>}
           </section>
 
           <section className="state-strip" aria-label={uiText.workspace.workflowStatusAria}>
@@ -2872,8 +2919,22 @@ export default function App() {
             <TabButton active={workspaceTab === "sources"} onClick={() => setWorkspaceTab("sources")} icon={<Library size={15} />} label={uiText.tabs.sources} />
             <TabButton active={workspaceTab === "agent"} onClick={() => setWorkspaceTab("agent")} icon={<MessageSquare size={15} />} label={uiText.tabs.agent} />
             <TabButton active={workspaceTab === "proposals"} onClick={() => setWorkspaceTab("proposals")} icon={<SplitSquareVertical size={15} />} label={uiText.tabs.proposals} />
-            <TabButton active={workspaceTab === "workflow"} onClick={() => setWorkspaceTab("workflow")} icon={<Activity size={15} />} label={uiText.tabs.workflow} />
+            <details className="tools-menu">
+              <summary title={uiText.navigation.toolsHelp}><Settings size={15} /> {uiText.navigation.tools} <ChevronDown size={13} /></summary>
+              <div className="tools-menu-items" onClick={(event) => { if ((event.target as HTMLElement).closest("button")) event.currentTarget.closest("details")?.removeAttribute("open"); }}>
+                <button type="button" onClick={() => setWorkspaceTab("workflow")}><Activity size={15} /> {uiText.tabs.workflow}</button>
+                <button type="button" onClick={() => setActiveTab("context")}><Boxes size={15} /> {uiText.tabs.context}</button>
+                <button type="button" onClick={() => setActiveTab("continuity")}><ShieldCheck size={15} /> {uiText.tabs.continuity}</button>
+                <button type="button" onClick={() => setActiveTab("facts")}><Database size={15} /> {localizedTerms.canonReview}</button>
+                <button type="button" onClick={() => setActiveTab("settings")}><Settings size={15} /> {uiText.tabs.settings}</button>
+              </div>
+            </details>
           </section>
+
+          <div className="workspace-guide">
+            <span>{workspaceTab === "workflow" ? uiText.navigation.workflowHelp : uiText.navigation[`${workspaceTab === "write" ? "write" : workspaceTab === "sources" ? "sources" : workspaceTab === "agent" ? "agent" : "proposals"}Help`]}</span>
+            {!llmConfigured && <button type="button" onClick={() => setActiveTab("settings")}><KeyRound size={14} /> {uiText.navigation.setupModel}</button>}
+          </div>
 
           {(error || notice) && (
             <div className={`message ${error ? "error" : "notice"}`}>
@@ -2890,18 +2951,21 @@ export default function App() {
             </div>
           )}
 
-          {!hasWorkspace && (
+          {workspaceLoadError && <section className="empty-workspace"><EmptyState icon={<AlertTriangle />} title={uiText.navigation.connectionFailed} text={uiText.navigation.connectionFailedHelp} /><button type="button" onClick={() => setActiveTab("settings")}><Settings size={15} /> {uiText.tabs.settings}</button></section>}
+          {!hasWorkspace && workspaceLoaded && !workspaceLoadError && (
             <section className="empty-workspace">
               <EmptyState
                 icon={<Database />}
-                title={uiText.workspace.emptyTitle}
-                text={uiText.workspace.emptyText}
+                title={uiText.navigation.welcomeTitle}
+                text={uiText.navigation.welcomeText}
               />
             </section>
           )}
 
           {workspaceTab === "write" && (
-            <section className="meta-grid" aria-label={uiText.workspace.sceneMetadataAria}>
+            <details className="scene-details">
+              <summary>{uiText.navigation.sceneDetails}</summary>
+              <section className="meta-grid" aria-label={uiText.workspace.sceneMetadataAria}>
               <Meta label={uiText.editor.goal} value={contextPack?.scene_goal || selectedScene?.goal || ""} />
               <Meta label={uiText.editor.conflict} value={contextPack?.conflict || selectedScene?.conflict || ""} />
               <Meta
@@ -2909,7 +2973,8 @@ export default function App() {
                 value={contextPack?.timeline_position || selectedScene?.timeline_position || ""}
               />
               <Meta label={uiText.editor.location} value={contextPack?.location_id || selectedScene?.location_id || ""} />
-            </section>
+              </section>
+            </details>
           )}
 
           {workspaceTab === "sources" && (
@@ -3018,11 +3083,9 @@ export default function App() {
                 onRetry={(document, file) =>
                   runAction("source-retry", () => importSourceFiles([file], document))
                 }
-                onSaveDraft={(document) =>
-                  runAction("import-draft", async () => {
-                    await saveDocumentAsDraft(document);
-                  })
-                }
+                onSaveDraft={(document) => requestProposalNavigation(uiText.library.saveDraft, () => {
+                  void runAction("import-draft", () => saveDocumentAsDraft(document));
+                })}
                 onSaveProposal={(document) =>
                   runAction("import-proposal", () => saveDocumentAsProposal(document))
                 }
@@ -3059,6 +3122,8 @@ export default function App() {
           )}
 
           {workspaceTab === "agent" && (
+          <div className="agent-workspace">
+          <AgentPresets compact apiBase={apiBase} settings={agentSettings} busy={busy !== null} onChange={setAgentSettings} onManage={() => setActiveTab("settings")} />
           <AgentDiscussionPanel
             busy={busy}
             canDiscuss={canDiscussWithAgent}
@@ -3086,6 +3151,7 @@ export default function App() {
             sceneId={sceneId}
             sceneTitle={selectedScene?.title ?? ""}
           />
+          </div>
           )}
 
           {workspaceTab === "proposals" && (
@@ -3106,7 +3172,7 @@ export default function App() {
               runAction("proposal-structure", applyProjectStructureProposal)
             }
             onCreateNew={() =>
-              requestProposalNavigation(uiText.proposals.navigateNewProposal, startNewProposal)
+              requestProposalNavigation(uiText.proposals.navigateNewProposal, () => { void runAction("proposal-new", startNewProposal); })
             }
             onExtractCandidates={() =>
               runAction("proposal-candidates", promoteProposalToCandidates)
@@ -3128,7 +3194,11 @@ export default function App() {
                 setNotice(uiText.proposals.openDraftSwitchFirst);
                 return;
               }
+              requestProposalNavigation(uiText.proposals.openPromotedDraft, () => {
+              if (proposalPromotedDraft.status !== "ready") return;
               draftRequestSequenceRef.current += 1;
+              draftEditorScopeRef.current = { apiBase, projectId, sceneId };
+              draftEditRevisionRef.current += 1;
               setDraft(proposalPromotedDraft.draft);
               setDraftText(proposalPromotedDraft.draft.text);
               setDraftSummary(proposalPromotedDraft.draft.summary ?? "");
@@ -3139,8 +3209,9 @@ export default function App() {
                 proposalPromotedDraft.draft.id,
                 proposalPromotedDraft.draft.version
               ));
+              });
             }}
-            onPromoteDraft={() => runAction("proposal-draft", promoteProposalToDraft)}
+            onPromoteDraft={() => requestProposalNavigation(uiText.proposals.promoteDraft, () => { void runAction("proposal-draft", promoteProposalToDraft); })}
             onReject={() => runAction("proposal-reject", () => reviewProposal("reject"))}
             onReviewVersion={setReviewProposalVersion}
             onSave={() => runAction("proposal-save", saveProposal)}
@@ -3190,10 +3261,11 @@ export default function App() {
           )}
 
           {workspaceTab === "write" && (
-          <details className="draft-surface collapsible-panel" open>
-            <summary className="draft-header">
+          <section className="draft-surface">
+            <div className="draft-header">
               <span>{uiText.editor.draftTitle}</span>
               <div className="draft-header-actions">
+                <button type="button" disabled={!draftText.trim()} onClick={(event) => { event.preventDefault(); exportAuthorText(selectedScene?.title ?? "StoryGraph", draftText); }}><Download size={13} /> {uiText.navigation.exportText}</button>
                 <small>
                   {draft
                     ? `v${draft.version} / ${draft.id} / ${formatArtifactLanguage(draft.content_language, draft.language_inferred)}`
@@ -3208,9 +3280,11 @@ export default function App() {
                   <MessageSquare size={13} /> {uiText.editor.markSelectionForAgent}
                 </button>
               </div>
-            </summary>
+            </div>
+            <div className="draft-status"><span>{uiText.navigation.draftCharacters(Array.from(draftText).length)}</span><span className={draftDirty ? "dirty" : ""}>{draftDirty ? uiText.navigation.draftUnsaved : draft ? uiText.navigation.draftSaved : uiText.editor.unsavedDraft}</span></div>
             <textarea
               ref={draftTextareaRef}
+              readOnly={draftLoading || !draftEditorScopeRef.current || !draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId }) || (busy !== null && busy !== "save" && busy !== "proposal-save-navigation")}
               value={draftText}
               onChange={handleDraftTextChange}
               onKeyUp={captureDraftSelection}
@@ -3221,11 +3295,13 @@ export default function App() {
             />
             <input
               className="summary-input"
+              readOnly={draftLoading || !draftEditorScopeRef.current || !draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId }) || (busy !== null && busy !== "save" && busy !== "proposal-save-navigation")}
               value={draftSummary}
               onChange={handleDraftSummaryChange}
               aria-label={uiText.editor.draftSummaryAria}
+              placeholder={uiText.editor.draftSummaryAria}
             />
-          </details>
+          </section>
           )}
 
           {workspaceTab === "workflow" && (
@@ -3237,6 +3313,11 @@ export default function App() {
               </div>
               <StatusDot label={formatStatus(run?.status ?? "idle")} tone={statusTone(run?.status)} />
             </summary>
+            <div className="workflow-actions">
+              <button className="primary" onClick={() => requestProposalNavigation(uiText.navigation.startWorkflow, () => { void runAction("run", runScene); })} type="button" disabled={!canRunScene || busy !== null}><Play size={15} /> {uiText.navigation.startWorkflow}</button>
+              <button onClick={() => runAction("context", buildContext)} type="button" disabled={!hasScene || busy !== null}><RefreshCw size={15} /> {uiText.editor.contextButton}</button>
+              <button onClick={() => requestProposalNavigation(uiText.editor.generateDraftButton, () => { void runAction("draft", generateDraft); })} type="button" disabled={missingCritical || !canRunScene || busy !== null}><FileText size={15} /> {uiText.editor.generateDraftButton}</button>
+            </div>
             <div className="step-track">
               {(runEvents.length ? runEvents : fallbackSteps).map((step) => (
                 <div key={step.name} className={`step ${step.status}`}>
@@ -3249,7 +3330,8 @@ export default function App() {
           )}
         </main>
 
-        <aside className="inspector">
+        <aside className="inspector" hidden={!inspectorOpen}>
+          <div className="inspector-heading"><strong>{uiText.navigation.tools}</strong><button className="icon-button" type="button" onClick={() => setInspectorOpen(false)} aria-label={uiText.navigation.closeInspector}><X size={16} /></button></div>
           <div className="tabs" role="tablist">
             <TabButton active={activeTab === "context"} onClick={() => setActiveTab("context")} icon={<Boxes size={15} />} label={uiText.tabs.context} />
             <TabButton active={activeTab === "continuity"} onClick={() => setActiveTab("continuity")} icon={<Activity size={15} />} label={uiText.tabs.continuity} />
@@ -3266,8 +3348,11 @@ export default function App() {
               onReview={(factId, action) => runAction(action, () => reviewFact(factId, action))}
             />
           )}
-          {activeTab === "settings" && (
+          <div hidden={activeTab !== "settings"} className="settings-inspector-host">
             <AgentSettingsInspector
+              apiBase={apiBase}
+              onApiBaseChange={(value) => { const normalized = normalizeApiBase(value); if (!normalized) return; if (!isDesktopRuntime()) saveBrowserApiBase(normalized); setApiBase(normalized); }}
+              connectionLocked={proposalDirty || draftDirty}
               apiKeyInput={apiKeyInput}
               busy={busy}
               clearApiKey={clearApiKey}
@@ -3278,7 +3363,7 @@ export default function App() {
               onApiKeyChange={setApiKeyInput}
               onClearApiKeyChange={setClearApiKey}
               onFormChange={setAgentForm}
-              onLocaleChange={setUiLocale}
+              onLocaleChange={(locale) => { void changeUiLocale(locale); }}
               onBackendRefresh={() => runAction("desktop-backend", () => refreshDesktopBackend("status").then(() => undefined))}
               onBackendStart={() => runAction("desktop-backend", () => refreshDesktopBackend("start").then(() => undefined))}
               onBackendStop={() => runAction("desktop-backend", stopDesktopBackend)}
@@ -3287,9 +3372,10 @@ export default function App() {
               onInstallUpdate={() => runAction("update-install", installAvailableUpdate)}
               onUpdateCheck={() => runAction("update-check", () => checkForUpdates(false))}
               settings={agentSettings}
+              onSettingsChange={setAgentSettings}
               updateStatus={updateStatus}
             />
-          )}
+          </div>
           <GraphPreview preview={graphPreview} selectedSceneId={sceneId} />
         </aside>
       </div>
@@ -3297,6 +3383,7 @@ export default function App() {
         <UnsavedProposalDialog
           busy={busy !== null}
           destination={pendingProposalNavigation.label}
+          kind={pendingProposalNavigation.kind}
           onCancel={cancelProposalNavigation}
           onDiscard={discardProposalAndNavigate}
           onSave={saveProposalAndNavigate}
@@ -3309,12 +3396,14 @@ export default function App() {
 function UnsavedProposalDialog({
   busy,
   destination,
+  kind,
   onCancel,
   onDiscard,
   onSave
 }: {
   busy: boolean;
   destination: string;
+  kind: "proposal" | "draft";
   onCancel: () => void;
   onDiscard: () => void;
   onSave: () => void;
@@ -3328,9 +3417,9 @@ function UnsavedProposalDialog({
         className="unsaved-proposal-dialog"
         role="dialog"
       >
-        <h2 id="proposal-navigation-title">{uiText.proposals.unsavedDialogTitle}</h2>
+        <h2 id="proposal-navigation-title">{kind === "draft" ? uiText.navigation.unsavedDraftTitle : uiText.proposals.unsavedDialogTitle}</h2>
         <p id="proposal-navigation-description">
-          {uiText.proposals.unsavedDialogText(destination)}
+          {kind === "draft" ? uiText.navigation.unsavedDraftText(destination) : uiText.proposals.unsavedDialogText(destination)}
         </p>
         <div className="dialog-actions">
           <button className="primary" disabled={busy} onClick={onSave} type="button">
@@ -3473,6 +3562,7 @@ function AgentDiscussionPanel({
               }
             >
               <option value="discuss">{uiText.agentDiscussion.modes.discuss}</option>
+              <option value="continue_scene">{uiText.navigation.continueScene}</option>
               <option value="revise_selection">{uiText.agentDiscussion.modes.revise_selection}</option>
               <option value="revise_scene">{uiText.agentDiscussion.modes.revise_scene}</option>
             </select>
@@ -3491,7 +3581,7 @@ function AgentDiscussionPanel({
             placeholder={uiText.agentDiscussion.instructionPlaceholder}
           />
         </label>
-        <label className="agent-field selection">
+        {selectedRequired && <label className="agent-field selection">
           <span>{uiText.agentDiscussion.selectionLabel}</span>
           <textarea
             disabled={!form.includeLatestDraft}
@@ -3501,7 +3591,7 @@ function AgentDiscussionPanel({
             }
             placeholder={uiText.agentDiscussion.selectionPlaceholder}
           />
-        </label>
+        </label>}
         <div className="agent-actions">
           <button type="button" className="primary" onClick={onSubmit} disabled={!canSubmit}>
             <Wand2 size={15} /> {uiText.agentDiscussion.submit}
@@ -3740,7 +3830,7 @@ function AgentDiscussionPanel({
             <MetricRow label={uiText.agentDiscussion.proposalMetric} value={`${result.proposal.title} / v${result.proposal.version}`} />
             <MetricRow
               label={uiText.agentDiscussion.replacementMetric}
-              value={result.replacement_applied ? uiText.agentDiscussion.fullSceneDraft : uiText.agentDiscussion.discussionOnly}
+              value={result.proposal.artifact_type === "scene_draft" ? uiText.agentDiscussion.fullSceneDraft : uiText.agentDiscussion.discussionOnly}
             />
             <p>{result.reply}</p>
             {result.truncated_sources.length > 0 && (
@@ -3849,7 +3939,7 @@ function ProposalInbox({
   const actionPolicy = selectedProposal
     ? proposalActionPolicy(selectedProposal.status, dirty, selectedProposal.artifact_type)
     : null;
-  const locked = Boolean(selectedProposal && actionPolicy?.readonly);
+  const locked = busy !== null || Boolean(selectedProposal && actionPolicy?.readonly);
   const canSave = canGenerate && busy === null && dirty && (
     !selectedProposal || Boolean(actionPolicy?.canSave)
   );
@@ -3955,6 +4045,7 @@ function ProposalInbox({
             disabled={locked}
           />
           <div className="proposal-actions">
+            <button type="button" disabled={!proposalText.trim()} onClick={() => exportAuthorText(proposalTitle || "StoryGraph", proposalText)}><Download size={14} /> {uiText.navigation.exportText}</button>
             {(!selectedProposal || actionPolicy?.editable) && (
               <button type="button" onClick={onSave} disabled={!canSave}>
                 <Save size={14} /> {uiText.proposals.save}
@@ -4259,6 +4350,7 @@ function ProjectSidebar({
   storyCharacters,
   storyLocations,
   workspaceLoaded,
+  workspaceLoadError,
   worldRuleForm
 }: {
   busy: string | null;
@@ -4298,6 +4390,7 @@ function ProjectSidebar({
   storyCharacters: GraphNodePayload[];
   storyLocations: GraphNodePayload[];
   workspaceLoaded: boolean;
+  workspaceLoadError: boolean;
   worldRuleForm: WorldRuleForm;
 }) {
   const chapters = selectedProject?.chapters ?? [];
@@ -4410,7 +4503,7 @@ function ProjectSidebar({
             </>
           ) : (
             <div className="project-empty">
-              {workspaceLoaded ? uiText.sidebar.projectEmpty : uiText.sidebar.projectLoading}
+              {workspaceLoadError ? uiText.navigation.connectionFailed : workspaceLoaded ? uiText.sidebar.projectEmpty : uiText.sidebar.projectLoading}
             </div>
           )}
           <div className="sidebar-button-row">
@@ -4481,8 +4574,8 @@ function ProjectSidebar({
           ) : (
             <EmptyState
               icon={<BookOpen />}
-              title={uiText.sidebar.noProjectTreeTitle}
-              text={uiText.sidebar.noProjectTreeText}
+              title={workspaceLoadError ? uiText.navigation.connectionFailed : uiText.sidebar.noProjectTreeTitle}
+              text={workspaceLoadError ? uiText.navigation.connectionFailedHelp : uiText.sidebar.noProjectTreeText}
             />
           )}
         </nav>
@@ -4581,7 +4674,7 @@ function ProjectSidebar({
           </details>
         )}
 
-        <details className="sidebar-section seed-panel" open>
+        <details className="sidebar-section seed-panel">
           <summary className="section-title">{uiText.sidebar.outlineTitle}</summary>
           <input
             placeholder={uiText.sidebar.chapterTitlePlaceholder}
@@ -5612,6 +5705,9 @@ function DocumentReader({
 }
 
 function AgentSettingsInspector({
+  apiBase,
+  onApiBaseChange,
+  connectionLocked,
   apiKeyInput,
   busy,
   clearApiKey,
@@ -5631,8 +5727,12 @@ function AgentSettingsInspector({
   onInstallUpdate,
   onUpdateCheck,
   settings,
+  onSettingsChange,
   updateStatus
 }: {
+  apiBase: string;
+  onApiBaseChange: (value: string) => void;
+  connectionLocked: boolean;
   apiKeyInput: string;
   busy: string | null;
   clearApiKey: boolean;
@@ -5652,9 +5752,15 @@ function AgentSettingsInspector({
   onInstallUpdate: () => void;
   onUpdateCheck: () => void;
   settings: AgentSettings | null;
+  onSettingsChange: (settings: AgentSettings) => void;
   updateStatus: UpdateStatus;
 }) {
-  const descriptions = settings?.permission_descriptions ?? defaultPermissionDescriptions;
+  const [connectionInput, setConnectionInput] = useState(apiBase);
+  useEffect(() => { setConnectionInput(apiBase); }, [apiBase]);
+  const [models, setModels] = useState<AgentModels | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  useEffect(() => { setModels(null); }, [apiBase, settings?.llm_base_url, settings?.api_key_preview]);
+  const descriptions = defaultPermissionDescriptions;
   const apiKeyStatus = settings?.api_key_configured
     ? `${uiText.settings.configuredKey} (${settings.api_key_preview ?? uiText.settings.hiddenKey})`
     : uiText.common.notConfigured;
@@ -5662,6 +5768,7 @@ function AgentSettingsInspector({
 
   return (
     <div className="settings-panel">
+      <AgentPresets apiBase={apiBase} settings={settings} busy={busy !== null} onChange={onSettingsChange} />
       <section className="settings-block">
         <div className="settings-title"><BookOpen size={15} /> {uiText.language.uiLocaleLabel}</div>
         <label>
@@ -5672,11 +5779,15 @@ function AgentSettingsInspector({
             value={locale}
             onChange={(event) => onLocaleChange(normalizeAppLocale(event.target.value))}
           >
-            <option value="zh-CN">{uiText.language.chinese}</option>
-            <option value="en-US">{uiText.language.english}</option>
+            {SUPPORTED_UI_LOCALES.map((key) => <option key={key} value={key}>{localeRegistry[key].label}</option>)}
           </select>
         </label>
       </section>
+      <details className="settings-block settings-disclosure">
+        <summary><Database size={15} /> {uiText.navigation.connection}</summary>
+        <label><span>{uiText.settings.apiAddress}</span><input value={connectionInput} onChange={(event) => setConnectionInput(event.target.value)} disabled={connectionLocked || busy !== null} aria-label={uiText.runtime.apiAddressAria} /></label>
+        <button type="button" disabled={connectionLocked || busy !== null || !normalizeApiBase(connectionInput) || connectionInput.replace(/\/$/, "") === apiBase} onClick={() => onApiBaseChange(connectionInput.trim().replace(/\/$/, ""))}>{uiText.navigation.connect}</button>
+      </details>
       {isDesktopRuntime() && (
         <section className="settings-block">
           <div className="settings-title"><Database size={15} /> {uiText.settings.desktopBackend}</div>
@@ -5766,12 +5877,23 @@ function AgentSettingsInspector({
         <label>
           <span>{uiText.settings.model}</span>
           <input
+            list="provider-models"
             value={form.llm_model}
             onChange={(event) =>
               onFormChange((current) => ({ ...current, llm_model: event.target.value }))
             }
           />
         </label>
+        <datalist id="provider-models">{models?.models.map((model) => <option key={model.id} value={model.id} />)}</datalist>
+        <button type="button" disabled={modelsLoading || busy !== null || !settings?.api_key_configured} onClick={async () => {
+          setModelsLoading(true);
+          try { setModels(await apiGet<AgentModels>(apiBase, "/settings/agent/models")); }
+          catch { setModels({ models: [], current_model: "", current_model_available: null, status: "unavailable", error: null }); }
+          finally { setModelsLoading(false); }
+        }}><RefreshCw size={14} /> {modelsLoading ? uiText.common.loading : uiText.navigation.modelDiscovery}</button>
+        <small>{uiText.navigation.modelDiscoveryHelp}</small>
+        {models?.status === "unavailable" && <p className="preset-error">{uiText.navigation.modelsUnavailable}</p>}
+        {models?.current_model_available === false && <p className="preset-error">{uiText.navigation.currentModelUnavailable}</p>}
         <label className="checkbox-row">
           <input
             checked={form.llm_json_mode}

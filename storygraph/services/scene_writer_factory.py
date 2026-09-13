@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from storygraph.core.config import StoryGraphSettings
+from storygraph.core.agent_config import load_agent_config, selected_agent_preset
 from storygraph.services.llm_provider import OpenAICompatibleProvider
 from storygraph.services.scene_writer import LLMSceneWriter, RuleBasedSceneWriter
 from storygraph.stores.draft_store import SQLiteDraftStore
@@ -27,5 +28,8 @@ def create_scene_writer(settings: StoryGraphSettings, draft_store: SQLiteDraftSt
             draft_store=draft_store,
             provider=provider,
             model=settings.llm_model,
+            agent_preset=getattr(settings, "agent_preset", None) or selected_agent_preset(
+                load_agent_config(settings)
+            ),
         )
     raise ValueError(f"Unknown scene writer: {settings.scene_writer}")

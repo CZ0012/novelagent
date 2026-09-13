@@ -195,3 +195,14 @@ Review status:
 Merge target:
 Notes:
 ```
+
+## SG-023 branch strategy
+
+Branch: `codex/sg-023-complete-author-workbench`
+Owner: Main Agent; Front / Contract-Creation / Check agents share disjoint file ownership.
+Base: clean `main` at task start.
+Scope: approachable bilingual UX, independently loaded locales, Agent presets, concrete defect fixes and real private continuation validation.
+Changed areas: Front owns apps/web; Contract/Creation owns preset backend, API and contracts; Main owns documentation/release/private verification; Check starts read-only and coordinates any fixes.
+Check status: passed (269 Python, 46 Web, 3 Rust tests; packaged backend and signature verified)
+Review status: passed; final English dependency defect fixed and browser resource isolation verified
+Merge target: main / GitHub software repository after validation. Agents must not switch the shared checkout or commit other owners' work.

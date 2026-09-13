@@ -4,6 +4,20 @@ StoryGraph Agent is a local MVP for long-form fiction workflows built around str
 
 Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md).
 
+## Start writing
+
+Use **Write → Sources → Agent → Proposals** for everyday work. **Tools & review** opens workflow runs, context, continuity checks, facts, and settings when needed; the inspector can be closed to make room for prose.
+
+1. Create a project and choose its story language. Add a chapter/scene, or import a TXT, Markdown, or DOCX manuscript into Sources and review a proposed structure.
+2. Open **Settings** and save your provider's Chat Completions-compatible endpoint, key, and exact model ID. **Refresh available models** checks the provider's own listing. A model label does not establish its vendor or model family; missing/unsupported listing never changes your model automatically.
+3. Choose a writing preset: **Concise Chinese**, **Balanced narrative**, **Precise English**, or create your own System prompt. Presets persist in the local workspace and are shared by CLI, API, and desktop. Built-ins can be duplicated; custom presets can be edited and deleted.
+4. Save your scene, choose **Continue story**, describe what should happen, and check the input list. The Agent uses that exact saved version and explicitly selected sources. The server appends only new text to a separate proposal and preserves the original draft.
+5. Read the proposal and its version diff, edit it if needed, then explicitly adopt it as a scene draft. Candidate facts still require their own human review before canon changes. **Export text** downloads the visible draft or proposal without changing stored content.
+
+Unsaved drafts and proposals are protected when changing projects, scenes, or connections. Saving while typing preserves newer local edits. A failed draft load remains locked until a successful retry. Changing the interface language never translates the manuscript or changes project output language.
+
+For localization extension, runtime boundaries, and verified behavior, see [Localization](docs/localization.md), [Acceptance checks](docs/acceptance-0.1.12.md), and [Agent runtime contract](contracts/agent_runtime_v1.md).
+
 The implementation follows:
 
 - `docs/architecture.md`
@@ -17,6 +31,7 @@ The implementation follows:
 - `contracts/proposal_artifact_v1.md`
 - `contracts/source_document_v1.md`
 - `contracts/language_policy_v1.md`
+- `contracts/agent_runtime_v1.md`
 
 ## Current MVP Capabilities
 
@@ -151,7 +166,7 @@ npm --prefix apps/desktop run build:installer
 The generated installer is:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe
 ```
 
 Other useful desktop commands:
@@ -171,10 +186,10 @@ Verified local build output from `npm --prefix apps/desktop run build:installer`
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.11_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.11_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.11_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.12_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.12_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.12_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -184,7 +199,7 @@ The in-app settings panel includes a `Version & Updates` section. In the Tauri d
 
 Version updates must keep `VERSION`, `pyproject.toml`, the FastAPI version in `apps/api/main.py`, both Web/Desktop package manifests and root lockfile entries, `apps/web/src/version.ts`, the desktop package entry in `apps/desktop/src-tauri/Cargo.lock`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, Source Store documents, canon, drafts, project settings, and review state are not synchronized to GitHub.
 
-For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.11_x64-setup.exe.sig`, plus the no-space GitHub Release copies and `latest.json`. The backend sidecar is built with pinned PyInstaller 6.21.0. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.12_x64-setup.exe.sig`, plus the no-space GitHub Release copies and `latest.json`. The backend sidecar is built with pinned PyInstaller 6.21.0. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 

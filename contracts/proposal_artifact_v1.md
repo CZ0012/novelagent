@@ -194,6 +194,13 @@ translate or rewrite either side.
 
 ## Provenance
 
+Agent runtime presets and `continue_scene` follow `agent_runtime_v1`.
+Continuation retains the complete exact pinned Draft as the Proposal body
+prefix, appends only new validated prose, and records that unique Draft source
+ref. It does not overwrite the Draft. Generated Proposal notes may include the
+selected preset's stable ID and SHA256 instruction hash; full custom System
+prompts are not copied into provenance. No Proposal shape change is required.
+
 `provenance` records how the current version was created:
 
 - `created_by`: author, Agent, or local system actor.
@@ -340,3 +347,7 @@ structure only when:
 - Rejected proposals MUST NOT create drafts, candidates, or graph writes.
 - Web and Tauri surfaces MUST use the same backend Proposal Store APIs; desktop
   must not introduce a separate proposal or canon-writing path.
+
+## Structure apply validation and repeat requests
+
+Before applying an accepted project structure, the API checks every proposed Chapter, Scene and expected relationship ID for incompatible existing records, including archived nodes and relation collisions. A predictable target conflict must fail before any graph node, relationship, event or derived reference is created. Applies are serialized within one API process. A fully applied structure may return its original derived nodes on a retry carrying the original expected version only after validating the complete graph structure and recorded derived references; a partial or mismatched structure remains a conflict. This preflight does not provide a cross-store hard-crash transaction guarantee.

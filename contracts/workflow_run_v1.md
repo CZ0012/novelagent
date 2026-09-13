@@ -59,6 +59,11 @@ Allowed v1 statuses:
 
 ## Step Fields
 
+For LLM scene generation, `write_draft.artifact_refs` may additionally record
+`agent_preset_id` and `agent_preset_sha256` as defined by `agent_runtime_v1`.
+They snapshot the applied writing preferences without embedding prompt text
+or changing any workflow step/status semantics.
+
 Each `steps` item must include:
 
 - `name`

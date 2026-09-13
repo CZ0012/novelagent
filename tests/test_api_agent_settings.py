@@ -55,6 +55,7 @@ def test_read_only_permission_blocks_draft_generation(tmp_path):
 
 def test_permission_level_can_be_changed_through_settings_api(tmp_path):
     client = TestClient(create_app(StoryGraphSettings(tmp_path)))
+    assert client.post("/demo/seed").status_code == 200
     lowered = client.put(
         "/settings/agent",
         json={
@@ -85,6 +86,7 @@ def test_permission_level_can_be_changed_through_settings_api(tmp_path):
 
 def test_read_generate_permission_blocks_canon_review_decision(tmp_path):
     client = TestClient(create_app(StoryGraphSettings(tmp_path)))
+    assert client.post("/demo/seed").status_code == 200
     client.put(
         "/settings/agent",
         json={

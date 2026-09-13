@@ -119,6 +119,7 @@ def test_api_can_use_configured_langgraph_runtime(tmp_path):
     settings = StoryGraphSettings(tmp_path)
     settings.workflow_runtime = "langgraph"
     client = TestClient(create_app(settings))
+    assert client.post("/demo/seed").status_code == 200
 
     health = client.get("/health")
     response = client.post(f"/projects/{PROJECT_ID}/scenes/{SCENE_ID}/runs/scene-generation")
