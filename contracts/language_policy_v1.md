@@ -293,3 +293,18 @@ Focused acceptance tests MUST also prove:
 - old and resumed records retain their snapshots or explicit inferred marker;
 - style retrieval never crosses project or language; and
 - UI locale is absent from all runtime story and canon stores.
+
+## Manuscript generation and exact source adoption
+
+New scene, chapter and volume prose use the resolved Project.language with the
+configured provider and selected creative preset. Composition validates authored
+plan fields and prose against that language before storing or applying the
+Proposal. An inherited existing volume title is preserved author metadata, not
+new generated text and not automatically translated. Explicit selected Source
+references obey the existing cross-language policy and retain their own language.
+
+Verbatim Source-to-Draft adoption requires Source.language exactly equal to the
+project output language. It rejects und and cross-language copies rather than
+stamping foreign prose with the project language. Generating translated prose
+from an explicitly authorized foreign-language reference is a separate reviewed
+Agent action.

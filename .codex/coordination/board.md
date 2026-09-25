@@ -455,3 +455,11 @@ Acceptance: real chapter folding and scene leaf navigation; independently locali
 | SG-026 | completed | Main Agent | `codex/sg-026-update-readiness` | Repair Windows update preparation and graph-language gaps; provide safe reviewed correction of historical outline metadata. | Implementation and independent review complete: 377 Python/75 Web/11 Rust tests, 35 lifecycle and 5 NSIS checks passed; browser and authorized private-copy provider acceptance passed. Signed package privacy verified; v0.1.15 published and all three re-downloaded assets match the verified package. |
 
 Acceptance: exercise real packaged-backend exit/file release, retain rejection of persistent locks, distinguish preparation from installation failures, never interrupt author edits or touch novel data during diagnostics.
+
+## SG-027 — Manuscript preview, editing and reviewed generation (2026-09-25)
+
+| ID | Status | Owner | Branch | Goal | Next action |
+| --- | --- | --- | --- | --- | --- |
+| SG-027 | active | Main Agent | `codex/sg-027-manuscript-workspace` | Make selected manuscript content visible with preview/edit modes, selection discussion and red/green review; support new chapter and volume planning/drafts. | Implementation and review complete; 420 distinct backend and 117 Web tests passed. Browser and private-copy provider acceptance passed. Final signed package audit and publication in progress. |
+
+Acceptance: meaningful chapter/scene reading surface and empty-state actions; preview/edit share exact Draft state; scoped selection input; accessible added/deleted diff and explicit adoption; reviewed generated architecture and drafts; separate zh/en resources; original workspace untouched by testing; release privacy verified.

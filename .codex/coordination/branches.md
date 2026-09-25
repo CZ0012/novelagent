@@ -232,3 +232,9 @@ SG-026 scope addition: Contract/Creation owns outline_language_repair service, t
 SG-026 delivery: all owners frozen, independent review passed and final signed package verified. Final source/build baseline carries 0.1.15 in all 13 version locations. Main publishes only software and signed release assets; no private fixture, story workspace or credential is staged.
 
 SG-026 publication complete: 7715712/tag v0.1.15 synchronized to main and this integration branch. All three public assets re-downloaded and matched; latest channel resolves to stable v0.1.15. Private test fixtures remain ignored.
+
+## SG-027 branch strategy
+
+Branch `codex/sg-027-manuscript-workspace`, base clean ccde8fb. Main owns integration, docs, acceptance and release; Front owns manuscript/Agent workspace; Contract/Creation owns generation and import-to-draft APIs/contracts; Review audits exact text scope, provenance, storage boundaries and user workflow. Shared checkout; no agent branch switching or commits.
+
+SG-027 integration: all product owners frozen. Chapter/scene preview, exact source adoption, reviewed composition and bounded accessible diffs have independent review and production-browser acceptance. Source and sidecar credential scans passed. Main owns final signed package publication; original author workspace and installation remain untouched.

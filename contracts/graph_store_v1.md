@@ -268,3 +268,17 @@ Required v1 error categories:
 
 - Final backend choice may be Neo4j first with an optional Kuzu backend.
 - Exact API method names may change during implementation, but the semantics above should remain stable for v1.
+
+## Manuscript composition and source adoption
+
+Reviewed composition may create new Chapter/Scene nodes with author-review
+provenance and full creation events. Chapter.volume_index retains the existing
+volume grouping semantics; optional volume_title is descriptive metadata, not a
+new node type. Actual scene prose is stored only in Draft Store. Local JSON/memory
+composition stages the entire graph delta before atomic JSON persistence; later
+Draft/ref persistence is deterministic and recoverable as documented in
+proposal_artifact_v1. Retry requires complete node and relationship event evidence;
+partial or mismatched structure must never be recreated automatically.
+
+Explicit same-language Source span adoption writes only a new Draft and its
+source provenance; it cannot seed graph state or promote story facts.

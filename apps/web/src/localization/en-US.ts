@@ -33,6 +33,19 @@ export const enUS = {
     proposalSuffix: "proposal"
   },
   ui: {
+    manuscript: {
+      saveWholeSource: "Save entire source as manuscript", sourceAdvanced: "Advanced source actions",
+      localBackendOnly: "This operation requires a local JSON or memory graph backend. Safe application is not supported by the current connection.", compositionTooLarge: "The selected references exceed 100,000 characters. Select less material and try again.", compositionInvalid: "The outline and manuscript proposal does not meet its format or language requirements. Adjust your instructions and generate it again.", compositionStale: "The outline, volume position, or project language changed. Refresh and generate a new proposal.", sourceStale: "The source changed. Reopen it and select the passage again.",
+      staleProposal: "The current manuscript differs from this proposal’s original version. Keep your current prose and request a new revision using its latest saved version.",
+      includeSelectedSources: "Include explicitly selected sources",
+      includeCurrentDraft: "Reference the current saved manuscript", compositionInputs: "Input: the project and its existing outline. Source documents and prose are included only when explicitly selected.",
+      lineBreak: "Line break",
+      preview: "Preview", edit: "Edit", chapterPreview: "Chapter manuscript", sceneBody: "Scene manuscript", openScene: "Open scene", editChapter: "Edit chapter details",
+      emptyTitle: "This scene has no manuscript yet", emptyHelp: "The outline and summary are a writing plan. Start writing, ask the Agent for a draft, or select original prose from your sources.", startWriting: "Start writing", generateScene: "Ask Agent to draft", openSources: "View original / import sources", loading: "Loading manuscript…", loadFailed: "Could not load the manuscript. Refresh to retry.",
+      chapterHelp: "Read scenes in outline order. Select text to ask the Agent; open a scene to edit its prose.", chapterEmpty: "This chapter has no scenes. Add one in the sidebar or ask the Agent to plan a chapter.", sceneEmpty: "This scene has no manuscript", selectionAction: "Ask Agent about selection", selectionChanged: "The manuscript version changed. Select the passage again.", readingDraft: "Saved draft", unsavedPreview: "This preview includes unsaved changes. Save before sending it to the Agent.", selectionHelp: "Select a passage to ask a question or request a revision.",
+      diffTitle: "Manuscript changes", added: "Added", removed: "Removed", unchanged: "Unchanged", noChanges: "No manuscript changes", simplified: "For this large comparison, differences are shown as complete text blocks.",
+      newWork: "New chapter / volume", currentScene: "Current scene", generationHelp: "Describe what happens next. The Agent creates a reviewable outline and manuscript proposal. Accept and apply it to add it to your project.", scope: "Scope", chapter: "New chapter", volume: "New volume", chapterCount: "Chapters", sceneCount: "Scenes per chapter", instruction: "What should happen?", instructionPlaceholder: "For example: The protagonist reaches the Mars base and discovers that someone altered the supply records. Keep the current narrative viewpoint.", generate: "Generate outline and manuscript", noProject: "Create or select a project first.", compositionTitle: "Outline and manuscript proposal", volumeLabel: "Volume title", plannedProse: "Proposed manuscript", applyComposition: "Add outline and drafts", compositionApplied: "Outline and drafts added", compositionCreated: "The proposal is ready. Review each chapter before applying it.", compositionHelp: "Accept records your decision. Adding the outline and drafts creates new chapters and scenes. Existing prose is preserved.", sourceOriginal: "Source original · not yet manuscript", useSource: "Use selected original as manuscript", sourceHelp: "This is linked source material. It is not automatically assigned to this scene. Select this scene's original passage before saving it as a draft."
+    },
     authorWorkspace: {
       treeTitle: "Manuscript",
       toggleChapter: (title: string) => `Expand or collapse chapter: ${title}`,
@@ -892,6 +905,7 @@ export const enUS = {
   },
   reviewActions: { accept: "Accept", reject: "Reject", defer: "Defer" },
   refKinds: {
+    scene_draft_baseline: "Manuscript state when the first draft was requested",
     project: "Project", canon_event: "Canon change record",
     author_instruction: "Author instruction", imported_document: "Imported document", source_document: "Project source",
     draft: "Draft", scene: "Scene", chapter: "Chapter", graph_node: "Graph node", graph_relation: "Graph relationship",

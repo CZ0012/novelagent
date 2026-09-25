@@ -216,3 +216,7 @@ Keep the existing backend contracts and unique parent editor state while moving 
 ## SG-026 — Explicit repair rather than hidden title translation
 
 Known graph model labels are UI-localized. Historical chapter/scene titles and planning summaries are author data: an explicit metadata-only generation creates a narrow canon_patch for review, then a separate apply preserves original node IDs and relationships. New structure-language validation also covers timeline_position. Update readiness retries transient sharing locks only; diagnostics and delivery do not stop the author application.
+
+## SG-027 — Actual manuscript rather than blank outline forms
+
+Chapter selection projects saved scene prose, and empty planned scenes receive explicit source-adoption/writing/generation choices. Preview/Edit keep one Draft state. Exact UTF-16 range plus pinned saved Draft supports repeated-text revision. Red/green review stays client-only and does not mutate story content. New chapter/volume generation is a strict reviewed composition proposal; volume grouping uses existing Chapter.volume_index and readable metadata. Source adoption preserves original text with explicit range/language/freshness checks, never inventing links from legacy opaque import refs.

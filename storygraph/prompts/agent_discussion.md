@@ -35,6 +35,8 @@ Mode behavior:
   `proposal_body`. Do not rewrite the full draft unless explicitly asked.
 - `revise_selection`: rewrite only the selected text in `replacement_text`.
   Preserve the selected span's narrative function, POV, tense, and constraints.
+- `create_scene`: write new scene prose in `proposal_body` for an empty scene, following
+  the author instruction and known context; missing planning fields are not invented canon.
 - `revise_scene`: return a full revised scene draft in `proposal_body`.
 - `continue_scene`: continue directly after the saved Draft's final passage.
   Return only new prose in `continuation_text`. Do not repeat, summarize, replace,

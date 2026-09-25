@@ -147,10 +147,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.15_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.15_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.15_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.15_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.16_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.16_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -241,3 +241,11 @@ The native readiness probe retries only Windows sharing/lock violations 32/33 fo
 Clients 0.1.13/0.1.14 retain their old one-shot probe until updated. If it blocks with error 32, save work, quit using the tray menu, and run the latest official installer in the existing installation directory. No uninstall or workspace deletion is needed.
 
 `npm --prefix apps/desktop run test:update-lifecycle` builds an isolated PyInstaller 6.21.0 one-file process fixture and exercises the production native shutdown/readiness module. It requires normal Windows process permissions, opens no network port, and does not use the installed application or author workspace. The script supports Windows PowerShell 5.1 and PowerShell on Windows. `test:update-guard` separately covers actual NSIS replacement and persistent-lock rejection.
+
+## Manuscript workspace (v0.1.16)
+
+Select a chapter to read its saved scene drafts in order. Select a scene for **Preview / Edit**; the reading surface uses the same editor state, with comfortable line width and selectable prose. An empty scene means it has a plan but no saved manuscript. Its actions let the author start writing, select exact text from Sources, or ask the Agent to draft it.
+
+Selected prose can be discussed or revised using a pinned saved Draft and exact UTF-16 offsets. Proposed edits remain separate from the manuscript and show deleted text in red and added text in green with text labels. Review and explicitly adopt the result. New chapter/volume generation similarly creates a reviewable plan and initial drafts before adding them to the project. Volume grouping uses the existing chapter volume index.
+
+Historical structure imports did not create scene prose or reliable source spans. Upgrading therefore cannot safely fill every empty scene from a summary or an entire imported document. Choose an exact source range, or explicitly generate a new draft. Verbatim source adoption requires the source and project languages to match; a foreign-language source can instead be explicitly selected as Agent reference.

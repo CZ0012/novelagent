@@ -104,6 +104,10 @@ from storygraph.services.outline_language_repair import (
     require_local_graph,
     safe_provider_failure,
 )
+from storygraph.services.manuscript_composition import (
+    CompositionRequest, CompositionApplyRequest, generate_composition, apply_composition,
+)
+from storygraph.services.source_draft import SourceDraftRequest, adopt_source_draft
 from storygraph.stores.json_graph import save_json_graph
 from storygraph.workflows import SceneGenerationWorkflow
 
@@ -414,9 +418,11 @@ class AgentDiscussionSourceRequest(BaseModel):
 
 class AgentDiscussionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["discuss", "revise_selection", "revise_scene", "continue_scene"] = "discuss"
+    mode: Literal["discuss", "revise_selection", "revise_scene", "continue_scene", "create_scene"] = "discuss"
     instruction: str = Field(..., min_length=1)
     selected_text: str | None = None
+    selected_start: int | None = Field(default=None, ge=0, strict=True)
+    selected_end: int | None = Field(default=None, gt=0, strict=True)
     base_text: str | None = None
     include_context_pack: bool = True
     include_latest_draft: bool = True
@@ -434,6 +440,10 @@ class AgentDiscussionRequest(BaseModel):
 
     @model_validator(mode="after")
     def included_draft_requires_enabled_draft_input(self) -> "AgentDiscussionRequest":
+        if (self.selected_start is None) != (self.selected_end is None):
+            raise ValueError("Selection offsets must be supplied together.")
+        if self.selected_start is not None and (self.included_draft_id is None or self.selected_text is None):
+            raise ValueError("Exact selection requires included_draft_id and selected_text.")
         if not self.include_latest_draft and self.included_draft_id is not None:
             raise ValueError(
                 "included_draft_id requires include_latest_draft to be enabled"
@@ -502,6 +512,7 @@ class ProposalDecisionRequest(ReviewRequest):
 
 
 class ProposalPromoteDraftRequest(BaseModel):
+    expected_current_draft_id: str | None = Field(default=None, min_length=1, max_length=200)
     scene_id: str = Field(..., min_length=1)
     summary: str | None = None
     actor: str = Field("author", min_length=1)
@@ -526,7 +537,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.15")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.16")
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -1386,6 +1397,53 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
+    @app.post("/projects/{project_id}/composition-proposals")
+    def create_composition_proposal(project_id: str, request: CompositionRequest) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        try:
+            _ensure_project_exists(graph, project_id)
+            _require_llm_configured(settings)
+            return generate_composition(
+                graph=graph, proposal_store=proposal_store, source_store=source_store,
+                draft_store=draft_store, project_id=project_id, request=request,
+                provider=create_llm_provider(settings), model=settings.llm_model,
+                preset=selected_agent_preset(agent_config),
+            )
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+        except RuntimeError as exc:
+            detail = safe_provider_failure(exc)
+            detail["category"] = detail["category"].replace("outline_language_", "composition_")
+            detail["message"] = "The configured provider could not complete composition."
+            raise HTTPException(status_code=502, detail=detail) from exc
+
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/apply/composition")
+    def apply_composition_proposal(project_id: str, proposal_id: str, request: CompositionApplyRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            return apply_composition(
+                graph=graph, proposal_store=proposal_store, draft_store=draft_store,
+                project_id=project_id, proposal_id=proposal_id, request=request,
+                persist_snapshot=lambda snapshot: save_json_graph(snapshot, settings.graph_path)
+                if configured_graph.backend == "json" else None,
+            )
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail={
+                "category": "composition_persistence_failed",
+                "message": "Saving composition could not finish. Retry the same accepted proposal to recover safely.",
+            }) from exc
+
+    @app.post("/projects/{project_id}/scenes/{scene_id}/draft/from-source")
+    def create_draft_from_source(project_id: str, scene_id: str, request: SourceDraftRequest) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            return adopt_source_draft(graph=graph, source_store=source_store, draft_store=draft_store,
+                                     project_id=project_id, scene_id=scene_id, request=request)
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
     @app.post("/projects/{project_id}/outline/localization-proposal")
     def create_outline_language_proposal(
         project_id: str, request: OutlineLanguageGenerateRequest,
@@ -1688,7 +1746,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     ) -> dict:
         require_permission(AgentPermissionLevel.FULL)
         try:
-            with scene_draft_promotion_lock:
+            with scene_draft_promotion_lock, draft_store._lock:
                 proposal = proposal_store.get(proposal_id)
                 _ensure_proposal_project(proposal, project_id)
                 _ensure_proposal_artifact_type(proposal, "scene_draft")
@@ -1708,6 +1766,19 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                         "draft": existing_draft.model_dump(),
                     }
                 _ensure_proposal_expected_version(proposal, request.expected_version)
+                current = draft_store.latest_for_scene(project_id, request.scene_id)
+                current_id = current.id if current else None
+                if ("expected_current_draft_id" in request.model_fields_set
+                        and current_id != request.expected_current_draft_id):
+                    raise GraphStoreError("draft_baseline_stale", "The current Draft changed; compare against it before adopting this proposal.")
+                original = proposal_store.get(proposal_id, version=1)
+                baselines = [ref for ref in original.source_refs if ref.kind == "scene_draft_baseline"]
+                if baselines:
+                    if (len(baselines) != 1 or baselines[0].ref != request.scene_id
+                            or not baselines[0].source_span or baselines[0].source_span.get("empty") is not True
+                            or current_id != baselines[0].source_span.get("draft_id")
+                            or current is not None and current.text.strip()):
+                        raise GraphStoreError("draft_baseline_stale", "This first-draft proposal was generated for an empty scene that has since changed.")
                 draft = draft_store.create_draft(
                     project_id=project_id,
                     scene_id=request.scene_id,
@@ -2330,6 +2401,10 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         try:
             graph_query.scene_node(project_id=project_id, scene_id=scene_id)
             output_language = resolve_project_output_language(graph, project_id)
+            if request.mode == "create_scene":
+                current = draft_store.latest_for_scene(project_id, scene_id)
+                if current is not None and current.text.strip():
+                    raise ContractError("create_scene requires an empty scene; revise the saved Draft instead.")
             if request.include_latest_draft and request.included_draft_id is not None:
                 latest = _get_scoped_scene_draft(
                     draft_store,
@@ -2364,6 +2439,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 output_language=output_language,
                 cross_language_policy=request.cross_language_policy,
                 selected_text=request.selected_text,
+                selected_start=request.selected_start,
+                selected_end=request.selected_end,
                 base_text=request.base_text,
                 context_pack=context_pack,
                 latest_draft=latest,
@@ -2374,6 +2451,11 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 allow_web_search=request.allow_web_search,
                 web_search_query=request.web_search_query,
             )
+            if request.mode == "create_scene":
+                result.source_refs.append(ProposalRef(
+                    kind="scene_draft_baseline", ref=scene_id,
+                    source_span={"draft_id": current.id if current else None, "empty": True},
+                ))
             now = utc_now()
             proposal = ProposalArtifact(
                 id=new_id("proposal"),

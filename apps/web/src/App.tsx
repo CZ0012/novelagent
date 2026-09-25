@@ -129,13 +129,11 @@ import {
 } from "./sourcePaneLayout";
 import {
   type PromotionTargetPolicy,
-  type ReviewDiffRow,
   type SourceAgentEligibility,
   type UniqueRefResolution,
   addStableSourceSelection,
   agentIncludedDraftPolicy,
   type ProposalEditorSnapshot,
-  buildReviewDiff,
   canOpenPromotedDraft,
   canRestoreSavedDraft,
   continueAfterSuccessfulSave,
@@ -158,6 +156,10 @@ import { DEFAULT_API_BASE, loadBrowserApiBase, normalizeApiBase, saveBrowserApiB
 import { backendVersionCompatibility, backendVersionRequestIsCurrent, readBackendVersion, type BackendVersion } from "./backendVersion";
 import { DesktopUpdateFailure, isWindowsUpdateFileLock, runSafeDesktopUpdate } from "./safeDesktopUpdate";
 import { ProjectTree } from "./ProjectTree";
+import { ChapterManuscript, ManuscriptProse, selectedManuscriptRange, type ManuscriptSelection } from "./ManuscriptReader";
+import { CompositionComposer, CompositionPreview, parseComposition, compositionApplicationRecorded, canApplyComposition as compositionCanApply, type CompositionInput } from "./CompositionPanel";
+import { ManuscriptDiff } from "./ManuscriptDiff";
+import { proposalCreationMethod } from "./proposalProvenance";
 import { genreLabel } from "./genreLabels";
 import { changedMetadataFields, chapterEditorMatches, chapterTitleIsDirty, chapterTitleUpdate, type ChapterTitleEditor, type ChapterEditorScope } from "./chapterEditing";
 import "./styles.css";
@@ -261,6 +263,9 @@ type AgentDiscussionForm = {
   mode: AgentDiscussionMode;
   instruction: string;
   selectedText: string;
+  selectedStart?: number;
+  selectedEnd?: number;
+  selectedDraftId?: string;
   includeContextPack: boolean;
   includeLatestDraft: boolean;
   allowWebSearch: boolean;
@@ -436,6 +441,8 @@ export default function App() {
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("write");
   const [contextPack, setContextPack] = useState<ContextPack | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const currentDraftRef = useRef(draft);
+  currentDraftRef.current = draft;
   const [draftText, setDraftText] = useState("");
   const [draftSummary, setDraftSummary] = useState("");
   const [draftLoading, setDraftLoading] = useState(false);
@@ -457,6 +464,7 @@ export default function App() {
     ref: null,
     draft: null
   });
+  const [proposalBaselineOwnerKey, setProposalBaselineOwnerKey] = useState("");
   const [proposalPromotedDraft, setProposalPromotedDraft] = useState<ExactDraftLookup>({
     status: "idle",
     ref: null,
@@ -505,6 +513,11 @@ export default function App() {
   const [agentDiscussionResult, setAgentDiscussionResult] =
     useState<AgentDiscussionResult | null>(null);
   const [draftSelection, setDraftSelection] = useState("");
+  const [draftSelectionRange, setDraftSelectionRange] = useState<ManuscriptSelection | null>(null);
+  const [manuscriptMode, setManuscriptMode] = useState<"preview" | "edit">("preview");
+  const [readingChapterId, setReadingChapterId] = useState<string | null>(null);
+  const [agentTarget, setAgentTarget] = useState<"scene" | "composition">("scene");
+  const pendingManuscriptSelectionRef = useRef<{ projectId: string; draft: Draft; range: ManuscriptSelection } | null>(null);
   const draftTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [desktopUpdate, setDesktopUpdate] = useState<TauriUpdate | null>(null);
   const updateInProgressRef = useRef(false);
@@ -552,6 +565,7 @@ export default function App() {
   const draftRequestSequenceRef = useRef(0);
   const draftEditRevisionRef = useRef(0);
   const draftEditorScopeRef = useRef<DraftScope | null>(null);
+  const draftContextInitializedRef = useRef<string | null>(null);
   const draftDirtyRef = useRef(false);
   const proposalListRequestSequenceRef = useRef(0);
   const activeApiBaseRef = useRef(apiBase);
@@ -672,6 +686,7 @@ export default function App() {
     () => selectedProject?.chapters.find((chapter) => chapter.id === currentChapterId) ?? null,
     [currentChapterId, selectedProject]
   );
+  const readingChapter = selectedProject?.chapters.find((chapter) => chapter.id === readingChapterId) ?? null;
   const hasWorkspace = projects.length > 0;
   const hasScene = Boolean(projectId && sceneId);
   const endpoint = useMemo(
@@ -736,7 +751,7 @@ export default function App() {
   );
   const selectedReviewProposal = useMemo(
     () =>
-      proposalVersions.find((version) => version.version === reviewProposalVersion) ??
+      proposalVersions.find((version) => version.id === selectedProposal?.id && version.version === reviewProposalVersion) ??
       selectedProposal,
     [proposalVersions, reviewProposalVersion, selectedProposal]
   );
@@ -748,13 +763,8 @@ export default function App() {
     () => resolveUniqueProposalRef(selectedReviewProposal?.source_refs ?? [], "draft"),
     [selectedReviewProposal]
   );
-  const proposalDiffRows = useMemo(
-    () =>
-      proposalBaseline.status === "ready" && selectedReviewProposal
-        ? buildReviewDiff(proposalBaseline.draft.text, selectedReviewProposal.body)
-        : [],
-    [proposalBaseline, selectedReviewProposal]
-  );
+  const proposalBaselineKey = JSON.stringify([apiBase, projectId, selectedReviewProposal?.id, selectedReviewProposal?.version, proposalBaselineRef, proposalReviewTargetRef]);
+  const effectiveProposalBaseline: ExactDraftLookup = proposalBaselineOwnerKey === proposalBaselineKey ? proposalBaseline : { status: "loading", ref: null, draft: null };
   const effectiveSourcePaneLayout = useMemo(
     () => clampSourcePaneLayout(sourcePaneLayout, sourcePaneBoundsState),
     [sourcePaneBoundsState, sourcePaneLayout]
@@ -806,7 +816,7 @@ export default function App() {
       if (isLocalizedUserError(message)) {
         setError(message);
       } else {
-        setError(outlineLanguageFailureMessage(exc) ?? (isGeneratedLanguageConflict(exc) ? uiText.errors.generatedLanguageConflict : uiText.errors.requestFailed));
+        setError(manuscriptFailureMessage(exc) ?? outlineLanguageFailureMessage(exc) ?? (isGeneratedLanguageConflict(exc) ? uiText.errors.generatedLanguageConflict : uiText.errors.requestFailed));
         setTechnicalError(
           exc instanceof ApiRequestError ? exc.technicalDetails : toErrorMessage(exc)
         );
@@ -1124,6 +1134,11 @@ export default function App() {
         sequence: draftRequestSequenceRef.current, editorRevision: draftEditRevisionRef.current
       }, draftEditorScopeRef.current, draftDirtyRef.current)) return;
       draftEditorScopeRef.current = request.scope;
+      const contextScope = JSON.stringify(request.scope);
+      if (draftContextInitializedRef.current !== contextScope) {
+        draftContextInitializedRef.current = contextScope;
+        setAgentDiscussionForm((current) => ({ ...current, includeLatestDraft: Boolean(payload.draft?.text.trim()) }));
+      }
       setDraft(payload.draft);
       setDraftText(payload.draft?.text ?? "");
       setDraftSummary(payload.draft?.summary ?? "");
@@ -1837,17 +1852,22 @@ export default function App() {
     if (!target) {
       return "";
     }
-    const selection = target.value.slice(target.selectionStart, target.selectionEnd).trim();
+    const selection = target.value.slice(target.selectionStart, target.selectionEnd);
     return selection;
   }, []);
 
   const captureDraftSelection = useCallback((event: React.SyntheticEvent<HTMLTextAreaElement>) => {
-    setDraftSelection(readDraftSelection(event.currentTarget));
+    const target = event.currentTarget;
+    const text = readDraftSelection(target);
+    setDraftSelection(text);
+    setDraftSelectionRange(text.trim() ? { text, start: target.selectionStart, end: target.selectionEnd } : null);
   }, [readDraftSelection]);
 
   const refreshDraftSelection = useCallback(() => {
     const selection = readDraftSelection(draftTextareaRef.current);
     setDraftSelection(selection);
+    const target = draftTextareaRef.current;
+    setDraftSelectionRange(selection.trim() && target ? { text: selection, start: target.selectionStart, end: target.selectionEnd } : null);
     return selection;
   }, [readDraftSelection]);
 
@@ -1855,7 +1875,9 @@ export default function App() {
     draftEditRevisionRef.current += 1;
     draftDirtyRef.current = true;
     setDraftText(event.target.value);
-    setDraftSelection(readDraftSelection(event.target));
+    setDraftSelection("");
+    setDraftSelectionRange(null);
+    setAgentDiscussionForm((current) => ({ ...current, selectedText: "", selectedStart: undefined, selectedEnd: undefined, selectedDraftId: undefined }));
   }, [readDraftSelection]);
 
   const handleDraftSummaryChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1870,29 +1892,33 @@ export default function App() {
     setDraftText(draft.text);
     setDraftSummary(draft.summary ?? "");
     setDraftSelection("");
+    setDraftSelectionRange(null);
+    setAgentDiscussionForm((current) => ({ ...current, selectedText: "", selectedStart: undefined, selectedEnd: undefined, selectedDraftId: undefined }));
     setNotice(uiText.notices.savedDraftRestored(draft.id, draft.version));
   }, [draft]);
 
   const useDraftSelectionForAgent = useCallback(() => {
-    const selection = draftSelection || refreshDraftSelection();
-    if (!selection) {
-      setNotice(uiText.notices.draftSelectionRequired);
-      return;
-    }
+    const selection = draftSelection;
+    if (!selection.trim() || !draftSelectionRange) { setNotice(uiText.notices.draftSelectionRequired); return; }
     setAgentDiscussionForm((current) => ({
-      ...current,
-      mode: "revise_selection",
-      selectedText: selection,
-      includeLatestDraft: true
+      ...current, mode: "discuss", selectedText: selection, selectedStart: draftSelectionRange.start,
+      selectedEnd: draftSelectionRange.end, selectedDraftId: draft?.id, includeLatestDraft: true
     }));
-    setWorkspaceTab("write"); setActiveTab("agent");
-  }, [draftSelection, refreshDraftSelection]);
+    setAgentTarget("scene"); setWorkspaceTab("write"); setActiveTab("agent");
+  }, [draftSelection, draftSelectionRange, draft]);
+
+  const beginSceneDraft = useCallback(() => {
+    setAgentTarget("scene");
+    setAgentDiscussionForm((current) => ({ ...current, mode: "create_scene", selectedText: "", selectedStart: undefined, selectedEnd: undefined, selectedDraftId: undefined, includeLatestDraft: false, includeContextPack: true }));
+    setActiveTab("agent");
+  }, []);
 
   const requestAgentDiscussion = useCallback(async () => {
     if (!endpoint || !projectId) throw new Error(uiText.errors.selectScene);
     const instruction = agentDiscussionForm.instruction.trim();
     if (!instruction) throw new Error(uiText.errors.agentInstructionRequired);
-    const selectedText = agentDiscussionForm.selectedText.trim();
+    const selectedText = agentDiscussionForm.selectedText;
+    if (selectedText && agentDiscussionForm.selectedDraftId && agentDiscussionForm.selectedDraftId !== draft?.id) throw new Error(uiText.manuscript.selectionChanged);
     if (agentDiscussionForm.mode === "revise_selection" && !selectedText) {
       throw new Error(uiText.errors.agentSelectionRequired);
     }
@@ -1911,7 +1937,7 @@ export default function App() {
       );
     }
     if (
-      agentDiscussionForm.mode !== "discuss" &&
+      agentDiscussionForm.mode !== "discuss" && agentDiscussionForm.mode !== "create_scene" &&
       !agentDiscussionForm.includeLatestDraft
     ) {
       throw new Error(uiText.errors.agentRevisionRequiresSavedDraft);
@@ -1935,6 +1961,8 @@ export default function App() {
       mode: agentDiscussionForm.mode,
       instruction,
       selected_text: agentDiscussionForm.includeLatestDraft ? selectedText || null : null,
+      selected_start: agentDiscussionForm.includeLatestDraft && selectedText ? agentDiscussionForm.selectedStart ?? null : null,
+      selected_end: agentDiscussionForm.includeLatestDraft && selectedText ? agentDiscussionForm.selectedEnd ?? null : null,
       base_text: null,
       include_context_pack: agentDiscussionForm.includeContextPack,
       include_latest_draft: agentDiscussionForm.includeLatestDraft,
@@ -1945,23 +1973,27 @@ export default function App() {
       web_search_query: agentDiscussionForm.webSearchQuery.trim() || null,
       cross_language_policy: crossLanguagePolicy
     };
+    const target = { apiBase, projectId, sceneId };
+    const currentScope = () => activeApiBaseRef.current === target.apiBase && activeProjectIdRef.current === target.projectId && activeSceneIdRef.current === target.sceneId;
     const result = await apiPost<AgentDiscussionResult>(
       apiBase,
       `${endpoint}/agent-discussion`,
       payload
     );
+    if (!currentScope()) return;
     setAgentDiscussionResult(result);
     const refreshed = await refreshProposals(projectId);
+    if (!currentScope()) return;
     const created = refreshed.find((proposal) => proposal.id === result.proposal.id);
     if (!proposalDirty) {
       setCreatingNewProposal(false);
       setSelectedProposalId(created?.id ?? result.proposal.id);
     }
-    setWorkspaceTab("write"); setActiveTab("agent");
+    setWorkspaceTab(result.proposal.artifact_type === "scene_draft" && !proposalDirty ? "proposals" : "write"); setActiveTab("agent");
     setNotice(
       proposalDirty
         ? uiText.notices.proposalCreatedNotOpened(result.proposal.id)
-        : result.replacement_applied
+        : result.proposal.artifact_type === "scene_draft"
           ? uiText.notices.agentSceneDraftCreated
           : uiText.notices.agentDiscussionCreated
     );
@@ -2266,6 +2298,56 @@ export default function App() {
     }
   }, [desktopUpdate, refreshBackendVersion, requestProposalNavigation]);
 
+  const adoptSourceSelection = useCallback(async (document: SourceDocument, range: ManuscriptSelection) => {
+    if (!projectId || !sceneId || document.project_id !== projectId || draftDirtyRef.current) throw new Error(uiText.errors.agentIncludedDraftMustBeSaved);
+    const target = { apiBase, projectId, sceneId };
+    const currentScope = () => activeApiBaseRef.current === target.apiBase && activeProjectIdRef.current === target.projectId && activeSceneIdRef.current === target.sceneId;
+    if (!currentScope()) return;
+    if (draftLoading || !draftEditorScopeRef.current || !draftScopesMatch(draftEditorScopeRef.current, target)) throw new Error(uiText.errors.agentDraftScopeMismatch);
+    const current = currentDraftRef.current;
+    const editorRevision = draftEditRevisionRef.current;
+    const saved = await apiPost<Draft>(apiBase, `/projects/${projectId}/scenes/${sceneId}/draft/from-source`, {
+      source_document_id: document.id, expected_source_updated_at: document.updated_at, expected_source_checksum: document.checksum_sha256,
+      start: range.start, end: range.end, expected_text: range.text, expected_current_draft_id: current?.id ?? null
+    });
+    if (!currentScope() || draftEditRevisionRef.current !== editorRevision || draftDirtyRef.current) return;
+    draftRequestSequenceRef.current += 1; draftEditRevisionRef.current += 1;
+    draftEditorScopeRef.current = target; setDraft(saved); setDraftText(saved.text); setDraftSummary(saved.summary ?? "");
+    setDraftSelection(""); setDraftSelectionRange(null); setReadingChapterId(null); setManuscriptMode("preview"); setWorkspaceTab("write");
+    setNotice(uiText.runtime.draftSaved(saved.version));
+  }, [apiBase, projectId, sceneId, draftLoading]);
+
+  const generateComposition = useCallback(async (input: CompositionInput) => {
+    if (!projectId) throw new Error(uiText.errors.selectProject);
+    const target = { apiBase, projectId };
+    const currentScope = () => activeApiBaseRef.current === target.apiBase && activeProjectIdRef.current === target.projectId;
+    if (!currentScope()) return;
+    const { include_current_draft, include_selected_sources, ...request } = input;
+    const sourceIds = include_selected_sources ? Array.from(selectedAgentSourceIds) : [];
+    if (sourceIds.length > 8 || sourceIds.some((id) => { const source = sourceDocuments.find((item) => item.id === id); return !source || sourceAgentEligibility(source, outputLanguageOrNull(selectedProject?.language), crossLanguagePolicy) !== "eligible"; })) throw new Error(uiText.errors.agentSourcesBlockedByPolicy);
+    if (include_current_draft && (!draft || draftDirty || draft.project_id !== projectId || draft.scene_id !== sceneId)) throw new Error(uiText.errors.agentIncludedDraftMustBeSaved);
+    const result = await apiPost<{ proposal: ProposalArtifact; output_language: string }>(apiBase, `/projects/${encodeURIComponent(projectId)}/composition-proposals`, { ...request, source_document_ids: sourceIds, cross_language_policy: crossLanguagePolicy, ...(include_current_draft && draft ? { scene_id: sceneId, included_draft_id: draft.id } : {}) });
+    if (!currentScope()) return;
+    await refreshProposals(projectId);
+    if (!currentScope()) return;
+    setProposalStatusFilter("all"); setCreatingNewProposal(false); setSelectedProposalId(result.proposal.id);
+    hydrateProposalEditor(result.proposal); setWorkspaceTab("proposals"); setNotice(uiText.manuscript.compositionCreated);
+  }, [apiBase, projectId, sceneId, draft, draftDirty, selectedAgentSourceIds, sourceDocuments, selectedProject, crossLanguagePolicy, refreshProposals, hydrateProposalEditor]);
+
+  const applyCompositionProposal = useCallback(async () => {
+    if (!selectedProposal || !parseComposition(selectedProposal) || proposalDirty || selectedProposal.status !== "accepted") throw new Error(uiText.errors.proposalActionUnavailable);
+    const target = { apiBase, projectId };
+    const currentScope = () => activeApiBaseRef.current === target.apiBase && activeProjectIdRef.current === target.projectId;
+    if (!currentScope()) return;
+    const result = await apiPost<{ proposal: ProposalArtifact; chapters: GraphNodePayload[]; scenes: GraphNodePayload[]; drafts: Draft[]; already_applied: boolean }>(apiBase, `/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(selectedProposal.id)}/apply/composition`, { expected_version: selectedProposal.version, reviewer: "author", rationale: "workbench.composition.apply" });
+    if (!currentScope()) return;
+    await refreshWorkspace(projectId, sceneId); await refreshGraphPreview(projectId); await refreshProposals(projectId);
+    if (!currentScope()) return;
+    setCreatingNewProposal(false); setSelectedProposalId(result.proposal.id); hydrateProposalEditor(result.proposal);
+    if (result.chapters[0]) { setReadingChapterId(result.chapters[0].id); setChapterSelection({ projectId, id: result.chapters[0].id }); setWorkspaceTab("write"); setAgentTarget("composition"); }
+    setNotice(uiText.manuscript.compositionApplied);
+  }, [apiBase, projectId, sceneId, selectedProposal, proposalDirty, refreshWorkspace, refreshGraphPreview, refreshProposals, hydrateProposalEditor]);
+
   const generateOutlineLanguageProposal = useCallback(async () => {
     if (!projectId) throw new Error(uiText.errors.selectProject);
     const target = { apiBase, projectId };
@@ -2397,11 +2479,19 @@ export default function App() {
             : uiText.errors.proposalTargetMismatch
       );
     }
+    const target = { apiBase, projectId, sceneId };
+    if (draftLoading || draftDirtyRef.current || !draftEditorScopeRef.current || !draftScopesMatch(draftEditorScopeRef.current, target)) throw new Error(uiText.errors.agentIncludedDraftMustBeSaved);
+    const currentDraft = currentDraftRef.current;
+    const baseline = resolveUniqueProposalRef(selectedProposal.source_refs, "draft");
+    if (baseline.status === "unique" && baseline.ref !== currentDraft?.id) throw new Error(uiText.manuscript.staleProposal);
+    const editorRevision = draftEditRevisionRef.current;
+    const currentScope = () => activeApiBaseRef.current === apiBase && activeProjectIdRef.current === projectId && activeSceneIdRef.current === sceneId;
     const result = await apiPost<ProposalDraftPromotionResult>(
       apiBase,
       `/projects/${projectId}/proposals/${selectedProposal.id}/promote/draft`,
-      { scene_id: sceneId, expected_version: selectedProposal.version }
+      { scene_id: sceneId, expected_version: selectedProposal.version, expected_current_draft_id: currentDraft?.id ?? null }
     );
+    if (!currentScope() || draftEditRevisionRef.current !== editorRevision || draftDirtyRef.current) return;
     draftRequestSequenceRef.current += 1;
     draftEditorScopeRef.current = { apiBase, projectId, sceneId };
     draftEditRevisionRef.current += 1;
@@ -2413,11 +2503,14 @@ export default function App() {
     await refreshProposals(projectId);
     setCreatingNewProposal(false);
     setSelectedProposalId(result.proposal.id);
+    if (!currentScope()) return;
+    setReadingChapterId(null); setManuscriptMode("preview"); setDraftSelectionRange(null); setWorkspaceTab("write");
     setNotice(uiText.runtime.proposalPromoted(result.draft.version));
   }, [
     apiBase,
     projectId,
     proposalDerivedDraftRef,
+    draftLoading,
     proposalDirty,
     proposalTarget,
     refreshProposals,
@@ -2615,12 +2708,26 @@ export default function App() {
     setCrossLanguagePolicy("project_only");
     setDraftSelection("");
     draftEditorScopeRef.current = null;
+    draftContextInitializedRef.current = null;
     draftDirtyRef.current = false;
     setDraft(null);
     setDraftText("");
     setDraftSummary("");
-    setAgentDiscussionForm((current) => ({ ...current, selectedText: "" }));
+    setDraftSelectionRange(null); setManuscriptMode("preview"); setAgentTarget(readingChapterId ? "composition" : "scene");
+    setAgentDiscussionForm((current) => ({ ...current, mode: "discuss", includeLatestDraft: false, selectedText: "", selectedStart: undefined, selectedEnd: undefined, selectedDraftId: undefined }));
   }, [apiBase, projectId, sceneId]);
+
+  useEffect(() => { setReadingChapterId(null); setAgentTarget("scene"); pendingManuscriptSelectionRef.current = null; }, [apiBase, projectId]);
+
+  useEffect(() => {
+    if (draftLoading || !draft || !pendingManuscriptSelectionRef.current) return;
+    const pending = pendingManuscriptSelectionRef.current;
+    if (pending.projectId !== projectId || pending.draft.scene_id !== sceneId) return;
+    pendingManuscriptSelectionRef.current = null;
+    if (pending.draft.id !== draft.id || draft.text.slice(pending.range.start, pending.range.end) !== pending.range.text) { setNotice(uiText.manuscript.selectionChanged); return; }
+    setAgentDiscussionForm((current) => ({ ...current, mode: "discuss", includeLatestDraft: true, selectedText: pending.range.text, selectedStart: pending.range.start, selectedEnd: pending.range.end, selectedDraftId: draft.id }));
+    setAgentTarget("scene"); setActiveTab("agent");
+  }, [draft, draftLoading, projectId, sceneId]);
 
   useEffect(() => {
     if (!projectId || !selectedSourceDocumentId) {
@@ -2759,6 +2866,7 @@ export default function App() {
       }
     };
 
+    setProposalBaselineOwnerKey(proposalBaselineKey);
     void loadExactDraft(proposalBaselineRef, proposalReviewTargetRef, setProposalBaseline);
     void loadExactDraft(
       proposalDerivedDraftRef,
@@ -2772,6 +2880,7 @@ export default function App() {
     apiBase,
     projectId,
     proposalBaselineRef,
+    proposalBaselineKey,
     proposalDerivedDraftRef,
     proposalPromotedDraftTargetRef,
     proposalReviewTargetRef,
@@ -2984,16 +3093,23 @@ export default function App() {
             onLoadChapterMetadata={loadChapterMetadata}
             onLoadSceneMetadata={loadSceneMetadata}
             sceneMetadataSaveAllowed={sceneMetadataTarget?.apiBase === apiBase && sceneMetadataTarget.projectId === projectId && sceneMetadataTarget.sceneId === sceneId && sceneMetadataDirty}
+            readingChapterId={readingChapterId}
+            onEditChapter={(id) => {
+              const chapter = selectedProject?.chapters.find((item) => item.id === id);
+              if (!chapter || actionInFlightRef.current) return;
+              if (chapterEditsDirty && !window.confirm(uiText.authorWorkspace.discardMetadataEdits)) return;
+              setChapterMetadataTarget(null); setChapterForm(defaultChapterForm);
+              setChapterSelection({ projectId, id });
+              setChapterTitleEditor({ apiBase, projectId, chapterId: id, title: chapter.title, originalTitle: chapter.title });
+            }}
             onSelectChapter={(id) => {
               const chapter = selectedProject?.chapters.find((item) => item.id === id);
               if (!chapter) return;
-              if (chapterTitleEditor?.chapterId === id && chapterEditorMatches(chapterTitleEditor, apiBase, projectId)) return;
-              if (actionInFlightRef.current) return;
-              if (chapterEditsDirty && !window.confirm(uiText.authorWorkspace.discardMetadataEdits)) return;
-              setChapterMetadataTarget(null);
-              setChapterForm(defaultChapterForm);
-              setChapterSelection({ projectId, id });
-              setChapterTitleEditor({ apiBase, projectId, chapterId: id, title: chapter.title, originalTitle: chapter.title });
+              requestProposalNavigation(chapter.title, () => {
+                setReadingChapterId(id); setChapterSelection({ projectId, id }); setWorkspaceTab("write");
+                setManuscriptMode("preview"); setDraftSelection(""); setDraftSelectionRange(null);
+                setAgentTarget("composition");
+              });
             }}
             hasWorkspace={hasWorkspace}
             locationForm={locationForm}
@@ -3051,13 +3167,13 @@ export default function App() {
               );
             }}
             onSelectScene={(nextSceneId) => {
-              if (nextSceneId === sceneId) { setWorkspaceTab("write"); return; }
+              if (nextSceneId === sceneId) { setReadingChapterId(null); setAgentTarget("scene"); setWorkspaceTab("write"); return; }
               const nextScene = findScene(projects, projectId, nextSceneId);
               requestProposalNavigation(
                 uiText.proposals.navigateScene(nextScene?.title ?? nextSceneId),
                 () => {
                   setWorkspaceTab("write");
-                  setChapterSelection(null);
+                  setChapterSelection(null); setReadingChapterId(null); setAgentTarget("scene");
                   if (nextSceneId === sceneId) return;
                   setSceneId(nextSceneId);
                   setContextPack(null);
@@ -3098,10 +3214,10 @@ export default function App() {
           <section className="scene-toolbar">
             <div>
               <h1>
-                {selectedScene?.title ||
+                {readingChapter?.title || selectedScene?.title ||
                   (hasWorkspace ? uiText.workspace.importedStructureTitle : uiText.navigation.welcomeTitle)}
               </h1>
-              {selectedScene && <button className="scene-rename-trigger" type="button" disabled={!canReview || busy !== null} onClick={() => {
+              {!readingChapter && selectedScene && <button className="scene-rename-trigger" type="button" disabled={!canReview || busy !== null} onClick={() => {
                 if (sceneTitleEditor?.sceneId === sceneId) return;
                 if (sceneEditsDirty && !window.confirm(uiText.authorWorkspace.discardMetadataEdits)) return;
                 setSceneMetadataTarget(null);
@@ -3110,19 +3226,19 @@ export default function App() {
               }}>{uiText.authorWorkspace.renameScene}</button>}
               {sceneTitleEditor?.apiBase === apiBase && sceneTitleEditor.projectId === projectId && sceneTitleEditor.sceneId === sceneId && <div className="scene-title-editor"><input aria-label={uiText.authorWorkspace.sceneTitle} value={sceneTitleEditor.title} disabled={busy !== null} onChange={(event) => setSceneTitleEditor((current) => current ? { ...current, title: event.target.value } : current)} /><button type="button" disabled={busy !== null || !sceneTitleEditor.title.trim()} onClick={() => runAction("rename-scene", saveSceneTitle)}>{uiText.common.save}</button><button type="button" disabled={busy !== null} onClick={() => setSceneTitleEditor(null)}>{uiText.common.cancel}</button></div>}
               <p>
-                {hasScene
+                {readingChapter ? selectedProject?.title : hasScene
                   ? `${selectedProject?.title ?? ""} / ${selectedProject?.chapters.find((chapter) => chapter.scenes.some((scene) => scene.id === sceneId))?.title ?? ""}`
                   : hasWorkspace
                     ? uiText.workspace.noSceneWithWorkspace
                     : uiText.workspace.noSceneEmptyWorkspace}
               </p>
             </div>
-            {workspaceTab === "write" && <div className="toolbar-actions">
-              <button className="primary" onClick={() => runAction("save", saveDraft)} type="button" disabled={!canGenerate || !hasScene || busy !== null}>
+            {workspaceTab === "write" && !readingChapter && <div className="toolbar-actions">
+              <button className="primary" onClick={() => runAction("save", saveDraft)} type="button" disabled={!canGenerate || !hasScene || !draftDirty || draftLoading || busy !== null}>
                 <Save size={16} /> {uiText.editor.saveButton}
               </button>
-              <button onClick={() => { setAgentDiscussionForm((current) => ({ ...current, mode: "continue_scene", includeLatestDraft: true, selectedText: "" })); setWorkspaceTab("write"); setActiveTab("agent"); }}
-                type="button" disabled={!hasScene} title={uiText.navigation.agentHelp}>
+              <button onClick={() => { setAgentTarget("scene"); setAgentDiscussionForm((current) => ({ ...current, mode: "continue_scene", includeLatestDraft: true, selectedText: "", selectedStart: undefined, selectedEnd: undefined, selectedDraftId: undefined })); setWorkspaceTab("write"); setActiveTab("agent"); }}
+                type="button" disabled={!hasScene || !draft?.text.trim() || busy !== null} title={uiText.navigation.agentHelp}>
                 <Wand2 size={16} /> {uiText.navigation.continueScene}
               </button>
               {!inspectorOpen && <button type="button" onClick={() => setActiveTab("agent")}><MessageSquare size={16} /> {uiText.authorWorkspace.openAgent}</button>}
@@ -3195,7 +3311,7 @@ export default function App() {
             </section>
           )}
 
-          {workspaceTab === "write" && (
+          {workspaceTab === "write" && !readingChapter && (
             <details className="scene-details">
               <summary>{uiText.navigation.sceneDetails}</summary>
               <section className="meta-grid" aria-label={uiText.workspace.sceneMetadataAria}>
@@ -3301,6 +3417,7 @@ export default function App() {
                 />
               )}
               <DocumentReader
+                canAdoptSources={canReview}
                 busy={busy}
                 canGenerate={canGenerate}
                 document={selectedSourceDocument}
@@ -3316,8 +3433,10 @@ export default function App() {
                 onRetry={(document, file) =>
                   runAction("source-retry", () => importSourceFiles([file], document))
                 }
-                onSaveDraft={(document) => requestProposalNavigation(uiText.library.saveDraft, () => {
-                  void runAction("import-draft", () => saveDocumentAsDraft(document));
+                onSaveSelection={(document, range) => requestProposalNavigation(uiText.manuscript.useSource, () => { void runAction("source-selection-draft", () => adoptSourceSelection(document, range)); })}
+                onSaveDraft={(document) => requestProposalNavigation(uiText.manuscript.saveWholeSource, () => {
+                  const text = document.extracted_text ?? "";
+                  void runAction("source-whole-draft", () => adoptSourceSelection(document, { text, start: 0, end: text.length }));
                 })}
                 onSaveProposal={(document) =>
                   runAction("import-proposal", () => saveDocumentAsProposal(document))
@@ -3356,14 +3475,14 @@ export default function App() {
 
           {workspaceTab === "proposals" && (
           <ProposalInbox
-            baseline={proposalBaseline}
+            baseline={effectiveProposalBaseline}
             busy={busy}
             canGenerate={canGenerate}
             canReview={canReview}
             currentDraftId={draft?.id ?? ""}
+            currentDraftReady={!draftLoading && !draftDirty && Boolean(draftEditorScopeRef.current && draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId }))}
             currentSceneId={sceneId}
             derivedDraftRef={proposalDerivedDraftRef}
-            diffRows={proposalDiffRows}
             dirty={proposalDirty}
             filter={proposalStatusFilter}
             hasScene={hasScene}
@@ -3371,6 +3490,7 @@ export default function App() {
             onApplyProjectStructure={() =>
               runAction("proposal-structure", applyProjectStructureProposal)
             }
+            onApplyComposition={() => requestProposalNavigation(uiText.manuscript.applyComposition, () => { void runAction("composition-apply", applyCompositionProposal); })}
             onApplyOutlineLanguage={() => requestProposalNavigation(uiText.outlineLanguage.apply, () => {
               void runAction("outline-language-apply", applyOutlineLanguageProposal);
             })}
@@ -3408,6 +3528,7 @@ export default function App() {
               setDraftSummary(proposalPromotedDraft.draft.summary ?? "");
               setDraftSelection("");
               setAgentDiscussionForm((current) => ({ ...current, selectedText: "" }));
+              setReadingChapterId(null); setManuscriptMode("preview"); setDraftSelectionRange(null);
               setWorkspaceTab("write");
               setNotice(uiText.notices.promotedDraftOpened(
                 proposalPromotedDraft.draft.id,
@@ -3459,52 +3580,36 @@ export default function App() {
             selectedProposal={selectedProposal}
             targetPolicy={proposalTarget}
             targetScene={proposalTargetScene}
-            versions={proposalVersions}
+            versions={proposalVersions.filter((version) => version.id === selectedProposal?.id)}
             versionsLoading={proposalVersionsLoading}
           />
           )}
 
-          {workspaceTab === "write" && (
-          <section className="draft-surface">
+          {workspaceTab === "write" && readingChapter && <ChapterManuscript apiBase={apiBase} projectId={projectId} chapter={readingChapter} refreshKey={`${draft?.id ?? ""}:${draft?.version ?? ""}`} busy={busy !== null}
+            onNewChapter={() => { setAgentTarget("composition"); setActiveTab("agent"); }}
+            onOpenScene={(id) => requestProposalNavigation(uiText.manuscript.openScene, () => { setReadingChapterId(null); setChapterSelection(null); setAgentTarget("scene"); setSceneId(id); setWorkspaceTab("write"); })}
+            onAskSelection={(selectedDraft, range) => requestProposalNavigation(uiText.manuscript.selectionAction, () => {
+              setReadingChapterId(null); setChapterSelection(null); setAgentTarget("scene"); setWorkspaceTab("write"); setActiveTab("agent");
+              if (selectedDraft.scene_id === sceneId && draft?.id === selectedDraft.id) setAgentDiscussionForm((current) => ({ ...current, mode: "discuss", includeLatestDraft: true, selectedText: range.text, selectedStart: range.start, selectedEnd: range.end, selectedDraftId: selectedDraft.id }));
+              else { pendingManuscriptSelectionRef.current = { projectId, draft: selectedDraft, range }; if (selectedDraft.scene_id === sceneId) { void runAction("chapter-draft-refresh", () => refreshLatestDraft()); } else setSceneId(selectedDraft.scene_id); }
+            })} />}
+          {workspaceTab === "write" && !readingChapter && hasScene && (
+          <section className={`draft-surface manuscript-surface ${manuscriptMode}`}>
             <div className="draft-header">
-              <span>{uiText.editor.draftTitle}</span>
-              <div className="draft-header-actions">
-                <button type="button" disabled={!draftText.trim()} onClick={(event) => { event.preventDefault(); exportAuthorText(selectedScene?.title ?? "StoryGraph", draftText); }}><Download size={13} /> {uiText.navigation.exportText}</button>
-                <small>
-                  {draft
-                    ? `v${draft.version} / ${draft.id} / ${formatArtifactLanguage(draft.content_language, draft.language_inferred)}`
-                    : uiText.editor.unsavedDraft}
-                </small>
-                <button
-                  disabled={!draftText.trim() || busy !== null}
-                  onClick={useDraftSelectionForAgent}
-                  title={uiText.editor.markSelectionForAgentTitle}
-                  type="button"
-                >
-                  <MessageSquare size={13} /> {uiText.editor.markSelectionForAgent}
-                </button>
+              <span>{uiText.manuscript.sceneBody}</span>
+              <div className="manuscript-mode" role="group" aria-label={uiText.manuscript.sceneBody}>
+                <button type="button" className={manuscriptMode === "preview" ? "active" : ""} aria-pressed={manuscriptMode === "preview"} onClick={() => setManuscriptMode("preview")}><Eye size={14} />{uiText.manuscript.preview}</button>
+                <button type="button" className={manuscriptMode === "edit" ? "active" : ""} aria-pressed={manuscriptMode === "edit"} disabled={!canGenerate || draftLoading} onClick={() => setManuscriptMode("edit")}><FileText size={14} />{uiText.manuscript.edit}</button>
               </div>
+              <div className="draft-header-actions"><button type="button" disabled={!draftText.trim()} onClick={() => exportAuthorText(selectedScene?.title ?? "StoryGraph", draftText)}><Download size={13} />{uiText.navigation.exportText}</button></div>
             </div>
-            <div className="draft-status"><span>{uiText.navigation.draftCharacters(Array.from(draftText).length)}</span><span className={draftDirty ? "dirty" : ""}>{draftDirty ? uiText.navigation.draftUnsaved : draft ? uiText.navigation.draftSaved : uiText.editor.unsavedDraft}</span></div>
-            <textarea
-              ref={draftTextareaRef}
-              readOnly={draftLoading || !draftEditorScopeRef.current || !draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId }) || (busy !== null && busy !== "save" && busy !== "proposal-save-navigation")}
-              value={draftText}
-              onChange={handleDraftTextChange}
-              onKeyUp={captureDraftSelection}
-              onMouseUp={captureDraftSelection}
-              onSelect={captureDraftSelection}
-              spellCheck={false}
-              aria-label={uiText.editor.draftBodyAria}
-            />
-            <input
-              className="summary-input"
-              readOnly={draftLoading || !draftEditorScopeRef.current || !draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId }) || (busy !== null && busy !== "save" && busy !== "proposal-save-navigation")}
-              value={draftSummary}
-              onChange={handleDraftSummaryChange}
-              aria-label={uiText.editor.draftSummaryAria}
-              placeholder={uiText.editor.draftSummaryAria}
-            />
+            <div className="draft-status"><span>{uiText.navigation.draftCharacters(Array.from(draftText).length)}{draft ? ` · v${draft.version}` : ""}</span><span className={draftDirty ? "dirty" : ""}>{draftDirty ? uiText.navigation.draftUnsaved : draft ? uiText.navigation.draftSaved : uiText.manuscript.sceneEmpty}</span></div>
+            {draftSelection.trim() && <div className="manuscript-selection-bar"><span>{uiText.manuscript.selectionHelp}</span><button type="button" disabled={busy !== null} onClick={useDraftSelectionForAgent}><MessageSquare size={14} />{uiText.manuscript.selectionAction}</button></div>}
+            {draftLoading ? <p className="manuscript-empty">{uiText.manuscript.loading}</p> : manuscriptMode === "preview" ? draftText.trim() ?
+              <div className="manuscript-page">{draftDirty && <p className="manuscript-reading-hint">{uiText.manuscript.unsavedPreview}</p>}<ManuscriptProse text={draftText} onSelection={(range) => { setDraftSelection(range?.text ?? ""); setDraftSelectionRange(range); }} /></div> :
+              <div className="manuscript-empty"><BookOpen size={34} /><h2>{uiText.manuscript.emptyTitle}</h2><p>{uiText.manuscript.emptyHelp}</p><div><button type="button" className="primary" disabled={!canGenerate} onClick={() => setManuscriptMode("edit")}><FileText size={15} />{uiText.manuscript.startWriting}</button><button type="button" disabled={!canDiscussWithAgent || busy !== null} onClick={beginSceneDraft}><Wand2 size={15} />{uiText.manuscript.generateScene}</button><button type="button" onClick={() => setWorkspaceTab("sources")}><Library size={15} />{uiText.manuscript.openSources}</button></div></div> :
+              <div className="manuscript-edit-page"><textarea ref={draftTextareaRef} readOnly={draftLoading || !draftEditorScopeRef.current || !draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId }) || (busy !== null && busy !== "save" && busy !== "proposal-save-navigation")} value={draftText} onChange={handleDraftTextChange} onKeyUp={captureDraftSelection} onMouseUp={captureDraftSelection} onSelect={captureDraftSelection} spellCheck={false} aria-label={uiText.editor.draftBodyAria} /></div>}
+            {manuscriptMode === "edit" && <input className="summary-input" readOnly={draftLoading || busy !== null} value={draftSummary} onChange={handleDraftSummaryChange} aria-label={uiText.editor.draftSummaryAria} placeholder={uiText.editor.draftSummaryAria} />}
           </section>
           )}
 
@@ -3548,7 +3653,8 @@ export default function App() {
           <details className="agent-preset-options"><summary>{uiText.authorWorkspace.presetOptions}</summary>
           <AgentPresets compact apiBase={apiBase} settings={agentSettings} busy={busy !== null} onChange={setAgentSettings} onManage={() => setActiveTab("settings")} />
           </details>
-          <AgentDiscussionPanel
+          <div className="agent-target-tabs"><button type="button" className={agentTarget === "scene" ? "active" : ""} onClick={() => { setReadingChapterId(null); setAgentTarget("scene"); }}>{uiText.manuscript.currentScene}</button><button type="button" className={agentTarget === "composition" ? "active" : ""} onClick={() => setAgentTarget("composition")}>{uiText.manuscript.newWork}</button></div>
+          {agentTarget === "composition" ? <CompositionComposer key={`${apiBase}:${projectId}`} sourceLabels={Array.from(selectedAgentSourceIds).map((id) => { const source = sourceDocuments.find((item) => item.id === id); return source ? `${source.title} · ${formatSourceLanguage(source.language)} · ${id}` : uiText.agentDiscussion.sourceMissing; })} sourcePolicy={crossLanguagePolicy === "explicit_reference" ? uiText.language.explicitReference : uiText.language.projectOnly} draftLabel={!readingChapter && draft?.text.trim() && !draftDirty && draft.project_id === projectId && draft.scene_id === sceneId ? `${selectedScene?.title ?? ""} · v${draft.version} · ${draft.id}` : null} busy={busy !== null} canGenerate={Boolean(projectId) && canGenerate && llmConfigured} onGenerate={(input) => requestProposalNavigation(uiText.manuscript.generate, () => { void runAction("composition-generate", () => generateComposition(input)); })} /> : <AgentDiscussionPanel
             busy={busy}
             canDiscuss={canDiscussWithAgent}
             draft={draft}
@@ -3581,7 +3687,7 @@ export default function App() {
             projectId={projectId}
             sceneId={sceneId}
             sceneTitle={selectedScene?.title ?? ""}
-          />
+          />}
           </div>
           )}
 
@@ -3741,7 +3847,7 @@ function AgentDiscussionPanel({
   sceneTitle: string;
 }) {
   const selectedRequired = form.mode === "revise_selection";
-  const draftRequired = form.mode !== "discuss";
+  const draftRequired = form.mode !== "discuss" && form.mode !== "create_scene";
   const includedDraft = agentIncludedDraftPolicy(
     draft,
     form.includeLatestDraft,
@@ -3804,7 +3910,7 @@ function AgentDiscussionPanel({
           <span>{projectLanguage ? formatArtifactLanguage(projectLanguage, false) : uiText.language.projectLanguageNeedsReview} · {uiText.agentDiscussion.sourcePickerCount(selectedSourceIds.size)}</span>
           <code>{savedDraftManifest}</code>
         </div>
-        {form.includeLatestDraft && includedDraft.status !== "ready" && <div className="agent-context-note warning">
+        {form.includeLatestDraft && includedDraft.status !== "ready" && (draftDirty || Boolean(draft) || draftRequired) && <div className="agent-context-note warning">
           <span>{draftDirty ? uiText.authorWorkspace.saveBeforeSend : includedDraft.status === "blocked_scope" ? uiText.errors.agentDraftScopeMismatch : uiText.errors.agentIncludedDraftMustBeSaved}</span>
           <button type="button" onClick={onSaveDraft} disabled={busy !== null || !hasScene}>{uiText.authorWorkspace.saveCurrentDraft}</button>
         </div>}
@@ -3818,10 +3924,11 @@ function AgentDiscussionPanel({
                 onFormChange((current) => ({
                   ...current,
                   mode: event.target.value as AgentDiscussionMode,
-                  includeLatestDraft: event.target.value === "discuss" ? current.includeLatestDraft : true
+                  includeLatestDraft: event.target.value === "create_scene" ? false : event.target.value === "discuss" ? current.includeLatestDraft && Boolean(draft) : true
                 }))
               }
             >
+              {!draft?.text.trim() && <option value="create_scene">{uiText.manuscript.generateScene}</option>}
               <option value="discuss">{uiText.agentDiscussion.modes.discuss}</option>
               <option value="continue_scene">{uiText.navigation.continueScene}</option>
               <option value="revise_selection">{uiText.agentDiscussion.modes.revise_selection}</option>
@@ -3842,13 +3949,13 @@ function AgentDiscussionPanel({
             placeholder={uiText.agentDiscussion.instructionPlaceholder}
           />
         </label>
-        {selectedRequired && <label className="agent-field selection">
+        {(selectedRequired || Boolean(form.selectedText)) && <label className="agent-field selection">
           <span>{uiText.agentDiscussion.selectionLabel}</span>
           <textarea
             disabled={!form.includeLatestDraft}
             value={form.selectedText}
             onChange={(event) =>
-              onFormChange((current) => ({ ...current, selectedText: event.target.value }))
+              onFormChange((current) => ({ ...current, selectedText: event.target.value, selectedStart: undefined, selectedEnd: undefined, selectedDraftId: undefined }))
             }
             placeholder={uiText.agentDiscussion.selectionPlaceholder}
           />
@@ -3952,12 +4059,14 @@ function AgentDiscussionPanel({
             <input
               type="checkbox"
               checked={form.includeLatestDraft}
+              disabled={form.mode === "create_scene" || !draft}
               onChange={(event) =>
                 onFormChange((current) => ({
                   ...current,
                   includeLatestDraft: event.target.checked,
                   mode: event.target.checked ? current.mode : "discuss",
-                  selectedText: event.target.checked ? current.selectedText : ""
+                  selectedText: event.target.checked ? current.selectedText : "",
+                  selectedStart: event.target.checked ? current.selectedStart : undefined, selectedEnd: event.target.checked ? current.selectedEnd : undefined, selectedDraftId: event.target.checked ? current.selectedDraftId : undefined
                 }))
               }
             />
@@ -4121,16 +4230,17 @@ function ProposalInbox({
   canGenerate,
   canReview,
   currentDraftId,
+  currentDraftReady,
   currentSceneId,
   currentProjectId,
   derivedDraftRef,
-  diffRows,
   dirty,
   filter,
   hasScene,
   onAccept,
   onApplyProjectStructure,
   onApplyOutlineLanguage,
+  onApplyComposition,
   onCreateNew,
   onExtractCandidates,
   onFilterChange,
@@ -4166,16 +4276,17 @@ function ProposalInbox({
   canGenerate: boolean;
   canReview: boolean;
   currentDraftId: string;
+  currentDraftReady: boolean;
   currentSceneId: string;
   currentProjectId: string;
   derivedDraftRef: UniqueRefResolution;
-  diffRows: ReviewDiffRow[];
   dirty: boolean;
   filter: ProposalStatus | "all";
   hasScene: boolean;
   onAccept: () => void;
   onApplyProjectStructure: () => void;
   onApplyOutlineLanguage: () => void;
+  onApplyComposition: () => void;
   onCreateNew: () => void;
   onExtractCandidates: () => void;
   onFilterChange: (filter: ProposalStatus | "all") => void;
@@ -4215,7 +4326,10 @@ function ProposalInbox({
   );
   const canSubmit = canGenerate && busy === null && Boolean(actionPolicy?.canSubmit);
   const canDecide = canReview && busy === null && Boolean(actionPolicy?.canDecide);
+  const sourceBaseline = resolveUniqueProposalRef(selectedProposal?.source_refs ?? [], "draft");
+  const staleDraftBaseline = sourceBaseline.status === "unique" && sourceBaseline.ref !== currentDraftId;
   const canPromoteDraft =
+    currentDraftReady && !staleDraftBaseline &&
     canReview &&
     busy === null &&
     hasScene &&
@@ -4236,6 +4350,10 @@ function ProposalInbox({
     Boolean(actionPolicy?.canPromote) &&
     selectedProposal?.artifact_type === "project_structure_draft";
   const sortedVersions = [...versions].sort((left, right) => right.version - left.version);
+  const compositionBody = parseComposition(selectedProposal);
+  const editedComposition = selectedProposal ? parseComposition({ ...selectedProposal, body: proposalText }) : null;
+  const compositionApplied = compositionApplicationRecorded(selectedProposal);
+  const canApplyComposition = canReview && compositionCanApply(selectedProposal, dirty, currentProjectId);
   const storedOutlinePatch = parseOutlineLanguagePatch(selectedProposal);
   const editedOutlinePatch = selectedProposal ? parseOutlineLanguagePatch({ ...selectedProposal, body: proposalText }) : null;
   const isOutlinePatch = Boolean(storedOutlinePatch || editedOutlinePatch);
@@ -4319,9 +4437,12 @@ function ProposalInbox({
               disabled={locked}
             />
           </div>
-          {isOutlinePatch ? <>
+          {compositionBody ? <>{editedComposition && <CompositionPreview body={editedComposition} />}<details><summary>{uiText.outlineLanguage.advanced}</summary>{bodyEditor}</details></> : isOutlinePatch ? <>
             {editedOutlinePatch ? <OutlineLanguagePreview patch={editedOutlinePatch} /> : <p className="proposal-inline-warning">{uiText.outlineLanguage.invalidPreview}</p>}
             <details><summary>{uiText.outlineLanguage.advanced}</summary>{bodyEditor}</details>
+          </> : selectedProposal?.artifact_type === "scene_draft" ? <>
+            {baseline.status === "ready" && reviewProposal?.version === selectedProposal.version ? <ManuscriptDiff before={baseline.draft.text} after={proposalText} labels={{ ...uiText.manuscript, title: uiText.manuscript.diffTitle }} /> : selectedProposal.source_refs.some((ref) => ref.kind === "draft") ? reviewProposal && reviewProposal.version !== selectedProposal.version ? <ManuscriptProse text={proposalText} /> : <p className="proposal-inline-warning">{baseline.status === "loading" || baseline.status === "idle" ? uiText.proposals.baselineLoading : uiText.proposals.baselineUnavailable}</p> : <ManuscriptDiff before="" after={proposalText} labels={{ ...uiText.manuscript, title: uiText.manuscript.diffTitle }} />}
+            <details><summary>{uiText.manuscript.edit}</summary>{bodyEditor}</details>
           </> : bodyEditor}
           <div className="proposal-actions">
             <button type="button" disabled={!proposalText.trim()} onClick={() => exportAuthorText(proposalTitle || "StoryGraph", proposalText)}><Download size={14} /> {uiText.navigation.exportText}</button>
@@ -4350,6 +4471,7 @@ function ProposalInbox({
                 <BookOpen size={14} /> {uiText.proposals.applyStructure}
               </button>
             )}
+            {compositionBody && (selectedProposal?.status === "accepted" || compositionApplied) && <button type="button" disabled={busy !== null || !canApplyComposition} onClick={onApplyComposition}><BookOpen size={14} />{compositionApplied ? uiText.manuscript.compositionApplied : uiText.manuscript.applyComposition}</button>}
             {(canApplyOutlineLanguage || (canReview && outlineApplied && !dirty)) && <button type="button" disabled={busy !== null || outlineApplied} onClick={onApplyOutlineLanguage}>
               <BookOpen size={14} /> {outlineApplied ? uiText.outlineLanguage.alreadyApplied : uiText.outlineLanguage.apply}
             </button>}
@@ -4359,6 +4481,7 @@ function ProposalInbox({
           )}
           {actionPolicy?.showPromotion && selectedProposal?.artifact_type === "scene_draft" && (
             <div className="proposal-promotion-state">
+              {staleDraftBaseline && <p className="proposal-inline-warning">{uiText.manuscript.staleProposal}</p>}
               {derivedDraftRef.status === "ambiguous" ? (
                 <p className="proposal-inline-warning">{uiText.proposals.derivedDraftAmbiguous}</p>
               ) : derivedDraftRef.status === "unique" ? (
@@ -4408,7 +4531,7 @@ function ProposalInbox({
                 : uiText.common.none
             }
           />
-          <MetricRow label={uiText.proposals.metadataCreatedVia} value={formatProvenanceMethod(selectedProposal?.provenance.created_via)} />
+          <MetricRow label={uiText.proposals.metadataCreatedVia} value={proposalCreationMethod(selectedProposal, versions) ? formatProvenanceMethod(proposalCreationMethod(selectedProposal, versions)) : versionsLoading ? uiText.common.loading : uiText.common.notSet} />
           {proposalType === "fact_draft" && (
             <label>
               <span>{uiText.proposals.sourceDraft}</span>
@@ -4430,7 +4553,7 @@ function ProposalInbox({
                 </button>
               </div>
           )}
-          <details open={isOutlinePatch ? undefined : true}>
+          <details open={isOutlinePatch || compositionBody ? undefined : true}>
           <summary>{uiText.outlineLanguage.auditDetails}</summary>
           <ListBlock
             title={uiText.proposals.refsSource}
@@ -4487,7 +4610,7 @@ function ProposalInbox({
             <strong>{reviewProposal.title}</strong>
             <pre>{reviewProposal.body}</pre>
           </details>
-          {!isOutlinePatch && <ProposalReviewDiff baseline={baseline} rows={diffRows} />}
+          {!isOutlinePatch && !compositionBody && (selectedProposal.artifact_type !== "scene_draft" || reviewProposal.version !== selectedProposal.version) && <ProposalReviewDiff baseline={baseline} after={reviewProposal?.body ?? ""} />}
         </section>
       )}
     </section>
@@ -4537,7 +4660,7 @@ function PromotedDraftSummary({
   );
 }
 
-function ProposalReviewDiff({ baseline, rows }: { baseline: ExactDraftLookup; rows: ReviewDiffRow[] }) {
+function ProposalReviewDiff({ baseline, after }: { baseline: ExactDraftLookup; after: string }) {
   const statusText = baseline.status === "none"
     ? uiText.proposals.baselineNone
     : baseline.status === "ambiguous"
@@ -4568,29 +4691,7 @@ function ProposalReviewDiff({ baseline, rows }: { baseline: ExactDraftLookup; ro
             <span>{formatArtifactLanguage(baseline.draft.content_language, baseline.draft.language_inferred)}</span>
             <span>{baseline.draft.discarded ? uiText.proposals.draftDiscarded : uiText.proposals.draftAvailable}</span>
           </div>
-          <div className="proposal-diff-side-by-side">
-            <div className="proposal-diff-columns" aria-hidden="true">
-              <strong>{uiText.proposals.baselineColumn}</strong>
-              <strong>{uiText.proposals.proposalColumn}</strong>
-            </div>
-            {rows.map((row, index) => (
-              <div className={`proposal-diff-row ${row.kind}`} key={`${index}-${row.leftLine}-${row.rightLine}`}>
-                <span>{row.leftLine ?? ""}</span><code>{row.left ?? ""}</code>
-                <span>{row.rightLine ?? ""}</span><code>{row.right ?? ""}</code>
-              </div>
-            ))}
-          </div>
-          <div className="proposal-diff-unified">
-            {rows.flatMap((row, index) => {
-              if (row.kind === "equal") {
-                return [<div className="equal" key={`${index}-equal`}><span> </span><code>{row.right ?? ""}</code></div>];
-              }
-              const lines: React.ReactElement[] = [];
-              if (row.left !== null) lines.push(<div className="removed" key={`${index}-removed`}><span>-</span><code>{row.left}</code></div>);
-              if (row.right !== null) lines.push(<div className="added" key={`${index}-added`}><span>+</span><code>{row.right}</code></div>);
-              return lines;
-            })}
-          </div>
+          <ManuscriptDiff before={baseline.draft.text} after={after} labels={{ ...uiText.manuscript, title: uiText.manuscript.diffTitle }} />
         </>
       ) : null}
     </section>
@@ -4604,6 +4705,8 @@ function ProjectSidebar({
   characterForm,
   currentChapterId,
   editingChapterId,
+  readingChapterId,
+  onEditChapter,
   chapterTitleEditor,
   onChapterTitleChange,
   onSaveChapterTitle,
@@ -4664,6 +4767,8 @@ function ProjectSidebar({
   onLoadChapterMetadata: (chapter: ChapterOutline) => void;
   onLoadSceneMetadata: (scene: SceneOutline) => void;
   sceneMetadataSaveAllowed: boolean;
+  readingChapterId: string | null;
+  onEditChapter: (id: string) => void;
   onSelectChapter: (id: string) => void;
   hasWorkspace: boolean;
   locationForm: LocationForm;
@@ -4853,7 +4958,7 @@ function ProjectSidebar({
 
         <nav className="scene-tree" aria-label={uiText.sidebar.projectTreeAria}>
           {selectedProject ? (
-            <ProjectTree projectId={projectId} chapters={chapters} sceneId={sceneId} selectedChapterId={editingChapterId}
+            <ProjectTree projectId={projectId} chapters={chapters} sceneId={readingChapterId ? "" : sceneId} selectedChapterId={readingChapterId} editingChapterId={editingChapterId} onEditChapter={onEditChapter}
               busy={busy !== null} onSelectScene={onSelectScene} onSelectChapter={onSelectChapter}
               chapterEditor={<div className="chapter-inline-editor">
                 <label><span>{uiText.authorWorkspace.editingChapter}</span><input aria-label={uiText.authorWorkspace.chapterTitle} value={chapterTitleEditor?.title ?? ""} disabled={busy !== null} onChange={(event) => onChapterTitleChange(event.target.value)} /></label>
@@ -5727,6 +5832,7 @@ function LibraryTreeItem({
 function DocumentReader({
   busy,
   canGenerate,
+  canAdoptSources,
   crossLanguagePolicy,
   document: doc,
   hasProject,
@@ -5737,6 +5843,7 @@ function DocumentReader({
   onPolicyChange,
   onRetry,
   onSaveDraft,
+  onSaveSelection,
   onSaveProposal,
   onSaveStyle,
   onUpdateLanguage,
@@ -5746,6 +5853,7 @@ function DocumentReader({
 }: {
   busy: string | null;
   canGenerate: boolean;
+  canAdoptSources: boolean;
   crossLanguagePolicy: CrossLanguagePolicy;
   document: SourceDocument | null;
   hasProject: boolean;
@@ -5756,6 +5864,7 @@ function DocumentReader({
   onPolicyChange: (policy: CrossLanguagePolicy) => void;
   onRetry: (document: SourceDocumentSummary, file: File) => void;
   onSaveDraft: (document: SourceDocument) => void;
+  onSaveSelection: (document: SourceDocument, range: ManuscriptSelection) => void;
   onSaveProposal: (document: SourceDocument) => void;
   onSaveStyle: (document: SourceDocument) => void;
   onUpdateLanguage: (document: SourceDocumentSummary, language: "zh-CN" | "en-US") => void;
@@ -5764,6 +5873,8 @@ function DocumentReader({
   summary: SourceDocumentSummary | null;
 }) {
   const [languageDraft, setLanguageDraft] = useState<SourceLanguage>("zh-CN");
+  const [sourceSelection, setSourceSelection] = useState<ManuscriptSelection | null>(null);
+  useEffect(() => { setSourceSelection(null); }, [doc?.id, doc?.updated_at]);
   useEffect(() => {
     if (summary?.language && summary.language !== "und") {
       setLanguageDraft(summary.language);
@@ -5800,6 +5911,7 @@ function DocumentReader({
   const sameLanguage = doc.language === projectLanguage;
   const canManageSource = canGenerate && hasProject && busy === null;
   const canSceneBridge = ready && sameLanguage && canGenerate && hasScene && busy === null;
+  const canSourceAdopt = canSceneBridge && canAdoptSources;
   const canProjectBridge = ready && sameLanguage && canGenerate && hasProject && busy === null;
   const canAnalyzeStructure =
     ready && canManageSource &&
@@ -5831,11 +5943,10 @@ function DocumentReader({
         <div className="reader-tags">
           <span>{sourceMediaTypeLabel(doc.media_type)}</span>
           <span>{formatSourceLanguage(doc.language)}</span>
-          <span>{formatFileSize(doc.byte_size)}</span>
           <span>{formatStatus(doc.extraction_status)}</span>
-          <span title={doc.id}>{doc.id}</span>
         </div>
       </div>
+      <details className="source-language-disclosure"><summary>{uiText.language.sourceLanguageLabel}: {formatSourceLanguage(doc.language)}</summary>
       <div className="source-language-editor">
         <label>
           <span>{uiText.language.sourceLanguageLabel}</span>
@@ -5879,6 +5990,7 @@ function DocumentReader({
             : uiText.language.projectOnly}
         </small>
       </div>
+      </details>
       <div className="reader-bridge">
         <span>{uiText.library.bridgeText}</span>
         <div>
@@ -5899,6 +6011,7 @@ function DocumentReader({
           >
             <MessageSquare size={14} /> {uiText.library.useWithAgent}
           </button>
+          <details className="source-advanced-actions"><summary>{uiText.manuscript.sourceAdvanced}</summary><small>{doc.id} · {formatFileSize(doc.byte_size)}</small><div>
           <button
             disabled={!canAnalyzeStructure}
             onClick={() => onAnalyzeStructure(summary)}
@@ -5912,12 +6025,12 @@ function DocumentReader({
             <BookOpen size={14} /> {uiText.library.buildStructure}
           </button>
           <button
-            disabled={!canSceneBridge}
+            disabled={!canSourceAdopt}
             onClick={() => onSaveDraft(doc)}
-            title={contentBridgeLanguageTitle ?? uiText.library.saveDraftTitle}
+            title={!canAdoptSources ? uiText.sidebar.requireFullPermission : contentBridgeLanguageTitle ?? uiText.manuscript.saveWholeSource}
             type="button"
           >
-            <FileText size={14} /> {uiText.library.saveDraft}
+            <FileText size={14} /> {uiText.manuscript.saveWholeSource}
           </button>
           <button
             disabled={!canSceneBridge}
@@ -5964,6 +6077,7 @@ function DocumentReader({
           >
             <X size={14} /> {uiText.library.archive}
           </button>
+          </div></details>
         </div>
       </div>
       {doc.extraction_status === "failed" ? (
@@ -5990,7 +6104,8 @@ function DocumentReader({
               </details>
             </div>
           )}
-          <pre>{doc.extracted_text}</pre>
+          <div className="source-manuscript-selection"><strong>{uiText.manuscript.sourceOriginal}</strong><p>{uiText.manuscript.sourceHelp}</p><button type="button" disabled={!sourceSelection || !canSourceAdopt} title={!canAdoptSources ? uiText.sidebar.requireFullPermission : contentBridgeLanguageTitle ?? undefined} onClick={() => { if (sourceSelection) onSaveSelection(doc, sourceSelection); }}><FileText size={14} />{uiText.manuscript.useSource}</button>{contentBridgeLanguageTitle && <p className="proposal-inline-warning">{contentBridgeLanguageTitle}</p>}</div>
+          <pre onMouseUp={(event) => setSourceSelection(selectedManuscriptRange(event.currentTarget, window.getSelection()))} onKeyUp={(event) => setSourceSelection(selectedManuscriptRange(event.currentTarget, window.getSelection()))}>{doc.extracted_text}</pre>
         </div>
       )}
     </div>
@@ -7075,8 +7190,14 @@ function outlineLanguageFailureMessage(error: unknown): string | null {
   return key ? uiText.errors[key] : null;
 }
 
+function manuscriptFailureMessage(error: unknown): string | null {
+  if (!(error instanceof ApiRequestError)) return null;
+  const messages: Record<string, string> = { composition_backend_unsupported: uiText.manuscript.localBackendOnly, source_adoption_backend_unsupported: uiText.manuscript.localBackendOnly, composition_input_too_large: uiText.manuscript.compositionTooLarge, composition_invalid: uiText.manuscript.compositionInvalid, composition_stale: uiText.manuscript.compositionStale, source_language_mismatch: uiText.errors.sourceContentLanguageMismatch, source_stale: uiText.manuscript.sourceStale, draft_baseline_stale: uiText.manuscript.staleProposal };
+  return messages[error.category ?? ""] ?? null;
+}
+
 function isLocalizedUserError(message: string): boolean {
-  return Object.values(uiText.errors).some(
+  return [...Object.values(uiText.errors), ...Object.values(uiText.manuscript)].some(
     (value) => typeof value === "string" && value === message
   );
 }

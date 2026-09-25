@@ -295,3 +295,36 @@ but must never copy a full private document.
   does not relax that rule.
 - Web and Tauri use the same FastAPI Source Store routes. The desktop shell must
   not create a separate import database or canon-writing path.
+
+## Explicit source text adoption into a scene Draft
+
+`POST /projects/{project_id}/scenes/{scene_id}/draft/from-source` is a separate
+`full` author-write action. Importing, viewing or selecting a Source never invokes
+it automatically. It requires `source_document_id`, `expected_source_updated_at`,
+`expected_source_checksum`, `start`, `end`, `expected_text` and required nullable
+`expected_current_draft_id`. Offsets are half-open **UTF-16 code units**, matching
+browser/JavaScript selection. The server rejects out-of-range positions, split
+surrogate pairs and any mismatch between the exact Source span and expected text.
+The selected text is copied verbatim, including paragraph breaks and whitespace;
+it is not a summary, model rewrite or guessed mapping from an old outline.
+
+The Source must be ready, same-project, unchanged and have the exact project
+language; `und` and cross-language verbatim adoption are rejected. Authors may
+instead explicitly reference foreign-language Sources when requesting an Agent
+proposal under the existing cross-language policy. Adoption never translates or
+relabels source text and creates no graph, CandidateFact or event-log writes.
+
+The current scene Draft is compared under the Draft lock before a new version is
+created. A retry of the same validated source operation returns its existing
+Draft ID. `Draft.provenance` is additive nullable JSON (SQLite `provenance_json`,
+legacy records remain null); source adoption stores kind, source ID/checksum/
+updated-at, extracted-text SHA-256, UTF-16 start/end, adopted-text SHA-256 and the
+previous Draft ID. It stores no absolute local path or duplicate source prose.
+Graph → Source → Draft locks keep scene ownership/project language and Source
+state stable through adoption. The current implementation supports local JSON
+and memory graphs only; unsupported graph backends fail closed.
+
+Legacy structure proposals containing only opaque `imported_document` refs do
+not establish Source Store identity or exact prose spans. Clients must not invent
+those links, treat summaries as manuscript text, or assign an entire imported
+novel to a selected scene. Explicit selection and adoption/generation are required.

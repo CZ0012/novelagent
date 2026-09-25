@@ -31,6 +31,19 @@ export const zhCN = {
     proposalSuffix: "协作草稿"
   },
   ui: {
+    manuscript: {
+      saveWholeSource: "整份资料另存为正文", sourceAdvanced: "资料高级操作",
+      localBackendOnly: "此操作需要本地 JSON 或内存图谱后端。当前连接不支持安全应用。", compositionTooLarge: "选中的资料和正文超过 10 万字符。请减少参考资料后重试。", compositionInvalid: "结构与正文提案不符合格式或语言要求。请调整要求后重新生成。", compositionStale: "目录、卷位置或作品语言已经变化。请刷新目录并重新生成这份提案。", sourceStale: "资料已更新，请重新打开并选择原文。",
+      staleProposal: "当前正文已不是这份建议依据的版本。请保留当前正文，并以最新已保存版本重新让 Agent 修改。",
+      includeSelectedSources: "包含已明确选中的资料",
+      includeCurrentDraft: "将当前已保存正文作为参考", compositionInputs: "输入：作品与现有目录。资料和正文仅在明确选择后加入。",
+      lineBreak: "换行",
+      preview: "预览", edit: "编辑", chapterPreview: "章节正文", sceneBody: "场景正文", openScene: "打开场景", editChapter: "编辑章节信息",
+      emptyTitle: "这一场还没有正文", emptyHelp: "目录与摘要是写作计划，正文需要另行写入。你可以自己动笔、让 Agent 起草，或从资料中选取原文。", startWriting: "开始写作", generateScene: "让 Agent 起草", openSources: "查看原稿 / 导入资料", loading: "正在读取正文…", loadFailed: "正文读取失败，请刷新重试。",
+      chapterHelp: "按目录顺序阅读各场景。选中文字可以交给 Agent，编辑正文请打开对应场景。", chapterEmpty: "本章尚未建立场景。可在左侧添加场景，或让 Agent 规划下一章。", sceneEmpty: "此场景尚无正文", selectionAction: "就选区问 Agent", selectionChanged: "正文版本已变化，请重新选择要讨论的段落。", readingDraft: "已保存草稿", unsavedPreview: "预览包含尚未保存的修改，发送给 Agent 前请先保存。", selectionHelp: "选中一段文字，即可提问或提出修改要求。",
+      diffTitle: "正文修改对比", added: "增加", removed: "删除", unchanged: "保留", noChanges: "正文没有变化", simplified: "文本较长，以下按完整文本显示差异。",
+      newWork: "新章节 / 卷", currentScene: "当前场景", generationHelp: "描述接下来要发生的故事。Agent 会先生成可审阅的结构和正文草稿，接受并应用后才加入目录。", scope: "创作范围", chapter: "新章节", volume: "新卷", chapterCount: "章节数", sceneCount: "每章场景数", instruction: "这部分故事要写什么", instructionPlaceholder: "例如：下一章让主角抵达火星基地，发现补给记录被人篡改。保持当前叙事视角。", generate: "生成结构与正文草稿", noProject: "先创建或选择作品。", compositionTitle: "结构与正文草稿", volumeLabel: "卷标题", plannedProse: "待审正文", applyComposition: "加入目录与草稿", compositionApplied: "已加入目录与草稿", compositionCreated: "结构与正文提案已生成，请逐章审阅。", compositionHelp: "接受只记录你的决定；点击“加入目录与草稿”后才会新增章节和场景。现有正文不会被替换。", sourceOriginal: "资料原文 · 尚未作为正文", useSource: "选取原文作为正文", sourceHelp: "这里只展示关联资料，不会自动把整份资料当作当前场景。请选中本场景的原文后再存为草稿。"
+    },
     authorWorkspace: {
       treeTitle: "作品",
       toggleChapter: (title: string) => `展开或折叠章节：${title}`,
@@ -952,6 +965,7 @@ export const zhCN = {
     defer: "延后"
   },
   refKinds: {
+    scene_draft_baseline: "生成首稿时的正文状态",
     project: "项目",
     canon_event: "正典变更记录",
     author_instruction: "作者指令",

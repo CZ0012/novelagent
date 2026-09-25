@@ -22,7 +22,14 @@ Unsaved drafts and proposals are protected when changing projects, scenes, or co
 
 Historical English outline titles or summaries can be corrected through **Outline tools → Repair outline language**. This uses the configured provider and the project's story language to propose chapter/scene metadata changes. Compare the original and suggested text, submit for review, accept, then explicitly apply. Graph/timeline views refresh together; manuscript text, stable IDs and relationships remain unchanged. Known graph node and relationship labels have independent Chinese/English display translations.
 
-For localization extension, runtime boundaries, and verified behavior, see [Localization](docs/localization.md), [Update and outline repair acceptance](docs/acceptance-0.1.15.md), [Workbench acceptance](docs/acceptance-0.1.14.md), [Provider and preset acceptance](docs/acceptance-0.1.12.md), and [Agent runtime contract](contracts/agent_runtime_v1.md).
+For localization extension, runtime boundaries, and verified behavior, see [Manuscript acceptance](docs/acceptance-0.1.16.md), [Localization](docs/localization.md), [Update and outline repair acceptance](docs/acceptance-0.1.15.md), [Workbench acceptance](docs/acceptance-0.1.14.md), [Provider and preset acceptance](docs/acceptance-0.1.12.md), and [Agent runtime contract](contracts/agent_runtime_v1.md).
+
+## Manuscript and Agent revisions (0.1.16)
+
+- Select a chapter to read its saved scene drafts, or open a scene in **Preview / Edit**. Empty scenes offer writing, exact source-range adoption and Agent drafting actions.
+- Ask about or revise a prose selection. Results remain separate proposals with red deletions, green additions and accessible text markers. Review and explicitly adopt the result.
+- **New chapter / New volume** generates a reviewable structure and initial scene drafts from the author's instruction. Accept and apply before it enters the project; volume grouping uses the existing chapter volume index.
+- Historical outline-only imports require explicit source adoption or new generation. Summaries are never treated as manuscript text. Verbatim source adoption requires matching source/project languages; other languages may be explicitly selected as Agent references.
 
 The implementation follows:
 
@@ -174,7 +181,7 @@ npm --prefix apps/desktop run build:installer
 The generated installer is:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.15_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe
 ```
 
 Other useful desktop commands:
@@ -194,10 +201,10 @@ Verified local build output from `npm --prefix apps/desktop run build:installer`
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.15_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.15_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.15_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.15_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.16_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.16_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -207,7 +214,7 @@ The in-app settings panel includes a `Version & Updates` section. In the Tauri d
 
 Version updates must keep `VERSION`, `pyproject.toml`, the FastAPI version in `apps/api/main.py`, both Web/Desktop package manifests and root lockfile entries, `apps/web/src/version.ts`, the desktop package entry in `apps/desktop/src-tauri/Cargo.lock`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, Source Store documents, canon, drafts, project settings, and review state are not synchronized to GitHub.
 
-For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.15_x64-setup.exe.sig`, plus the no-space GitHub Release copies and `latest.json`. The backend sidecar is built with pinned PyInstaller 6.21.0. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.16_x64-setup.exe.sig`, plus the no-space GitHub Release copies and `latest.json`. The backend sidecar is built with pinned PyInstaller 6.21.0. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 

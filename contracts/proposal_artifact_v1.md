@@ -437,3 +437,92 @@ checks retains its read-only idempotent retry even if its historical wording
 would fail the newer short-field guard. This does not relax the pre-existing
 unknown-language review gate. No existing Chapter, Scene, Proposal body, or
 language snapshot is automatically rewritten, translated, or relabeled.
+
+## Reviewed chapter and volume composition
+
+`POST /projects/{project_id}/composition-proposals` is an explicit generation
+operation, requiring `read_generate` and a configured provider. The request has
+`instruction` (1–12,000 characters), `scope` (`chapter` or `volume`),
+`chapter_count` (1–4, exactly one for chapter scope), `scenes_per_chapter` (1–4),
+optional `source_document_ids` (up to eight unique IDs), optional paired
+`scene_id` / `included_draft_id`, and the existing `cross_language_policy`.
+It sends only visible project title/genre/POV, existing Chapter/Scene outline
+metadata, explicitly selected complete Source text and the exact pinned Draft.
+Unknown source languages and unapproved cross-language references fail before
+provider use. The complete input is capped at 100,000 characters and is rejected
+when too large, never silently truncated. The configured provider/model and
+selected creative preset are used once; no automatic fallback or paid retry.
+
+The result is a non-canon `outline_draft`, `structured_json` Proposal with body:
+
+```json
+{
+  "schema": "manuscript_composition_v1",
+  "project_id": "project_sample",
+  "output_language": "zh-CN",
+  "scope": "chapter",
+  "volume_index": 1,
+  "volume_title": null,
+  "base_chapter_index": 3,
+  "chapters": [{
+    "title": "雾中的来信", "summary": "林谨在码头收到来信。", "purpose": "推动主角启程。",
+    "scenes": [{"title": "码头来信", "summary": "林谨在码头收到来信。",
+      "goal": "找到送信人。", "conflict": "送信人已经离开。", "prose": "林谨把信收入口袋。"}]
+  }]
+}
+```
+
+The server assigns project/language/insertion fields. Chapter scope inherits a
+unique existing title for its target volume when one exists; it does not translate
+that author metadata. Volume scope requires a new nonempty title. Counts must
+match the generation request; titles ≤120, summaries ≤1,000, purpose/goal/conflict
+≤500, each prose ≤8,000 and all prose ≤60,000 characters. Empty or malformed
+output, extra keys, incomplete JSON, count mismatch or obvious output-language
+mismatch rejects the result before storing a Proposal. Complete fenced JSON may
+be accepted, but surrounding explanations, partial fences and multiple blocks
+are rejected. Preset ID/hash and the configured model identifier are provenance,
+not a claim about the actual underlying provider model.
+
+`POST /projects/{project_id}/proposals/{proposal_id}/apply/composition` requires
+`full`, an accepted Proposal and accepted decision, `expected_version`, nonempty
+`reviewer` and `rationale`. Body/project/language/target and frozen v1 insertion
+fields must match. Author edits may refine the new plans/prose within the schema;
+arbitrary `outline_draft` artifacts are not executable. Acceptance alone writes
+neither graph nor Drafts. Explicit application creates only new Chapter/Scene
+nodes and their containment/sequencing relations, then one separate initial Draft
+per scene. Prose is never stored in graph properties. Volume support uses existing
+`Chapter.volume_index` with optional `volume_title`; there is no new Volume node
+label. New identities derive from Proposal ID and positions, not titles. No
+existing chapter, scene, Draft, CandidateFact or story-bible fact is overwritten.
+
+Local JSON/memory application holds graph and Draft-store locks, checks all
+positions and identities, stages the complete graph/event delta and atomically
+publishes that graph snapshot. Drafts then commit as one SQLite batch with
+stable deterministic IDs and provenance (`kind=composition`, `proposal_id`,
+body and prose SHA-256). Finally, the Proposal records graph and Draft derived
+refs. A failed graph save leaves no graph/Draft delta. If Draft/ref persistence
+fails after graph publication, the API reports `composition_persistence_failed`
+and the same accepted Proposal can be retried, including after restart. This
+is recoverable multi-store persistence, **not** a cross-file transaction. Complete
+creation events must match every original node type, scope, property snapshot,
+relationship type/endpoint and full body hash; incomplete or mismatched evidence
+fails closed rather than reconstructing missing objects. Completed retries may
+carry the original accepted version and never reset subsequent author metadata
+or later Drafts. Neo4j fails closed until an equivalent implementation exists.
+
+## New-scene baseline and adoption compare-and-set
+
+`POST .../promote/draft` additionally accepts `expected_current_draft_id`.
+Omitting the field retains legacy behavior; explicit `null` means that no current
+Draft may exist. First promotion compares the current ID under the same Draft
+Store lock as insertion. A mismatch returns `draft_baseline_stale` without writes.
+A completed, fully validated derived-Draft retry remains idempotent and is not
+rejected merely because the current Draft changed afterwards.
+
+For new `create_scene` Agent proposals the server adds a v1 source reference
+`kind=scene_draft_baseline`, `ref=<scene ID>`,
+`source_span={"draft_id": <existing empty Draft ID or null>, "empty": true}`.
+First promotion checks this immutable v1 baseline even if later edits remove
+current source refs. A newly saved Draft, or a formerly empty Draft that acquired
+text, prevents adoption of that stale first-draft proposal. Existing scene
+revision, continuation and legacy proposal routes retain their review gates.

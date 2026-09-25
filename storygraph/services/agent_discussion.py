@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import hashlib
 from pathlib import Path
 from typing import Any
 from urllib import parse, request
@@ -14,6 +15,7 @@ from storygraph.models.context import ContextPack
 from storygraph.models.draft import Draft
 from storygraph.models.proposal import ProposalArtifactType, ProposalBodyFormat, ProposalRef
 from storygraph.models.project import CrossLanguagePolicy, OutputLanguage, localized
+from storygraph.services.text_span import utf16_span
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
 from storygraph.services.project_language import (
     authoritative_language_message,
@@ -138,6 +140,8 @@ class AgentDiscussionService:
         output_language: OutputLanguage,
         cross_language_policy: CrossLanguagePolicy = "project_only",
         selected_text: str | None = None,
+        selected_start: int | None = None,
+        selected_end: int | None = None,
         base_text: str | None = None,
         context_pack: ContextPack | None = None,
         latest_draft: Draft | None = None,
@@ -148,7 +152,7 @@ class AgentDiscussionService:
         instruction = instruction.strip()
         if not instruction:
             raise ContractError("Agent discussion requires an author instruction.")
-        if mode not in {"discuss", "revise_selection", "revise_scene", "continue_scene"}:
+        if mode not in {"discuss", "revise_selection", "revise_scene", "continue_scene", "create_scene"}:
             raise ContractError("Unknown agent discussion mode.")
         if context_pack is not None and (
             context_pack.project_id != project_id
@@ -178,7 +182,15 @@ class AgentDiscussionService:
             policy=cross_language_policy,
         )
 
-        selected_text = (selected_text or "").strip()
+        exact_span = None
+        if (selected_start is None) != (selected_end is None):
+            raise ContractError("Selection offsets must be supplied together.")
+        if selected_start is not None:
+            if latest_draft is None or selected_text is None:
+                raise ContractError("Exact selection requires a pinned Draft and selected text.")
+            exact_span = utf16_span(latest_draft.text, selected_start, selected_end, selected_text)
+        else:
+            selected_text = (selected_text or "").strip()
         base_text = base_text if base_text is not None else latest_draft.text if latest_draft else ""
         if mode == "revise_selection" and not selected_text:
             raise ContractError("revise_selection requires selected_text.")
@@ -232,17 +244,21 @@ class AgentDiscussionService:
             base_text=base_text,
             selected_text=selected_text,
             parsed=parsed,
+            exact_span=exact_span,
         )
+        source_refs = self._source_refs(
+            output_language=output_language, latest_draft=latest_draft,
+            context_pack=context_pack, local_sources=local_sources or [],
+            web_results=web_results, instruction=instruction,
+        )
+        if exact_span is not None and latest_draft is not None:
+            source_refs = [ref.model_copy(update={"source_span": {
+                "start": selected_start, "end": selected_end, "offset_unit": "utf16",
+                "text_sha256": hashlib.sha256(selected_text.encode()).hexdigest(),
+            }}) if ref.kind == "draft" and ref.ref == latest_draft.id else ref for ref in source_refs]
         return AgentDiscussionDraft(
             **draft,
-            source_refs=self._source_refs(
-                output_language=output_language,
-                latest_draft=latest_draft,
-                context_pack=context_pack,
-                local_sources=local_sources or [],
-                web_results=web_results,
-                instruction=instruction,
-            ),
+            source_refs=source_refs,
             target_refs=[ProposalRef(kind="scene", ref=scene_id)],
             web_results=web_results,
             truncated_sources=truncated_sources,
@@ -331,6 +347,7 @@ class AgentDiscussionService:
         base_text: str,
         selected_text: str,
         parsed: dict[str, Any],
+        exact_span: tuple[int, int] | None = None,
     ) -> dict[str, Any]:
         reply = _required_str(parsed, "reply")
         proposal_title = _optional_str(parsed.get("proposal_title")) or localized(
@@ -382,7 +399,7 @@ class AgentDiscussionService:
                 "replacement_applied": False,
             }
 
-        if mode == "revise_scene":
+        if mode in {"revise_scene", "create_scene"}:
             body = proposal_body or replacement_text
             if not body:
                 raise ContractError("revise_scene response requires proposal_body.")
@@ -392,12 +409,13 @@ class AgentDiscussionService:
                 "proposal_body": body,
                 "artifact_type": "scene_draft",
                 "body_format": "plain_text",
-                "replacement_applied": True,
+                "replacement_applied": mode == "revise_scene",
             }
 
         if not replacement_text:
             raise ContractError("revise_selection response requires replacement_text.")
-        applied = _replace_unique(base_text, selected_text, replacement_text)
+        applied = (base_text[:exact_span[0]] + replacement_text + base_text[exact_span[1]:]
+                   if exact_span else _replace_unique(base_text, selected_text, replacement_text))
         if applied is None:
             body = _discussion_markdown(
                 output_language=output_language,

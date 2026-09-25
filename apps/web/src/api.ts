@@ -235,7 +235,7 @@ export type ProjectStructureApplyResult = {
   already_applied: boolean;
 };
 
-export type AgentDiscussionMode = "discuss" | "revise_selection" | "revise_scene" | "continue_scene";
+export type AgentDiscussionMode = "discuss" | "revise_selection" | "revise_scene" | "continue_scene" | "create_scene";
 
 export type AgentDiscussionSource = {
   kind: string;
@@ -250,6 +250,8 @@ export type AgentDiscussionRequest = {
   mode: AgentDiscussionMode;
   instruction: string;
   selected_text?: string | null;
+  selected_start?: number | null;
+  selected_end?: number | null;
   base_text?: string | null;
   include_context_pack: boolean;
   include_latest_draft: boolean;

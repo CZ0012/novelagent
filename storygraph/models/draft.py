@@ -6,6 +6,7 @@ from pydantic import Field, model_validator
 
 from storygraph.models.common import ContractModel
 from storygraph.models.project import OutputLanguage
+from storygraph.models.common import JsonDict
 
 
 class Draft(ContractModel):
@@ -17,6 +18,7 @@ class Draft(ContractModel):
     version: int = Field(ge=1)
     text: str
     summary: str | None = None
+    provenance: JsonDict | None = None
     discarded: bool = False
     created_at: str
     updated_at: str

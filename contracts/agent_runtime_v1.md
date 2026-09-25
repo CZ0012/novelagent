@@ -123,3 +123,27 @@ or `provider_unavailable`. Transport and malformed responses use
 network reasons, credentials, and manuscript text must not appear in UI errors
 or persisted workflow failure messages. Successful generation continues to use
 the configured generic Chat Completions-compatible endpoint and exact model ID.
+
+## Empty scene drafting and exact selected passages
+
+`agent-discussion` adds `mode=create_scene` for an empty existing Scene. It uses
+the configured provider, selected preset, authoritative project language and the
+same explicitly selected context/reference policy as other modes. Missing scene
+planning fields may remain explicit Context Pack gaps. The model must return
+actual scene prose in `proposal_body`; only a non-canon `scene_draft` Proposal is
+created. A nonempty current saved Draft rejects the operation before provider use.
+The server records the generation-time empty-scene baseline as described in
+`proposal_artifact_v1`; acceptance plus separate guarded promotion is required.
+
+Optional paired `selected_start` / `selected_end` are half-open UTF-16 offsets
+into the exact `included_draft_id`. Their use requires that pinned Draft ID and
+`selected_text`. The server verifies scope, Unicode boundaries and exact text
+before contacting the provider. It preserves whitespace and splices only that
+specific occurrence, so repeated identical paragraphs remain independently
+selectable. Draft source refs record offsets, `offset_unit=utf16` and selected-text
+SHA-256. Requests without offsets retain the legacy unique-text replacement and
+ambiguity fallback. Generated text and UI selection/diff state never mutate canon.
+
+Project-level `composition-proposals` follows the separate bounded schema and
+review/apply path in `proposal_artifact_v1`. Its full explicit source and Draft
+inputs are rejected if too large rather than silently clipped.
