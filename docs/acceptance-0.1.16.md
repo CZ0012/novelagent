@@ -24,6 +24,8 @@ The authorized private-novel test used an isolated copy and the configured third
 
 The author's original project still has no saved scene drafts: the old import produced outline nodes, not mapped prose. Original graph nodes/relationships match the initial test copy; settings match except for the model deliberately selected only in the test copy. No original manuscript or running installation was modified. Private inputs, outputs, keys and acceptance workspaces remain ignored.
 
+A read-only follow-up passed **29 persistence checks** against the browser fixture. A separate final-code replay passed **10 checks** for exact second-occurrence UTF-16 selection, its first-version Draft/range/hash evidence, unchanged original text and unchanged graph, using a local test provider with zero external calls. The earlier browser revision fixture predates the final span-provenance addition and is not used as proof of that new field.
+
 ## Persistence and scope
 
 Composition application is recoverable staged persistence, not a transaction across JSON and SQLite. Graph nodes and their creation events are atomically published first; draft batches and proposal receipts follow. A later failure returns an explicit retryable error. Retry requires full creation evidence and matching identities, types, ownership and payload; it cannot overwrite unrelated or partially evidenced nodes. JSON/memory backends are supported; Neo4j is rejected for this path until equivalent atomic graph application exists.
@@ -38,4 +40,4 @@ The packaged backend matches the final sidecar byte for byte. Twelve runtime mod
 
 Independent checks scanned 4,126 decoded backend items, 21 installer-layer entries, and the changed/new source and documentation files against actual local credentials, encoded variants, high-confidence secret patterns and sensitive paths. No actual credential or private workspace file was found. Generic source candidates were documentation placeholders and synthetic fixtures. All 13 version locations agree on 0.1.16.
 
-Public upload and re-download verification are pending. The running author application has not been replaced.
+Software commit `510df35` and tag `v0.1.16` were synchronized to GitHub. The stable release contains exactly the installer, `.exe.sig` and `latest.json`. All three were downloaded again and matched the independently verified local files byte for byte; GitHub reports v0.1.16 as the latest non-draft, non-prerelease release. The running author application has not been replaced. Private novels, credentials and local acceptance fixtures were excluded.

@@ -238,3 +238,5 @@ SG-026 publication complete: 7715712/tag v0.1.15 synchronized to main and this i
 Branch `codex/sg-027-manuscript-workspace`, base clean ccde8fb. Main owns integration, docs, acceptance and release; Front owns manuscript/Agent workspace; Contract/Creation owns generation and import-to-draft APIs/contracts; Review audits exact text scope, provenance, storage boundaries and user workflow. Shared checkout; no agent branch switching or commits.
 
 SG-027 integration: all product owners frozen. Chapter/scene preview, exact source adoption, reviewed composition and bounded accessible diffs have independent review and production-browser acceptance. Source and sidecar credential scans passed. Main owns final signed package publication; original author workspace and installation remain untouched.
+
+SG-027 publication complete: software 510df35 and tag v0.1.16 synchronized to main and the integration branch. All three public assets match the independently audited signed package byte for byte; latest resolves to stable v0.1.16. Original installation, story workspace and credentials are unchanged.
