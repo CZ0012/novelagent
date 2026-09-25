@@ -2759,3 +2759,101 @@ body { min-width: 360px; }
   .tools-menu > summary { justify-content: center; }
   .tools-menu-items { left: 0; right: 0; }
 }
+/* SG-025 manuscript-first authoring workspace. */
+.topbar { min-height: 54px; padding: 8px 14px; gap: 10px; }
+.top-actions .status-dot { font-size: 11px; }
+.layout.with-inspector { grid-template-columns: 230px minmax(420px, 1fr) 360px; }
+.layout.focus-writing { grid-template-columns: 230px minmax(420px, 1fr); }
+.editor { gap: 10px; padding: 16px 20px; }
+.scene-toolbar h1 { font-size: 21px; line-height: 1.4; }
+.scene-toolbar p { font-size: 11px; overflow-wrap: anywhere; }
+.scene-toolbar .toolbar-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.scene-toolbar .toolbar-actions button { padding: 0 9px; font-size: 12px; white-space: nowrap; }
+.workspace-status-details { color: var(--muted); font-size: 11px; }
+.workspace-status-details > summary { cursor: pointer; }
+.workspace-status-details .state-strip { margin-top: 6px; }
+.workspace-tabs { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0 0 5px; background: transparent; gap: 4px; }
+.workspace-tabs button { min-height: 33px; font-size: 12px; }
+.workspace-guide { font-size: 12px; }
+.scene-details { border: 0; border-radius: 0; background: transparent; }
+.scene-details > summary { padding: 4px 0; font-size: 12px; }
+.draft-surface { box-shadow: none; border-radius: 5px; }
+.draft-header { font-weight: 600; }
+.draft-header-actions small { font-size: 10px; max-width: 210px; overflow-wrap: anywhere; }
+.draft-surface > textarea { padding: 24px 30px; font-size: 18px; line-height: 1.85; }
+.sidebar-section { padding: 12px; }
+.sidebar-button-row { gap: 4px; }
+.sidebar-button-row button { font-size: 11px; min-height: 29px; padding: 0 7px; }
+.project-card { border: 0; background: transparent; box-shadow: none; padding: 4px 0; font-size: 11px; }
+.project-card > summary { color: var(--muted); cursor: pointer; margin-bottom: 5px; }
+.novel-tree .chapter-row { padding: 0; display: flex; align-items: center; gap: 2px; background: transparent; }
+.novel-tree .chapter-row.selected { background: var(--teal-soft); border-radius: 5px; }
+.novel-tree .chapter-toggle { width: 26px; min-width: 26px; min-height: 32px; padding: 0; justify-content: center; border: 0; background: transparent; }
+.novel-tree .chapter-title { flex: 1; min-width: 0; min-height: 32px; border: 0; background: transparent; padding: 4px; text-align: left; justify-content: space-between; }
+.novel-tree .chapter-title span { white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.55; }
+.novel-tree .chapter-title small { color: var(--muted); font-size: 10px; }
+.novel-tree .chapter-scenes { margin-left: 13px; border-left: 1px solid var(--line); padding-left: 7px; }
+.novel-tree .scene-row { min-height: 32px; padding: 6px 7px; gap: 7px; font-weight: 400; }
+.novel-tree .scene-row span { font-size: 12px; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.novel-tree .scene-row svg { flex-shrink: 0; color: var(--muted); }
+.chapter-inline-editor { padding: 9px; margin: 4px 0 7px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; display: flex; flex-wrap: wrap; gap: 7px; }
+.chapter-inline-editor label { display: grid; gap: 5px; width: 100%; font-size: 11px; color: var(--teal); }
+.chapter-inline-editor input { width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 4px; }
+.chapter-inline-editor small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.chapter-inline-editor button { min-height: 28px; font-size: 11px; padding: 0 7px; }
+.inspector { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.inspector-heading { min-height: 43px; }
+.inspector-tabs { display: flex; flex-wrap: nowrap; }
+.inspector-tabs button { flex: 1 1 0; min-width: 0; height: 34px; font-size: 10px; gap: 4px; padding: 0 3px; white-space: nowrap; }
+.inspector-tabs button svg { flex-shrink: 0; width: 13px; height: 13px; }
+.agent-dock { overflow: auto; min-height: 0; display: flex; flex-direction: column; gap: 0; background: #fbfcfc; }
+.agent-dock .agent-panel { display: flex; flex-direction: column; border: 0; border-radius: 0; box-shadow: none; min-height: 0; overflow: visible; }
+.agent-dock .agent-compose, .agent-dock .agent-context { display: flex; flex-direction: column; gap: 12px; border: 0; padding: 14px; }
+.agent-dock .agent-head { display: none; }
+.agent-dock .agent-mode-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.agent-dock .agent-mode-row button { font-size: 11px; min-height: 29px; align-self: start; }
+.agent-dock .agent-field textarea { height: 145px; resize: vertical; font-family: inherit; font-size: 13px; }
+.agent-dock .agent-field.selection textarea { height: 95px; }
+.agent-dock .agent-actions { flex-wrap: wrap; }
+.agent-dock .agent-actions button { font-size: 12px; }
+.agent-input-summary { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--muted); background: #f0f5f3; border-radius: 5px; padding: 10px; }
+.agent-input-summary strong { color: var(--ink); font-size: 12px; overflow-wrap: anywhere; }
+.agent-input-summary code { font: inherit; overflow-wrap: anywhere; }
+.agent-dock details > summary { cursor: pointer; font-size: 12px; color: var(--muted); padding: 8px 0; }
+.agent-dock .agent-input-manifest { border: 0; padding: 0; background: transparent; }
+.agent-dock .agent-input-manifest .metric-row { min-height: 35px; }
+.agent-dock .agent-context-note { flex-direction: column; align-items: flex-start; font-size: 12px; line-height: 1.55; }
+.agent-dock .agent-result { order: -1; background: var(--panel); border: 1px solid #b6dbd6; border-radius: 6px; padding: 12px; }
+.agent-dock .agent-result p { font-size: 12px; line-height: 1.7; white-space: pre-wrap; }
+.agent-dock .agent-result .metric-row { font-size: 11px; }
+.agent-preset-options { padding: 4px 14px; border-bottom: 1px solid var(--line); }
+.agent-preset-options .preset-panel.compact { grid-template-columns: 1fr; padding: 8px; }
+@media (max-width: 1240px) {
+  .layout.with-inspector { grid-template-columns: 200px minmax(380px, 1fr) 330px; }
+  .layout.with-inspector .inspector { position: static; width: auto; z-index: auto; box-shadow: none; }
+  .editor { padding: 14px; }
+  .inspector-tabs button { font-size: 0; gap: 0; }
+  .inspector-tabs button svg { width: 16px; height: 16px; }
+}
+@media (max-width: 1000px) {
+  .workbench { height: auto; min-height: 100vh; }
+  .layout.with-inspector { grid-template-columns: 200px minmax(0, 1fr); }
+  .layout.with-inspector .inspector { grid-column: 2; max-height: 700px; min-height: 420px; border-top: 1px solid var(--line); }
+  .layout.with-inspector .sidebar { grid-row: 1 / span 2; }
+  .layout.focus-writing { grid-template-columns: 200px minmax(0, 1fr); }
+  .sidebar { max-height: none; }
+  .editor { min-height: 650px; }
+  .inspector-tabs button { font-size: 11px; gap: 5px; }
+}
+@media (max-width: 700px) {
+  .layout.with-inspector, .layout.focus-writing { grid-template-columns: 1fr; }
+  .layout.with-inspector .sidebar { grid-row: auto; max-height: 280px; }
+  .layout.with-inspector .inspector { grid-column: 1; max-height: none; }
+  .scene-toolbar { flex-direction: column; gap: 10px; }
+  .draft-surface > textarea { padding: 16px; font-size: 17px; }
+  .top-actions .status-dot { max-width: 100%; overflow-wrap: anywhere; }
+}
+.scene-rename-trigger { min-height: 23px; border: 0; background: transparent; padding: 0; font-size: 11px; color: var(--muted); font-weight: 400; }
+.scene-title-editor { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; }
+.scene-title-editor input { min-width: 0; max-width: 280px; border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
+.scene-title-editor button { font-size: 11px; min-height: 29px; }

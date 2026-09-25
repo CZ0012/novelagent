@@ -216,3 +216,9 @@ Root owns Web version diagnostics, API health version, docs, version bump and lo
 Check/review: passed native lifecycle, Web ordering/version diagnostics, generated NSIS hook and executable lock/scope fixtures. Merge target: main; signed0.1.13 local installation and workspace-preservation checks passed.
 
 SG-024 delivery complete: software commit `78c36f7` synchronized to main and repair branch; public v0.1.13 release assets re-downloaded and matched. Final documentation records publication verification.
+
+## SG-025 branch strategy
+
+Branch: `codex/sg-025-novel-editor-workbench`; base: clean `4c8856b`.
+Front owns apps/web; Contract/Creation owns backend output-language validation and relevant contracts/tests; Main owns documentation, version/release work and private acceptance; Review and Check inspect independently. Shared checkout, no agent branch switches or commits.
+Check/review: passed. Final Python suite 316 passed/1 skipped; 62 Web tests and production-browser acceptance passed. Final package signature, payload/source equality and credential/privacy scans passed. Software publication pending; local story content and credentials remain excluded.

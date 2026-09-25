@@ -439,3 +439,11 @@ Acceptance: everyday writing navigation and discoverable advanced features; inde
 | SG-024 | completed | Main Agent | `codex/sg-024-safe-desktop-update` | Prevent shell/backend mixed-version installation and repair the confirmed local installation. | Local installation repaired to 0.1.13; 7 Python/55 Web/8 Rust and 5 real NSIS checks passed; public release assets downloaded and verified. |
 
 Acceptance: installer preflight runs before replacing software; managed backend shutdown failures stop updates; external backends are not killed indiscriminately; version UI checks the connected backend; source/backend/canon data boundaries stay unchanged.
+
+## SG-025 — Novel editor workbench (2026-09-25)
+
+| ID | Status | Owner | Branch | Goal | Next action |
+| --- | --- | --- | --- | --- | --- |
+| SG-025 | active | Main Agent | `codex/sg-025-novel-editor-workbench` | Correct misleading outline controls and generated-language gaps; keep manuscript editing and Agent collaboration together in an approachable author workbench. | Code, production-browser acceptance and independent package/signature/privacy verification passed; Main synchronizes software and publishes signed 0.1.14 assets. |
+
+Acceptance: real chapter folding and scene leaf navigation; independently localized metadata; editor and Agent visible together on desktop with a usable narrow layout; exact Draft references, unsaved text guards and explicit Proposal review preserved; no implicit rewrite of historical project content; no private data in software delivery.

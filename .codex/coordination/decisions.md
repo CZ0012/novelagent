@@ -207,3 +207,8 @@ Use four everyday writing tabs with an optional tools/review inspector. Web cata
 ## 2026-09-13 — SG-024 prevent partial desktop updates
 
 The identified NSIS copy order allowed a new shell with an old locked backend. Require pre-install checks before any application binary copy; use exact installation-path backend cleanup and a bounded exclusive-write probe, so old updater clients also benefit. Native prepare/cancel commands gate managed backend restarts and preserve termination failure. Web downloads first and protects unsaved author text before prepare/install. Runtime backend version uses read-only health metadata with legacy OpenAPI fallback; unknown and mismatch remain explicit. Software repair/release never changes local author workspaces or their provider settings.
+
+
+## SG-025 — Editor-first collaboration and historical titles
+
+Keep the existing backend contracts and unique parent editor state while moving Agent interaction beside prose. Chapters disclose child scenes; scene leaves open the editor. Generated changes retain Proposal review and exact-Draft comparison. Known genre enums localize for display, but persisted author titles are edited only through explicit metadata saves. New structure generation and first application validate language, including short headings; verified completed applications retain retry compatibility. No automatic model retry or historical content translation.

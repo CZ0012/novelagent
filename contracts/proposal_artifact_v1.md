@@ -351,3 +351,14 @@ structure only when:
 ## Structure apply validation and repeat requests
 
 Before applying an accepted project structure, the API checks every proposed Chapter, Scene and expected relationship ID for incompatible existing records, including archived nodes and relation collisions. A predictable target conflict must fail before any graph node, relationship, event or derived reference is created. Applies are serialized within one API process. A fully applied structure may return its original derived nodes on a retry carrying the original expected version only after validating the complete graph structure and recorded derived references; a partial or mismatched structure remains a conflict. This preflight does not provide a cross-store hard-crash transaction guarantee.
+
+For a first application, the API also validates the normalized narrative fields
+against the Proposal's confirmed `content_language`, including short headings,
+as described in `language_policy_v1`. A language stamp alone is not proof that
+the structure body satisfies it. Rejection creates no graph objects, events,
+or derived refs and does not modify the Proposal. A previously fully applied
+structure that passes the existing scope, provenance, and confirmed-language
+checks retains its read-only idempotent retry even if its historical wording
+would fail the newer short-field guard. This does not relax the pre-existing
+unknown-language review gate. No existing Chapter, Scene, Proposal body, or
+language snapshot is automatically rewritten, translated, or relabeled.

@@ -50,6 +50,7 @@ import {
   AgentModels,
   AgentSettingsUpdate,
   ApiRequestError,
+  isGeneratedLanguageConflict,
   CandidateFact,
   ChapterOutline,
   ContextPack,
@@ -153,10 +154,13 @@ import { exportAuthorText } from "./exportText";
 import { DEFAULT_API_BASE, loadBrowserApiBase, normalizeApiBase, saveBrowserApiBase } from "./clientPreferences";
 import { backendVersionCompatibility, backendVersionRequestIsCurrent, readBackendVersion, type BackendVersion } from "./backendVersion";
 import { DesktopUpdateFailure, runSafeDesktopUpdate } from "./safeDesktopUpdate";
+import { ProjectTree } from "./ProjectTree";
+import { genreLabel } from "./genreLabels";
+import { changedMetadataFields, chapterEditorMatches, chapterTitleIsDirty, chapterTitleUpdate, type ChapterTitleEditor, type ChapterEditorScope } from "./chapterEditing";
 import "./styles.css";
 
-type InspectorTab = "context" | "continuity" | "facts" | "settings";
-type WorkspaceTab = "write" | "sources" | "agent" | "proposals" | "workflow";
+type InspectorTab = "agent" | "context" | "continuity" | "facts" | "settings";
+type WorkspaceTab = "write" | "sources" | "proposals" | "workflow";
 
 type LibraryTreeNode = {
   id: string;
@@ -419,8 +423,9 @@ export default function App() {
   const [workspaceLoadError, setWorkspaceLoadError] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [sceneId, setSceneId] = useState("");
-  const [activeTab, setInspectorTab] = useState<InspectorTab>("context");
-  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [chapterSelection, setChapterSelection] = useState<{ projectId: string; id: string } | null>(null);
+  const [activeTab, setInspectorTab] = useState<InspectorTab>("agent");
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const setActiveTab = useCallback((tab: InspectorTab) => {
     setInspectorTab(tab);
     setInspectorOpen(true);
@@ -473,7 +478,17 @@ export default function App() {
   const [clearApiKey, setClearApiKey] = useState(false);
   const [projectForm, setProjectForm] = useState<ProjectForm>(defaultProjectForm);
   const [chapterForm, setChapterForm] = useState<ChapterForm>(defaultChapterForm);
+  const [chapterTitleEditor, setChapterTitleEditor] = useState<ChapterTitleEditor | null>(null);
+  const [chapterMetadataTarget, setChapterMetadataTarget] = useState<(ChapterEditorScope & { baseline: ChapterForm }) | null>(null);
+  const chapterTitleDirty = chapterTitleIsDirty(chapterTitleEditor);
+  const chapterMetadataDirty = Boolean(chapterMetadataTarget && JSON.stringify(chapterForm) !== JSON.stringify(chapterMetadataTarget.baseline));
+  const chapterEditsDirty = chapterTitleDirty || chapterMetadataDirty;
   const [sceneForm, setSceneForm] = useState<SceneForm>(defaultSceneForm);
+  const [sceneTitleEditor, setSceneTitleEditor] = useState<{ apiBase: string; projectId: string; sceneId: string; title: string; originalTitle: string } | null>(null);
+  const sceneTitleDirty = Boolean(sceneTitleEditor && sceneTitleEditor.title !== sceneTitleEditor.originalTitle);
+  const [sceneMetadataTarget, setSceneMetadataTarget] = useState<{ apiBase: string; projectId: string; sceneId: string; baseline: SceneForm } | null>(null);
+  const sceneMetadataDirty = Boolean(sceneMetadataTarget && JSON.stringify(sceneForm) !== JSON.stringify(sceneMetadataTarget.baseline));
+  const sceneEditsDirty = sceneTitleDirty || sceneMetadataDirty;
   const [characterForm, setCharacterForm] = useState<CharacterForm>(defaultCharacterForm);
   const [locationForm, setLocationForm] = useState<LocationForm>(defaultLocationForm);
   const [worldRuleForm, setWorldRuleForm] = useState<WorldRuleForm>(defaultWorldRuleForm);
@@ -639,10 +654,11 @@ export default function App() {
   );
   const currentChapterId = useMemo(
     () =>
+      (chapterSelection?.projectId === projectId && selectedProject?.chapters.some((chapter) => chapter.id === chapterSelection.id) ? chapterSelection.id : null) ??
       findSceneChapterId(projects, projectId, sceneId) ??
       selectedProject?.chapters[0]?.id ??
       "",
-    [projectId, projects, sceneId, selectedProject]
+    [chapterSelection, projectId, projects, sceneId, selectedProject]
   );
   const selectedChapter = useMemo(
     () => selectedProject?.chapters.find((chapter) => chapter.id === currentChapterId) ?? null,
@@ -782,7 +798,7 @@ export default function App() {
       if (isLocalizedUserError(message)) {
         setError(message);
       } else {
-        setError(uiText.errors.requestFailed);
+        setError(isGeneratedLanguageConflict(exc) ? uiText.errors.generatedLanguageConflict : uiText.errors.requestFailed);
         setTechnicalError(
           exc instanceof ApiRequestError ? exc.technicalDetails : toErrorMessage(exc)
         );
@@ -1356,32 +1372,77 @@ export default function App() {
 
   const updateChapter = useCallback(async () => {
     if (!projectId) throw new Error(uiText.errors.selectProject);
-    const targetChapterId = currentChapterId;
-    if (!targetChapterId) throw new Error(uiText.errors.chooseChapterForEdit);
+    if (!chapterEditorMatches(chapterMetadataTarget, apiBase, projectId)) throw new Error(uiText.errors.chooseChapterForEdit);
+    const targetChapterId = chapterMetadataTarget!.chapterId;
     if (!chapterForm.title.trim()) throw new Error(uiText.errors.chapterTitleRequired);
     await apiPatch<GraphNodePayload>(apiBase, `/projects/${projectId}/chapters/${targetChapterId}`, {
-      title: chapterForm.title.trim(),
-      volume_index: toPositiveInteger(chapterForm.volume_index, 1),
-      chapter_index: toPositiveInteger(chapterForm.chapter_index, 1),
-      summary: chapterForm.summary.trim() || null,
-      purpose: chapterForm.purpose.trim() || null,
-      status: chapterForm.status.trim() || "planned",
+      ...Object.fromEntries(Object.entries(changedMetadataFields(chapterForm, chapterMetadataTarget!.baseline)).map(([key, value]) => [key, key === "volume_index" || key === "chapter_index" ? toPositiveInteger(value, 1) : value?.trim() || null])),
       reviewer: "author",
       rationale: auditText.updateChapter,
       source_ref: "author_seed:workbench_chapter_metadata"
     });
     await refreshWorkspace(projectId, sceneId);
     await refreshGraphPreview(projectId);
+    setChapterMetadataTarget((current) => current?.chapterId === targetChapterId && chapterEditorMatches(current, apiBase, projectId) ? { ...current, baseline: { ...chapterForm } } : current);
     setNotice(uiText.notices.chapterUpdated);
   }, [
     apiBase,
     chapterForm,
-    currentChapterId,
+    chapterMetadataTarget,
     projectId,
     refreshGraphPreview,
     refreshWorkspace,
     sceneId
   ]);
+
+  const saveChapterTitle = useCallback(async () => {
+    if (!chapterTitleEditor) return;
+    const update = chapterTitleUpdate(chapterTitleEditor, apiBase, projectId);
+    await apiPatch(apiBase, update.path, update.body);
+    setChapterTitleEditor((current) => current?.chapterId === chapterTitleEditor.chapterId ? { ...current, originalTitle: update.body.title, title: update.body.title } : current);
+    await refreshWorkspace(projectId, sceneId);
+    setNotice(uiText.notices.chapterUpdated);
+  }, [apiBase, chapterTitleEditor, projectId, refreshWorkspace, sceneId]);
+
+  const saveSceneTitle = useCallback(async () => {
+    const editor = sceneTitleEditor;
+    if (!editor || editor.apiBase !== apiBase || editor.projectId !== projectId || !editor.title.trim()) throw new Error(uiText.errors.selectScene);
+    await apiPatch(apiBase, `/projects/${encodeURIComponent(editor.projectId)}/scenes/${encodeURIComponent(editor.sceneId)}`, {
+      title: editor.title.trim(), reviewer: "author", rationale: "workbench.scene.rename", source_ref: "author_seed:workbench_scene_title"
+    });
+    setSceneTitleEditor(null);
+    await refreshWorkspace(projectId, sceneId);
+    setNotice(uiText.notices.sceneUpdated);
+  }, [apiBase, projectId, refreshWorkspace, sceneId, sceneTitleEditor]);
+
+  const discardChapterEditors = useCallback(() => {
+    if ((chapterEditsDirty || sceneEditsDirty) && !window.confirm(uiText.authorWorkspace.discardMetadataEdits)) return false;
+    setSceneTitleEditor(null);
+    setSceneMetadataTarget(null);
+    setSceneForm(defaultSceneForm);
+    setChapterTitleEditor(null);
+    setChapterMetadataTarget(null);
+    setChapterForm(defaultChapterForm);
+    return true;
+  }, [chapterEditsDirty, sceneEditsDirty]);
+
+  const loadChapterMetadata = useCallback((chapter: ChapterOutline) => {
+    if (actionInFlightRef.current) return;
+    if (chapterEditsDirty && !window.confirm(uiText.authorWorkspace.discardMetadataEdits)) return;
+    const form = chapterToForm(chapter);
+    setChapterTitleEditor(null);
+    setChapterForm(form);
+    setChapterMetadataTarget({ apiBase, projectId, chapterId: chapter.id, baseline: form });
+  }, [apiBase, chapterEditsDirty, projectId]);
+
+  const loadSceneMetadata = useCallback((scene: SceneOutline) => {
+    if (actionInFlightRef.current) return;
+    if (sceneEditsDirty && !window.confirm(uiText.authorWorkspace.discardMetadataEdits)) return;
+    const form = sceneToForm(scene, findSceneChapterId(projects, projectId, scene.id) ?? "");
+    setSceneTitleEditor(null);
+    setSceneForm(form);
+    setSceneMetadataTarget({ apiBase, projectId, sceneId: scene.id, baseline: form });
+  }, [apiBase, projectId, projects, sceneEditsDirty]);
 
   const createChapter = useCallback(async () => {
     if (!projectId) throw new Error(uiText.errors.selectProjectOrCreate);
@@ -1397,6 +1458,7 @@ export default function App() {
       rationale: auditText.createChapter,
       source_ref: "author_seed:workbench_outline"
     });
+    setChapterMetadataTarget(null);
     setChapterForm((current) => ({
       ...defaultChapterForm,
       volume_index: current.volume_index,
@@ -1436,6 +1498,7 @@ export default function App() {
         source_ref: "author_seed:workbench_outline"
       }
     );
+    setSceneMetadataTarget(null);
     setSceneForm((current) => ({
       ...defaultSceneForm,
       chapter_id: current.chapter_id,
@@ -1447,9 +1510,10 @@ export default function App() {
   }, [apiBase, projectId, refreshGraphPreview, refreshWorkspace, sceneForm, selectedProject]);
 
   const updateScene = useCallback(async () => {
-    if (!projectId || !sceneId) throw new Error(uiText.errors.chooseSceneForEdit);
+    const target = sceneMetadataTarget;
+    if (!target || target.apiBase !== apiBase || target.projectId !== projectId || target.sceneId !== sceneId) throw new Error(uiText.errors.chooseSceneForEdit);
     if (!sceneForm.title.trim()) throw new Error(uiText.errors.sceneTitleRequired);
-    await apiPatch<GraphNodePayload>(apiBase, `/projects/${projectId}/scenes/${sceneId}`, {
+    await apiPatch<GraphNodePayload>(apiBase, `/projects/${encodeURIComponent(target.projectId)}/scenes/${encodeURIComponent(target.sceneId)}`, {
       title: sceneForm.title.trim(),
       scene_index: toPositiveInteger(sceneForm.scene_index, selectedScene?.scene_index ?? 1),
       pov_character_id: sceneForm.pov_character_id.trim() || null,
@@ -1471,6 +1535,7 @@ export default function App() {
     });
     await refreshWorkspace(projectId, sceneId);
     await refreshGraphPreview(projectId);
+    setSceneMetadataTarget((current) => current?.apiBase === target.apiBase && current.projectId === target.projectId && current.sceneId === target.sceneId ? { ...current, baseline: { ...sceneForm } } : current);
     setContextPack(null);
     setNotice(uiText.notices.sceneUpdated);
   }, [
@@ -1479,6 +1544,7 @@ export default function App() {
     refreshGraphPreview,
     refreshWorkspace,
     sceneForm,
+    sceneMetadataTarget,
     sceneId,
     selectedScene
   ]);
@@ -1811,7 +1877,7 @@ export default function App() {
       selectedText: selection,
       includeLatestDraft: true
     }));
-    setWorkspaceTab("agent");
+    setWorkspaceTab("write"); setActiveTab("agent");
   }, [draftSelection, refreshDraftSelection]);
 
   const requestAgentDiscussion = useCallback(async () => {
@@ -1883,7 +1949,7 @@ export default function App() {
       setCreatingNewProposal(false);
       setSelectedProposalId(created?.id ?? result.proposal.id);
     }
-    setWorkspaceTab("agent");
+    setWorkspaceTab("write"); setActiveTab("agent");
     setNotice(
       proposalDirty
         ? uiText.notices.proposalCreatedNotOpened(result.proposal.id)
@@ -2050,6 +2116,7 @@ export default function App() {
   const requestProposalNavigation = useCallback(
     (label: string, action: () => void, onCancel?: () => void) => {
       if (actionInFlightRef.current) { onCancel?.(); return; }
+      if ((chapterEditsDirty || sceneEditsDirty) && !discardChapterEditors()) { onCancel?.(); return; }
       if (!proposalDirty && !draftDirty) {
         action();
         return;
@@ -2058,7 +2125,7 @@ export default function App() {
       pendingNavigationCancelRef.current = onCancel ?? null;
       setPendingProposalNavigation({ label, kind: proposalDirty ? "proposal" : "draft" });
     },
-    [proposalDirty, draftDirty]
+    [chapterEditsDirty, sceneEditsDirty, discardChapterEditors, proposalDirty, draftDirty]
   );
 
   const cancelProposalNavigation = useCallback(() => {
@@ -2631,14 +2698,24 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    if (!proposalDirty && !draftDirty) return;
+    if (!proposalDirty && !draftDirty && !chapterEditsDirty && !sceneEditsDirty) return;
     const preventUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", preventUnload);
     return () => window.removeEventListener("beforeunload", preventUnload);
-  }, [proposalDirty, draftDirty]);
+  }, [proposalDirty, draftDirty, chapterEditsDirty, sceneEditsDirty]);
+
+  useEffect(() => {
+    setChapterSelection(null);
+    setChapterTitleEditor(null);
+    setChapterMetadataTarget(null);
+    setChapterForm(defaultChapterForm);
+    setSceneTitleEditor(null);
+    setSceneMetadataTarget(null);
+    setSceneForm(defaultSceneForm);
+  }, [apiBase, projectId]);
 
   useEffect(() => {
     const firstChapterId = selectedProject?.chapters[0]?.id ?? "";
@@ -2727,7 +2804,7 @@ export default function App() {
         if (current.has(source.id)) return current;
         return addStableSourceSelection(current, source.id);
       });
-      setWorkspaceTab("agent");
+      setWorkspaceTab("write"); setActiveTab("agent");
       const sendEligibility = sourceAgentEligibility(
         source,
         outputLanguageOrNull(selectedProject?.language),
@@ -2816,6 +2893,27 @@ export default function App() {
             chapterForm={chapterForm}
             characterForm={characterForm}
             currentChapterId={currentChapterId}
+            editingChapterId={chapterTitleEditor && chapterEditorMatches(chapterTitleEditor, apiBase, projectId) ? chapterTitleEditor.chapterId : null}
+            chapterTitleEditor={chapterTitleEditor}
+            onChapterTitleChange={(title) => setChapterTitleEditor((current) => current ? { ...current, title } : current)}
+            onSaveChapterTitle={() => runAction("rename-chapter", saveChapterTitle)}
+            onCancelChapterTitle={() => setChapterTitleEditor(null)}
+            chapterMetadataTarget={chapterMetadataTarget}
+            chapterMetadataSaveAllowed={chapterEditorMatches(chapterMetadataTarget, apiBase, projectId) && chapterMetadataDirty}
+            onLoadChapterMetadata={loadChapterMetadata}
+            onLoadSceneMetadata={loadSceneMetadata}
+            sceneMetadataSaveAllowed={sceneMetadataTarget?.apiBase === apiBase && sceneMetadataTarget.projectId === projectId && sceneMetadataTarget.sceneId === sceneId && sceneMetadataDirty}
+            onSelectChapter={(id) => {
+              const chapter = selectedProject?.chapters.find((item) => item.id === id);
+              if (!chapter) return;
+              if (chapterTitleEditor?.chapterId === id && chapterEditorMatches(chapterTitleEditor, apiBase, projectId)) return;
+              if (actionInFlightRef.current) return;
+              if (chapterEditsDirty && !window.confirm(uiText.authorWorkspace.discardMetadataEdits)) return;
+              setChapterMetadataTarget(null);
+              setChapterForm(defaultChapterForm);
+              setChapterSelection({ projectId, id });
+              setChapterTitleEditor({ apiBase, projectId, chapterId: id, title: chapter.title, originalTitle: chapter.title });
+            }}
             hasWorkspace={hasWorkspace}
             locationForm={locationForm}
             onChapterFormChange={setChapterForm}
@@ -2872,11 +2970,14 @@ export default function App() {
               );
             }}
             onSelectScene={(nextSceneId) => {
-              if (nextSceneId === sceneId) return;
+              if (nextSceneId === sceneId) { setWorkspaceTab("write"); return; }
               const nextScene = findScene(projects, projectId, nextSceneId);
               requestProposalNavigation(
                 uiText.proposals.navigateScene(nextScene?.title ?? nextSceneId),
                 () => {
+                  setWorkspaceTab("write");
+                  setChapterSelection(null);
+                  if (nextSceneId === sceneId) return;
                   setSceneId(nextSceneId);
                   setContextPack(null);
                   setRun(null);
@@ -2911,9 +3012,17 @@ export default function App() {
                 {selectedScene?.title ||
                   (hasWorkspace ? uiText.workspace.importedStructureTitle : uiText.navigation.welcomeTitle)}
               </h1>
+              {selectedScene && <button className="scene-rename-trigger" type="button" disabled={!canReview || busy !== null} onClick={() => {
+                if (sceneTitleEditor?.sceneId === sceneId) return;
+                if (sceneEditsDirty && !window.confirm(uiText.authorWorkspace.discardMetadataEdits)) return;
+                setSceneMetadataTarget(null);
+                setSceneForm(defaultSceneForm);
+                setSceneTitleEditor({ apiBase, projectId, sceneId, title: selectedScene.title, originalTitle: selectedScene.title });
+              }}>{uiText.authorWorkspace.renameScene}</button>}
+              {sceneTitleEditor?.apiBase === apiBase && sceneTitleEditor.projectId === projectId && sceneTitleEditor.sceneId === sceneId && <div className="scene-title-editor"><input aria-label={uiText.authorWorkspace.sceneTitle} value={sceneTitleEditor.title} disabled={busy !== null} onChange={(event) => setSceneTitleEditor((current) => current ? { ...current, title: event.target.value } : current)} /><button type="button" disabled={busy !== null || !sceneTitleEditor.title.trim()} onClick={() => runAction("rename-scene", saveSceneTitle)}>{uiText.common.save}</button><button type="button" disabled={busy !== null} onClick={() => setSceneTitleEditor(null)}>{uiText.common.cancel}</button></div>}
               <p>
                 {hasScene
-                  ? `${sceneId} / ${uiText.editor.pov} ${contextPack?.pov_character_id || selectedScene?.pov_character_id || uiText.common.notSet}`
+                  ? `${selectedProject?.title ?? ""} / ${selectedProject?.chapters.find((chapter) => chapter.scenes.some((scene) => scene.id === sceneId))?.title ?? ""}`
                   : hasWorkspace
                     ? uiText.workspace.noSceneWithWorkspace
                     : uiText.workspace.noSceneEmptyWorkspace}
@@ -2923,13 +3032,15 @@ export default function App() {
               <button className="primary" onClick={() => runAction("save", saveDraft)} type="button" disabled={!canGenerate || !hasScene || busy !== null}>
                 <Save size={16} /> {uiText.editor.saveButton}
               </button>
-              <button onClick={() => { setAgentDiscussionForm((current) => ({ ...current, mode: "continue_scene", includeLatestDraft: true, selectedText: "" })); setWorkspaceTab("agent"); }}
+              <button onClick={() => { setAgentDiscussionForm((current) => ({ ...current, mode: "continue_scene", includeLatestDraft: true, selectedText: "" })); setWorkspaceTab("write"); setActiveTab("agent"); }}
                 type="button" disabled={!hasScene} title={uiText.navigation.agentHelp}>
                 <Wand2 size={16} /> {uiText.navigation.continueScene}
               </button>
+              {!inspectorOpen && <button type="button" onClick={() => setActiveTab("agent")}><MessageSquare size={16} /> {uiText.authorWorkspace.openAgent}</button>}
             </div>}
           </section>
 
+          <details className="workspace-status-details"><summary>{uiText.authorWorkspace.workspaceDetails}</summary>
           <section className="state-strip" aria-label={uiText.workspace.workflowStatusAria}>
             <StatusDot
               label={`${uiText.stateStrip.projectPrefix}: ${selectedProject?.title || uiText.common.notCreated}`}
@@ -2944,11 +3055,11 @@ export default function App() {
               tone={writerNeedsKey ? "danger" : "neutral"}
             />
           </section>
+          </details>
 
           <section className="workspace-tabs" aria-label={uiText.workspace.mainWorkspaceAria}>
             <TabButton active={workspaceTab === "write"} onClick={() => setWorkspaceTab("write")} icon={<FileText size={15} />} label={uiText.tabs.write} />
             <TabButton active={workspaceTab === "sources"} onClick={() => setWorkspaceTab("sources")} icon={<Library size={15} />} label={uiText.tabs.sources} />
-            <TabButton active={workspaceTab === "agent"} onClick={() => setWorkspaceTab("agent")} icon={<MessageSquare size={15} />} label={uiText.tabs.agent} />
             <TabButton active={workspaceTab === "proposals"} onClick={() => setWorkspaceTab("proposals")} icon={<SplitSquareVertical size={15} />} label={uiText.tabs.proposals} />
             <details className="tools-menu">
               <summary title={uiText.navigation.toolsHelp}><Settings size={15} /> {uiText.navigation.tools} <ChevronDown size={13} /></summary>
@@ -2963,7 +3074,7 @@ export default function App() {
           </section>
 
           <div className="workspace-guide">
-            <span>{workspaceTab === "workflow" ? uiText.navigation.workflowHelp : uiText.navigation[`${workspaceTab === "write" ? "write" : workspaceTab === "sources" ? "sources" : workspaceTab === "agent" ? "agent" : "proposals"}Help`]}</span>
+            <span>{workspaceTab === "write" ? uiText.authorWorkspace.writingGuide : workspaceTab === "workflow" ? uiText.navigation.workflowHelp : uiText.navigation[`${workspaceTab === "sources" ? "sources" : "proposals"}Help`]}</span>
             {!llmConfigured && <button type="button" onClick={() => setActiveTab("settings")}><KeyRound size={14} /> {uiText.navigation.setupModel}</button>}
           </div>
 
@@ -3154,39 +3265,6 @@ export default function App() {
           </section>
           )}
 
-          {workspaceTab === "agent" && (
-          <div className="agent-workspace">
-          <AgentPresets compact apiBase={apiBase} settings={agentSettings} busy={busy !== null} onChange={setAgentSettings} onManage={() => setActiveTab("settings")} />
-          <AgentDiscussionPanel
-            busy={busy}
-            canDiscuss={canDiscussWithAgent}
-            draft={draft}
-            draftDirty={draftDirty}
-            draftSelection={draftSelection}
-            form={agentDiscussionForm}
-            hasScene={hasScene}
-            llmConfigured={llmConfigured}
-            onFormChange={setAgentDiscussionForm}
-            onOpenWriting={() => setWorkspaceTab("write")}
-            onOpenProposal={() => setWorkspaceTab("proposals")}
-            onPolicyChange={changeCrossLanguagePolicy}
-            onSubmit={() => runAction("agent-discussion", requestAgentDiscussion)}
-            onRestoreDraft={restoreSavedDraft}
-            onToggleSource={toggleAgentSource}
-            onUseDraftSelection={useDraftSelectionForAgent}
-            result={agentDiscussionResult}
-            selectedSourceIds={selectedAgentSourceIds}
-            selectedProposal={selectedProposal}
-            sources={sourceDocuments}
-            crossLanguagePolicy={crossLanguagePolicy}
-            projectLanguage={outputLanguageOrNull(selectedProject?.language)}
-            projectId={projectId}
-            sceneId={sceneId}
-            sceneTitle={selectedScene?.title ?? ""}
-          />
-          </div>
-          )}
-
           {workspaceTab === "proposals" && (
           <ProposalInbox
             baseline={proposalBaseline}
@@ -3364,13 +3442,56 @@ export default function App() {
         </main>
 
         <aside className="inspector" hidden={!inspectorOpen}>
-          <div className="inspector-heading"><strong>{uiText.navigation.tools}</strong><button className="icon-button" type="button" onClick={() => setInspectorOpen(false)} aria-label={uiText.navigation.closeInspector}><X size={16} /></button></div>
-          <div className="tabs" role="tablist">
+          <div className="inspector-heading"><strong>{activeTab === "agent" ? uiText.authorWorkspace.agentTitle : uiText.authorWorkspace.settingsTitle}</strong><button className="icon-button" type="button" onClick={() => setInspectorOpen(false)} aria-label={uiText.authorWorkspace.closeAgent}><X size={16} /></button></div>
+          <div className="tabs inspector-tabs" role="tablist">
+            <TabButton active={activeTab === "agent"} onClick={() => setActiveTab("agent")} icon={<MessageSquare size={15} />} label={uiText.tabs.agent} />
             <TabButton active={activeTab === "context"} onClick={() => setActiveTab("context")} icon={<Boxes size={15} />} label={uiText.tabs.context} />
             <TabButton active={activeTab === "continuity"} onClick={() => setActiveTab("continuity")} icon={<Activity size={15} />} label={uiText.tabs.continuity} />
             <TabButton active={activeTab === "facts"} onClick={() => setActiveTab("facts")} icon={<ShieldCheck size={15} />} label={uiText.tabs.facts} />
             <TabButton active={activeTab === "settings"} onClick={() => setActiveTab("settings")} icon={<Settings size={15} />} label={uiText.tabs.settings} />
           </div>
+          {activeTab === "agent" && (
+          <div className="agent-workspace agent-dock">
+          <details className="agent-preset-options"><summary>{uiText.authorWorkspace.presetOptions}</summary>
+          <AgentPresets compact apiBase={apiBase} settings={agentSettings} busy={busy !== null} onChange={setAgentSettings} onManage={() => setActiveTab("settings")} />
+          </details>
+          <AgentDiscussionPanel
+            busy={busy}
+            canDiscuss={canDiscussWithAgent}
+            draft={draft}
+            draftDirty={draftDirty}
+            draftSelection={draftSelection}
+            form={agentDiscussionForm}
+            hasScene={hasScene}
+            llmConfigured={llmConfigured}
+            onFormChange={setAgentDiscussionForm}
+            onOpenWriting={() => setWorkspaceTab("write")}
+            onOpenProposal={() => {
+              const target = agentDiscussionResult?.proposal;
+              requestProposalNavigation(uiText.authorWorkspace.reviewResult, () => {
+                if (target) { setCreatingNewProposal(false); setSelectedProposalId(target.id); }
+                setWorkspaceTab("proposals");
+              });
+            }}
+            onSaveDraft={() => runAction("save", saveDraft)}
+            onPolicyChange={changeCrossLanguagePolicy}
+            onSubmit={() => runAction("agent-discussion", requestAgentDiscussion)}
+            onRestoreDraft={restoreSavedDraft}
+            onToggleSource={toggleAgentSource}
+            onUseDraftSelection={useDraftSelectionForAgent}
+            result={agentDiscussionResult}
+            selectedSourceIds={selectedAgentSourceIds}
+            selectedProposal={selectedProposal}
+            sources={sourceDocuments}
+            crossLanguagePolicy={crossLanguagePolicy}
+            projectLanguage={outputLanguageOrNull(selectedProject?.language)}
+            projectId={projectId}
+            sceneId={sceneId}
+            sceneTitle={selectedScene?.title ?? ""}
+          />
+          </div>
+          )}
+
           {activeTab === "context" && <ContextInspector pack={contextPack} />}
           {activeTab === "continuity" && <ContinuityInspector run={run} report={continuityReport} />}
           {activeTab === "facts" && (
@@ -3385,7 +3506,7 @@ export default function App() {
             <AgentSettingsInspector
               apiBase={apiBase}
               onApiBaseChange={(value) => { const normalized = normalizeApiBase(value); if (!normalized) return; if (!isDesktopRuntime()) saveBrowserApiBase(normalized); setApiBase(normalized); }}
-              connectionLocked={proposalDirty || draftDirty}
+              connectionLocked={proposalDirty || draftDirty || chapterEditsDirty || sceneEditsDirty}
               apiKeyInput={apiKeyInput}
               busy={busy}
               clearApiKey={clearApiKey}
@@ -3410,7 +3531,7 @@ export default function App() {
               updateStatus={updateStatus}
             />
           </div>
-          <GraphPreview preview={graphPreview} selectedSceneId={sceneId} />
+          {activeTab !== "agent" && <GraphPreview preview={graphPreview} selectedSceneId={sceneId} />}
         </aside>
       </div>
       {pendingProposalNavigation && (
@@ -3484,6 +3605,7 @@ function AgentDiscussionPanel({
   onFormChange,
   onOpenWriting,
   onOpenProposal,
+  onSaveDraft,
   onPolicyChange,
   onRestoreDraft,
   onSubmit,
@@ -3510,6 +3632,7 @@ function AgentDiscussionPanel({
   onFormChange: React.Dispatch<React.SetStateAction<AgentDiscussionForm>>;
   onOpenWriting: () => void;
   onOpenProposal: () => void;
+  onSaveDraft: () => void;
   onPolicyChange: (policy: CrossLanguagePolicy) => void;
   onRestoreDraft: () => void;
   onSubmit: () => void;
@@ -3583,6 +3706,16 @@ function AgentDiscussionPanel({
             tone={llmConfigured ? "good" : "danger"}
           />
         </div>
+        <div className="agent-input-summary" aria-label={uiText.authorWorkspace.draftContext}>
+          <strong>{sceneTitle || uiText.agentDiscussion.noSceneTitle}</strong>
+          <span>{projectLanguage ? formatArtifactLanguage(projectLanguage, false) : uiText.language.projectLanguageNeedsReview} · {uiText.agentDiscussion.sourcePickerCount(selectedSourceIds.size)}</span>
+          <code>{savedDraftManifest}</code>
+        </div>
+        {form.includeLatestDraft && includedDraft.status !== "ready" && <div className="agent-context-note warning">
+          <span>{draftDirty ? uiText.authorWorkspace.saveBeforeSend : includedDraft.status === "blocked_scope" ? uiText.errors.agentDraftScopeMismatch : uiText.errors.agentIncludedDraftMustBeSaved}</span>
+          <button type="button" onClick={onSaveDraft} disabled={busy !== null || !hasScene}>{uiText.authorWorkspace.saveCurrentDraft}</button>
+        </div>}
+        {blockedSourceIds.length > 0 && <p className="preset-error">{uiText.errors.agentSourcesBlockedByPolicy}</p>}
         <div className="agent-mode-row">
           <label>
             <span>{uiText.agentDiscussion.mode}</span>
@@ -3591,7 +3724,8 @@ function AgentDiscussionPanel({
               onChange={(event) =>
                 onFormChange((current) => ({
                   ...current,
-                  mode: event.target.value as AgentDiscussionMode
+                  mode: event.target.value as AgentDiscussionMode,
+                  includeLatestDraft: event.target.value === "discuss" ? current.includeLatestDraft : true
                 }))
               }
             >
@@ -3630,13 +3764,13 @@ function AgentDiscussionPanel({
           <button type="button" className="primary" onClick={onSubmit} disabled={!canSubmit}>
             <Wand2 size={15} /> {uiText.agentDiscussion.submit}
           </button>
-          <button type="button" onClick={onOpenProposal} disabled={!selectedProposal}>
-            <SplitSquareVertical size={14} /> {uiText.agentDiscussion.openProposal}
+          <button type="button" onClick={onOpenProposal} disabled={!result && !selectedProposal}>
+            <SplitSquareVertical size={14} /> {uiText.authorWorkspace.reviewResult}
           </button>
         </div>
       </div>
       <div className="agent-context">
-        <section className="agent-input-manifest" aria-label={uiText.agentDiscussion.manifestTitle}>
+        <details className="agent-input-manifest"><summary>{uiText.authorWorkspace.inputDetails}</summary>
           <div className="agent-source-head">
             <div>
               <strong>{uiText.agentDiscussion.manifestTitle}</strong>
@@ -3690,7 +3824,8 @@ function AgentDiscussionPanel({
               )
             ]}
           />
-        </section>
+        </details>
+        <details className="agent-reference-options"><summary>{uiText.authorWorkspace.referenceOptions}</summary>
         <div className="agent-options">
           <label>
             <input
@@ -3852,6 +3987,7 @@ function AgentDiscussionPanel({
           )}
           <small className="agent-source-safety">{uiText.agentDiscussion.sourcePickerSafety}</small>
         </div>
+        </details>
         {!hasScene && (
           <EmptyState
             icon={<MessageSquare />}
@@ -3861,6 +3997,9 @@ function AgentDiscussionPanel({
         )}
         {result && (
           <div className="agent-result">
+            <strong>{uiText.authorWorkspace.resultReady}</strong>
+            <p>{uiText.authorWorkspace.resultBoundary}</p>
+            <button type="button" className="primary" onClick={onOpenProposal}><SplitSquareVertical size={14} /> {uiText.authorWorkspace.reviewResult}</button>
             <MetricRow label={uiText.agentDiscussion.proposalMetric} value={`${result.proposal.title} / v${result.proposal.version}`} />
             <MetricRow
               label={uiText.agentDiscussion.replacementMetric}
@@ -4352,6 +4491,17 @@ function ProjectSidebar({
   chapterForm,
   characterForm,
   currentChapterId,
+  editingChapterId,
+  chapterTitleEditor,
+  onChapterTitleChange,
+  onSaveChapterTitle,
+  onCancelChapterTitle,
+  chapterMetadataTarget,
+  chapterMetadataSaveAllowed,
+  onLoadChapterMetadata,
+  onLoadSceneMetadata,
+  sceneMetadataSaveAllowed,
+  onSelectChapter,
   hasWorkspace,
   locationForm,
   onChapterFormChange,
@@ -4392,6 +4542,17 @@ function ProjectSidebar({
   chapterForm: ChapterForm;
   characterForm: CharacterForm;
   currentChapterId: string;
+  editingChapterId: string | null;
+  chapterTitleEditor: ChapterTitleEditor | null;
+  onChapterTitleChange: (title: string) => void;
+  onSaveChapterTitle: () => void;
+  onCancelChapterTitle: () => void;
+  chapterMetadataTarget: (ChapterEditorScope & { baseline: ChapterForm }) | null;
+  chapterMetadataSaveAllowed: boolean;
+  onLoadChapterMetadata: (chapter: ChapterOutline) => void;
+  onLoadSceneMetadata: (scene: SceneOutline) => void;
+  sceneMetadataSaveAllowed: boolean;
+  onSelectChapter: (id: string) => void;
   hasWorkspace: boolean;
   locationForm: LocationForm;
   onChapterFormChange: React.Dispatch<React.SetStateAction<ChapterForm>>;
@@ -4430,6 +4591,7 @@ function ProjectSidebar({
   const chapters = selectedProject?.chapters ?? [];
   const sceneChapterId = sceneForm.chapter_id || currentChapterId;
   const selectedBuiltinDemo = selectedProject?.id === "project_fantasy_demo";
+  const outlineDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const [projectPanelMode, setProjectPanelMode] = useState<"view" | "create" | "edit">("view");
   const projectScenes = selectedProject ? flattenScenes(selectedProject) : [];
   const projectSceneCount = projectScenes.length;
@@ -4458,12 +4620,12 @@ function ProjectSidebar({
 
   const loadSelectedScene = () => {
     if (!selectedScene) return;
-    onSceneFormChange(sceneToForm(selectedScene, currentChapterId));
+    onLoadSceneMetadata(selectedScene);
   };
 
   const loadSelectedChapter = () => {
     if (!selectedChapter) return;
-    onChapterFormChange(chapterToForm(selectedChapter));
+    onLoadChapterMetadata(selectedChapter);
   };
 
   const fillCharacterFromImportedHint = () => {
@@ -4506,7 +4668,7 @@ function ProjectSidebar({
     <>
       <div className="sidebar-scroll">
         <details className="sidebar-section workspace-section" open>
-          <summary className="section-title">{uiText.sidebar.workspaceTitle}</summary>
+          <summary className="section-title">{uiText.authorWorkspace.treeTitle}</summary>
           {workspaceLoaded && hasWorkspace ? (
             <>
               <select
@@ -4521,18 +4683,18 @@ function ProjectSidebar({
                   </option>
                 ))}
               </select>
-              <div className="project-id">{projectId}</div>
+
               {selectedProject && (
-                <div className="project-card">
+                <details className="project-card"><summary>{uiText.authorWorkspace.projectDetails}</summary>
                   <strong>{selectedProject.title}</strong>
                   <span>
-                    {selectedProject.genre ?? uiText.sidebar.uncategorized} / {formatProjectLanguage(selectedProject)}
+                    {genreLabel(selectedProject.genre, uiText.genres, uiText.sidebar.uncategorized)} / {formatProjectLanguage(selectedProject)}
                   </span>
                   <span>
                     {chapters.length} {uiText.sidebar.chapterCount} / {projectSceneCount} {uiText.sidebar.sceneCount}
                   </span>
                   <span>{String(selectedProject.properties.narrative_pov ?? uiText.sidebar.povUnset)}</span>
-                </div>
+                </details>
               )}
             </>
           ) : (
@@ -4579,32 +4741,16 @@ function ProjectSidebar({
 
         <nav className="scene-tree" aria-label={uiText.sidebar.projectTreeAria}>
           {selectedProject ? (
-            selectedProject.chapters.map((chapter) => (
-              <div key={chapter.id} className="chapter">
-                <div className="chapter-row">
-                  <BookOpen size={15} />
-                  <span>{chapter.title}</span>
-                  <small>{formatStatus(chapter.status ?? "planned")}</small>
-                </div>
-                {chapter.scenes.length ? (
-                  chapter.scenes.map((scene) => (
-                    <button
-                      key={scene.id}
-                      className={`scene-row ${scene.id === sceneId ? "selected" : ""}`}
-                      disabled={busy !== null}
-                      onClick={() => onSelectScene(scene.id)}
-                      type="button"
-                    >
-                      <ChevronRight size={14} />
-                      <span>{scene.title}</span>
-                      <small>{formatStatus(scene.status ?? "planned")}</small>
-                    </button>
-                  ))
-                ) : (
-                  <p className="tree-empty">{uiText.sidebar.noChapterScenes}</p>
-                )}
-              </div>
-            ))
+            <ProjectTree projectId={projectId} chapters={chapters} sceneId={sceneId} selectedChapterId={editingChapterId}
+              busy={busy !== null} onSelectScene={onSelectScene} onSelectChapter={onSelectChapter}
+              chapterEditor={<div className="chapter-inline-editor">
+                <label><span>{uiText.authorWorkspace.editingChapter}</span><input aria-label={uiText.authorWorkspace.chapterTitle} value={chapterTitleEditor?.title ?? ""} disabled={busy !== null} onChange={(event) => onChapterTitleChange(event.target.value)} /></label>
+                <small>{uiText.authorWorkspace.chapterSavedExplicitly}</small>
+                <button type="button" onClick={onSaveChapterTitle} disabled={!canReview || busy !== null || !chapterTitleEditor?.title.trim() || !chapterTitleIsDirty(chapterTitleEditor)}><Save size={13} /> {uiText.common.save}</button>
+                <button type="button" disabled={busy !== null} onClick={onCancelChapterTitle}>{uiText.common.cancel}</button>
+                <button type="button" disabled={busy !== null} onClick={() => { if (selectedChapter) onLoadChapterMetadata(selectedChapter); if (outlineDetailsRef.current) { outlineDetailsRef.current.open = true; outlineDetailsRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" }); } }}>{uiText.authorWorkspace.chapterDetails}</button>
+              </div>}
+            />
           ) : (
             <EmptyState
               icon={<BookOpen />}
@@ -4708,8 +4854,9 @@ function ProjectSidebar({
           </details>
         )}
 
-        <details className="sidebar-section seed-panel">
+        <details ref={outlineDetailsRef} className="sidebar-section seed-panel">
           <summary className="section-title">{uiText.sidebar.outlineTitle}</summary>
+          <p className="metadata-target-label">{chapterMetadataTarget ? `${uiText.authorWorkspace.editingChapter}: ${chapterMetadataTarget.baseline.title} (${chapterMetadataTarget.chapterId})` : uiText.authorWorkspace.chapterTargetRequired}</p>
           <input
             placeholder={uiText.sidebar.chapterTitlePlaceholder}
             value={chapterForm.title}
@@ -4786,7 +4933,7 @@ function ProjectSidebar({
               <BookOpen size={15} /> {uiText.sidebar.loadChapter}
             </button>
             <button
-              disabled={!canReview || !selectedChapter || busy !== null}
+              disabled={!canReview || !chapterMetadataSaveAllowed || busy !== null}
               onClick={onUpdateChapter}
               type="button"
               title={canReview ? uiText.sidebar.saveChapterMetadataTitle : uiText.sidebar.requireFullPermission}
@@ -4851,7 +4998,7 @@ function ProjectSidebar({
               <FileText size={15} /> {uiText.sidebar.loadScene}
             </button>
             <button
-              disabled={!canReview || !selectedScene || busy !== null}
+              disabled={!canReview || !selectedScene || busy !== null || !sceneMetadataSaveAllowed}
               onClick={onUpdateScene}
               type="button"
               title={canReview ? uiText.sidebar.saveSceneMetadataTitle : uiText.sidebar.requireFullPermission}
@@ -6212,7 +6359,7 @@ function ListBlock({ title, items, tone }: { title: string; items: string[]; ton
 }
 
 function TabButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
-  return <button className={active ? "active" : ""} onClick={onClick} type="button">{icon}{label}</button>;
+  return <button className={active ? "active" : ""} onClick={onClick} type="button" title={label} aria-label={label}>{icon}<span>{label}</span></button>;
 }
 
 function StatusDot({ label, tone }: { label: string; tone: "good" | "warning" | "danger" | "neutral" }) {

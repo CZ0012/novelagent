@@ -17,3 +17,12 @@ Web 与桌面工作台的 `zh-CN.ts`、`en-US.ts` 分别打包，按需加载。
 桌面原生窗口、托盘与错误消息另存为 `src-tauri/localization/` 下的 JSON 文件，运行时只解析所选语言，打包后可离线使用。新增原生语言需同步 `src/localization.rs` 注册项；Rust 测试检查消息与占位符对应关系。
 
 界面语言是本机偏好，小说输出语言由项目决定，来源资料语言则描述原文。自定义预设名称、System prompt、小说、资料和历史提案不会因界面切换被翻译。新增界面语言不会自动扩大后端允许的项目输出语言；后者需独立更新语言合同和校验。
+
+
+## Outline language and historical content
+
+Known project genre identifiers are localized only for display. Unknown genre values and author titles are preserved. A chapter/scene title is persisted project content, not a UI catalog key. Switching the interface or upgrading the application does not translate old outlines. Authors can edit chapter/scene metadata through explicit save actions.
+
+Structure generation and first application validate authored title/summary fields against the frozen project output language, including obvious short foreign-language headings. This is a conservative heuristic, not general language identification; proper-name labels and verified completed applications retain their compatibility boundaries. No rejected output triggers an automatic paid retry.
+
+已保存的英文目录属于历史作品内容，升级不会自动翻译；可通过章节/场景信息明确改名并保存。新结构会校验标题与摘要的项目语言，减少短英文标题漏检；AI、人物和地点专名仍允许保留原样。

@@ -64,3 +64,10 @@ SG-023 structure application: preserve the preflight conflict and verified compl
 ## SG-024 update consistency
 
 The read-only /health.version field is the running FastAPI app version and is diagnostic metadata, not an author setting or canon field. Legacy missing version may be read via OpenAPI info.version; do not silently infer that an unknown backend matches the UI.
+
+
+## SG-025 novel editor workspace
+
+Maintain the language_policy_v1 and proposal_artifact_v1 short-structure-field validation clarification. No wire-field rename is introduced. First application validates actual authored content; existing applied structure remains idempotent and historical content is not implicitly translated.
+
+Missing nullable scene planning fields project to empty Context Pack strings with explicit gaps under context_pack_v1. Discussion and saved-Draft continuation may use that pack; full scene generation retains its required-context gate. Never write projected defaults back to canon.

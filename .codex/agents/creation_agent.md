@@ -76,3 +76,10 @@ SG-023 structure application: preserve the preflight conflict and verified compl
 ## SG-024 update consistency
 
 Windows update replacement must preflight before any application binary write, stop only retained managed processes or an exact target-install executable path, and preserve stop errors. The updater can exit without Drop; do not rely on destructor cleanup. Do not touch author workspaces or indiscriminately stop image names.
+
+
+## SG-025 novel editor workspace
+
+Validate generated structure authored fields, including obvious short foreign-language headings, against frozen project language. Check edited structure content on first apply before graph writes; preserve verified completed retries. Proper-name metadata remains verbatim. No automatic paid retries, old-title rewrites or model-family assumptions.
+
+Missing nullable scene planning fields project to empty Context Pack strings with explicit gaps under context_pack_v1. Discussion and saved-Draft continuation may use that pack; full scene generation retains its required-context gate. Never write projected defaults back to canon.

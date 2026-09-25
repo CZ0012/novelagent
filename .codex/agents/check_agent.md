@@ -74,3 +74,10 @@ Check explicit workspace API restart without graph environment flags, full API/p
 ## SG-024 update consistency
 
 For Windows updater changes, test preparation failure prevents installation, backend restart is gated, exact-install-path cleanup preserves unrelated same-name processes, and locked-file failure leaves the old main binary intact. Run the actual NSIS-hook fixture and check generated production hook order; verify health/OpenAPI version diagnostics and version manifests.
+
+
+## SG-025 novel editor workspace
+
+Verify real chapter folding, scene-to-editor navigation, simultaneous editor/Agent display, responsive layout, independent catalogs, dirty text protection and exact Draft provenance. Cover short foreign structure headings, proper-name exceptions, first-apply no-write rejection and historical completed retries. Use isolated synthetic UI fixtures; never commit private manuscripts or credentials.
+
+Missing nullable scene planning fields project to empty Context Pack strings with explicit gaps under context_pack_v1. Discussion and saved-Draft continuation may use that pack; full scene generation retains its required-context gate. Never write projected defaults back to canon.

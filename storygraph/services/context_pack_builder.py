@@ -185,12 +185,12 @@ class ContextPackBuilder:
             project_id=project_id,
             output_language=output_language,
             scene_id=scene_id,
-            chapter_id=props.get("chapter_id", ""),
-            pov_character_id=props.get("pov_character_id", ""),
-            location_id=props.get("location_id", ""),
-            timeline_position=props.get("timeline_position", ""),
-            scene_goal=props.get("goal", ""),
-            conflict=props.get("conflict", ""),
+            chapter_id=props.get("chapter_id") or "",
+            pov_character_id=props.get("pov_character_id") or "",
+            location_id=props.get("location_id") or "",
+            timeline_position=props.get("timeline_position") or "",
+            scene_goal=props.get("goal") or "",
+            conflict=props.get("conflict") or "",
             required_characters=required_characters,
             active_relationships=active_relationships,
             knowledge_boundaries=knowledge,
@@ -323,17 +323,20 @@ class ContextPackBuilder:
         output_language: OutputLanguage,
         missing_context: list[ContextGap],
     ) -> None:
-        for field_name in ["chapter_id", "pov_character_id", "location_id"]:
+        for field_name in [
+            "chapter_id", "pov_character_id", "location_id", "timeline_position", "goal", "conflict",
+        ]:
             if not props.get(field_name):
+                required = field_name in {"chapter_id", "pov_character_id", "location_id"}
                 missing_context.append(
                     ContextGap(
                         kind="missing_scene_field",
                         ref=field_name,
-                        severity="critical",
+                        severity="critical" if required else "high",
                         message=localized(
                             output_language,
-                            zh=f"场景 {scene_id} 缺少必需字段 {field_name}。",
-                            en=f"Scene {scene_id} is missing required field {field_name}.",
+                            zh=f"场景 {scene_id} 尚未填写规划字段 {field_name}。",
+                            en=f"Scene {scene_id} has no value for planning field {field_name}.",
                         ),
                         source=scene_id,
                     )

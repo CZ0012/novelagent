@@ -39,7 +39,8 @@ describe("review workspace static boundaries", () => {
     const end = appSource.indexOf("const changeCrossLanguagePolicy", start);
     const callback = appSource.slice(start, end);
     expect(callback).toContain("addStableSourceSelection(current, source.id)");
-    expect(callback).toContain('setWorkspaceTab("agent")');
+    expect(callback).toContain('setWorkspaceTab("write")');
+    expect(callback).toContain('setActiveTab("agent")');
     expect(callback).not.toMatch(/api(Get|Post|Patch|Put)|setAgentDiscussionForm|setCrossLanguagePolicy/);
   });
 

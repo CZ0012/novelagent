@@ -579,6 +579,10 @@ export class ApiRequestError extends Error {
   }
 }
 
+export function isGeneratedLanguageConflict(error: unknown): boolean {
+  return error instanceof ApiRequestError && /Generated output field .+ clearly conflicts with output_language (?:zh-CN|en-US)\./.test(error.technicalDetails);
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   let payload: any = {};

@@ -61,6 +61,25 @@ persisted Agent-authored content MUST follow `output_language`. Proper names,
 contract identifiers, stable IDs, and bounded verbatim source quotes may retain
 their original form.
 
+Project structure analysis MUST validate its normalized chapter/scene titles,
+summaries, purpose, goals, and conflicts before saving a generated Proposal.
+This applies to both model and deterministic analysis. The language guard must
+not exempt all short headings merely because they are below a prose-length
+threshold: generic labels such as `Prologue` and recognizable short English
+narrative phrases conflict with `zh-CN`. A Chinese chapter-number prefix alone
+does not satisfy this requirement when the remaining heading is English.
+Generation prompts should illustrate the schema with the resolved project's
+content language rather than English placeholder values for every project.
+
+The script/phrase guard is conservative validation, not a general language
+detector or translator. Short ambiguous names and acronyms such as `Alice`,
+`Mars`, and `AI` remain permitted. Source-title metadata, explicit POV/location
+labels, timeline metadata, and exact names declared in those POV/location
+labels retain their original form. Unrecognized mixed-language wording can
+still require author review. Validation errors identify field paths and the
+required language without exposing field text; they must not trigger an
+implicit second paid model call or silently translate source content.
+
 ### Source Language
 
 `SourceDocument.language` describes the imported source text. It MUST be either:

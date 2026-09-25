@@ -69,3 +69,10 @@ SG-023 structure application: preserve the preflight conflict and verified compl
 ## SG-024 update consistency
 
 Review partial-update recovery against actual binary/runtime/installation-record versions. Require proof that locked backend aborts before the main binary changes, and that an unrelated same-named backend stays alive. Preserve the distinction between predictable lock preflight and power-loss atomicity.
+
+
+## SG-025 novel editor workspace
+
+Judge the workbench as an author editor with an adjacent Agent, not a stack of administrative forms. Check that disclosure icons correspond to real children and scene clicks visibly open prose. Ensure generated suggestions remain reviewable Proposals and the UI does not imply multi-turn memory or automatic translation of historical titles.
+
+Missing nullable scene planning fields project to empty Context Pack strings with explicit gaps under context_pack_v1. Discussion and saved-Draft continuation may use that pack; full scene generation retains its required-context gate. Never write projected defaults back to canon.

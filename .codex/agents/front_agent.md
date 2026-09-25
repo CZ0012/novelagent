@@ -69,3 +69,10 @@ Own frontend UI design and interaction flow for the React/Vite workbench and Tau
 ## SG-024 update consistency
 
 Keep connected backend version distinct from desktop version, with /health.version and legacy OpenAPI fallback; unknown/mismatch must not read as fully current. Download before stopping the backend, reuse dirty edit guards, call prepare_backend_update before install, and cancel the gate before restoring only a previously managed backend.
+
+
+## SG-025 novel editor workspace
+
+Use real chapter disclosure controls and document leaf buttons. Activating any scene opens prose through existing navigation guards, including the already-selected scene. Keep one parent Draft/Proposal state shared by editor and Agent sidebar; do not chain state-setting save and send through a stale closure. Keep blocking dirty/language feedback visible outside collapsed input controls. Translate only known display enums, never author titles.
+
+Missing nullable scene planning fields project to empty Context Pack strings with explicit gaps under context_pack_v1. Discussion and saved-Draft continuation may use that pack; full scene generation retains its required-context gate. Never write projected defaults back to canon.

@@ -96,3 +96,10 @@ Unblock condition:
 ## SG-024 update consistency
 
 Coordinate Windows installer preflight and managed-backend update gate fixes with both Web and native owners. A desktop version alone is not proof of complete installation; require backend runtime version and real installer-lock acceptance. See docs/windows-update-recovery.md.
+
+
+## SG-025 novel editor workspace
+
+Coordinate the manuscript-first outline/editor/Agent workspace without duplicating Draft state. Preserve exact saved-Draft sends and explicit Proposal comparison/adoption. Distinguish persisted historical titles from UI strings; never silently translate existing outlines. Require structure language checks at generation and first apply, while retaining verified completed retries.
+
+Missing nullable scene planning fields project to empty Context Pack strings with explicit gaps under context_pack_v1. Discussion and saved-Draft continuation may use that pack; full scene generation retains its required-context gate. Never write projected defaults back to canon.

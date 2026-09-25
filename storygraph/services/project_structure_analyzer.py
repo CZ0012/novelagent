@@ -79,6 +79,9 @@ class RuleBasedProjectStructureAnalyzer:
             project_id=project_id,
             title=title,
         )
+        validate_project_structure_output_language(
+            outline=outline, output_language=self.output_language,
+        )
         if truncated:
             outline["truncated"] = True
         return ProjectStructureDraft(
@@ -394,9 +397,8 @@ class LLMProjectStructureAnalyzer(RuleBasedProjectStructureAnalyzer):
         )
         payload = self._parse_response(response.content)
         outline = self._normalize_outline(payload, project_id=project_id, title=title)
-        validate_generated_output_language(
-            output_language=self.output_language,
-            fields=_outline_language_fields(outline),
+        validate_project_structure_output_language(
+            outline=outline, output_language=self.output_language,
         )
         if truncated:
             outline["truncated"] = True
@@ -426,6 +428,7 @@ class LLMProjectStructureAnalyzer(RuleBasedProjectStructureAnalyzer):
             "max_chapters": self.max_chapters,
             "max_scenes_per_chapter": self.max_scenes_per_chapter,
             "source_text": source_text,
+            "output_example": _localized_structure_example(self.output_language),
         }
         return [
             LLMMessage(role="system", content=prompt),
@@ -473,3 +476,119 @@ def _outline_language_fields(outline: dict[str, Any]) -> dict[str, str | None]:
                 value = scene.get(key)
                 fields[f"{scene_prefix}.{key}"] = value if isinstance(value, str) else None
     return fields
+
+
+_ENGLISH_WORD = re.compile(r"[A-Za-z]+(?:['’-][A-Za-z]+)*")
+_HAN = re.compile(r"[\u3400-\u9fff]")
+_ENGLISH_STRUCTURE_LABEL = re.compile(
+    r"^(?:prologue|epilogue|interlude|prelude|introduction|conclusion|appendix|"
+    r"preface|afterword|foreword|chapter|scene|part|volume)(?:\s+(?:\d+|[ivxlcdm]+))?$",
+    re.IGNORECASE,
+)
+_ENGLISH_GRAMMAR_WORDS = frozenset({
+    "a", "an", "the", "of", "to", "in", "at", "from", "with", "for", "and", "but",
+    "or", "as", "by", "on", "into", "without", "through", "before", "after", "when",
+    "while", "he", "she", "they", "it", "his", "her", "their", "is", "are", "was",
+    "were", "be", "been", "has", "have", "had", "will", "would", "should", "must",
+})
+_CHINESE_STRUCTURE_LABEL = re.compile(
+    r"^(?:序章|序幕|引子|尾声|终章|幕间|前言|后记|附录|结语|"
+    r"第\s*[一二三四五六七八九十百千万\d]+\s*[章节回卷部]|场景\s*\d+)$",
+)
+_ENGLISH_FRAME_WITH_HAN_NAME = re.compile(
+    r"^(?:the|a|an)\s+(?:[A-Za-z][A-Za-z'’-]*\s+){1,8}"
+    r"(?:of|in|at|for|from|with|to)\s+[\u3400-\u9fff]",
+    re.IGNORECASE,
+)
+
+
+def validate_project_structure_output_language(
+    *, outline: dict[str, Any], output_language: OutputLanguage,
+) -> None:
+    """Check short generated headings as well as long prose, without translating.
+
+    Short title-case names and acronyms are inherently ambiguous and remain
+    allowed. We reject structural English labels and recognizable narrative
+    grammar, not every Latin token in a Chinese project. Metadata labels and
+    exact proper names declared by the outline retain their original form.
+    """
+    proper_names: set[str] = set()
+    for chapter in outline.get("chapters", []):
+        if not isinstance(chapter, dict):
+            continue
+        for scene in chapter.get("scenes", []):
+            if not isinstance(scene, dict):
+                continue
+            for key in ("pov_label", "location_label"):
+                value = scene.get(key)
+                if isinstance(value, str) and value.strip():
+                    proper_names.add(value.strip())
+    fields: dict[str, str | None] = {}
+    for key, value in _outline_language_fields(outline).items():
+        if value is not None and not isinstance(value, str):
+            raise ContractError(f"Structure output field {key} must be text.")
+        if value is None or value.strip() not in proper_names:
+            fields[key] = value
+    validate_generated_output_language(output_language=output_language, fields=fields)
+    for field_name, value in fields.items():
+        if not value or not value.strip():
+            continue
+        text = value.strip()
+        if output_language == "zh-CN" and field_name.endswith(".title"):
+            # A translated chapter-number prefix alone does not translate its title.
+            text = re.sub(
+                r"^(?:第\s*[一二三四五六七八九十百千万\d]+\s*[章节回卷部]|场景\s*\d+)"
+                r"[\s:：.、—-]*", "", text,
+            ).strip()
+        if output_language == "zh-CN":
+            mismatched = not _HAN.search(text) and _clearly_english_structure_text(text)
+            if field_name.endswith(".title") and _ENGLISH_FRAME_WITH_HAN_NAME.search(text):
+                # A Chinese proper name does not make an English heading Chinese.
+                mismatched = True
+        else:
+            # Preserve short proper names such as 林谨; catch unambiguous outline labels.
+            mismatched = bool(_CHINESE_STRUCTURE_LABEL.fullmatch(text))
+        if mismatched:
+            raise ContractError(
+                f"Generated output field {field_name} clearly conflicts with "
+                f"output_language {output_language}."
+            )
+
+
+def _clearly_english_structure_text(value: str) -> bool:
+    text = value.strip(" \t\r\n:：.。!?！？—-")
+    if _ENGLISH_STRUCTURE_LABEL.fullmatch(text):
+        return True
+    if re.match(r"^(?:chapter|scene|part|volume)\s+(?:\d+|[ivxlcdm]+)\b", text, re.IGNORECASE):
+        return True
+    if re.fullmatch(r"[A-Za-z0-9]+(?:[_:/][A-Za-z0-9_.-]+)+", text):
+        return False  # Stable machine identifiers are not natural-language prose.
+    words = _ENGLISH_WORD.findall(text)
+    if len(words) < 2:
+        return False
+    return any(
+        word.casefold() in _ENGLISH_GRAMMAR_WORDS
+        or word[0].islower()
+        or re.search(r"['’]s$", word, re.IGNORECASE)
+        for word in words
+    )
+
+
+def _localized_structure_example(output_language: OutputLanguage) -> dict[str, Any]:
+    """Illustrate the actual content language; examples are format only, not story input."""
+    return {
+        "summary": localized(output_language, zh="项目摘要", en="Project summary"),
+        "chapters": [{
+            "title": localized(output_language, zh="序章", en="Prologue"),
+            "chapter_index": 1,
+            "summary": localized(output_language, zh="章节摘要", en="Chapter summary"),
+            "purpose": localized(output_language, zh="建立开篇冲突", en="Introduce the conflict"),
+            "scenes": [{
+                "title": localized(output_language, zh="出发前夜", en="Before Departure"),
+                "scene_index": 1,
+                "summary": localized(output_language, zh="场景摘要", en="Scene summary"),
+                "goal": "", "conflict": "", "timeline_position": None,
+                "pov_label": None, "location_label": None,
+            }],
+        }],
+    }

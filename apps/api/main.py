@@ -97,6 +97,7 @@ from storygraph.stores.workflow_store import SQLiteWorkflowStore
 from storygraph.services.project_language import resolve_project_output_language
 from storygraph.services.project_language import enforce_source_language_policy
 from storygraph.services.project_language import project_language_projection
+from storygraph.services.project_structure_analyzer import validate_project_structure_output_language
 from storygraph.workflows import SceneGenerationWorkflow
 
 
@@ -499,7 +500,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.13")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.14")
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -1833,6 +1834,9 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             )
             if not already_applied:
                 _ensure_proposal_expected_version(proposal, request.expected_version)
+                validate_project_structure_output_language(
+                    outline=outline, output_language=output_language,
+                )
             source_ref = request.source_ref or f"proposal:{proposal.id}@v{proposal.version}"
             chapters: list[dict] = []
             scenes: list[dict] = []
