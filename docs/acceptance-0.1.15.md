@@ -38,4 +38,4 @@ The installer backend matches the final sidecar byte for byte; five relevant Pyt
 
 The 54 changed/new source and documentation files, 21 installer-level entries and 4,123 decoded backend items were checked against actual local credential values, encoded forms, sensitive paths and high-confidence secret patterns. No actual credential or private workspace file was found. Generic source candidates were documentation and synthetic test placeholders. Private test inputs and provider responses remain in ignored local directories.
 
-Publication verification is recorded below after the public assets are downloaded again.
+Software commit `7715712` and tag `v0.1.15` were synchronized to GitHub. The stable release contains exactly the installer, `.exe.sig` and `latest.json`. All three were downloaded again and matched the verified local files byte for byte; GitHub reports v0.1.15 as the latest non-draft, non-prerelease release. Novel workspaces, credentials and private acceptance fixtures were excluded. The running local application was left untouched; older clients blocked by preparation should use the one-time manual recovery described above.

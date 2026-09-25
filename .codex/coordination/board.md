@@ -452,6 +452,6 @@ Acceptance: real chapter folding and scene leaf navigation; independently locali
 
 | ID | Status | Owner | Branch | Goal | Next action |
 | --- | --- | --- | --- | --- | --- |
-| SG-026 | active | Main Agent | `codex/sg-026-update-readiness` | Repair Windows update preparation and graph-language gaps; provide safe reviewed correction of historical outline metadata. | Implementation and independent review complete: 377 Python/75 Web/11 Rust tests, 35 lifecycle and 5 NSIS checks passed; browser and authorized private-copy provider acceptance passed. Signed package privacy verified; publishing v0.1.15. |
+| SG-026 | completed | Main Agent | `codex/sg-026-update-readiness` | Repair Windows update preparation and graph-language gaps; provide safe reviewed correction of historical outline metadata. | Implementation and independent review complete: 377 Python/75 Web/11 Rust tests, 35 lifecycle and 5 NSIS checks passed; browser and authorized private-copy provider acceptance passed. Signed package privacy verified; v0.1.15 published and all three re-downloaded assets match the verified package. |
 
 Acceptance: exercise real packaged-backend exit/file release, retain rejection of persistent locks, distinguish preparation from installation failures, never interrupt author edits or touch novel data during diagnostics.

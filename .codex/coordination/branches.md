@@ -230,3 +230,5 @@ Branch: `codex/sg-026-update-readiness`; base: clean `c60fd93`. Creation owns na
 SG-026 scope addition: Contract/Creation owns outline_language_repair service, two scoped API routes, narrow canon_patch/Graph contract clarification and tests. Front owns graph label coverage and review/apply UI. Main owns isolated provider/browser acceptance and release; Review independently audits transaction, language, provenance and UI scope guards.
 
 SG-026 delivery: all owners frozen, independent review passed and final signed package verified. Final source/build baseline carries 0.1.15 in all 13 version locations. Main publishes only software and signed release assets; no private fixture, story workspace or credential is staged.
+
+SG-026 publication complete: 7715712/tag v0.1.15 synchronized to main and this integration branch. All three public assets re-downloaded and matched; latest channel resolves to stable v0.1.15. Private test fixtures remain ignored.
