@@ -240,3 +240,7 @@ Branch `codex/sg-027-manuscript-workspace`, base clean ccde8fb. Main owns integr
 SG-027 integration: all product owners frozen. Chapter/scene preview, exact source adoption, reviewed composition and bounded accessible diffs have independent review and production-browser acceptance. Source and sidecar credential scans passed. Main owns final signed package publication; original author workspace and installation remain untouched.
 
 SG-027 publication complete: software 510df35 and tag v0.1.16 synchronized to main and the integration branch. All three public assets match the independently audited signed package byte for byte; latest resolves to stable v0.1.16. Original installation, story workspace and credentials are unchanged.
+
+## SG-028 branch strategy
+
+Branch `codex/sg-028-model-routing-and-imports`, base clean 3e2f917. Shared checkout: Backend owns provider/config/API/task routing and contracts; Front owns settings and import UI wiring; Import owner owns isolated document parser/helpers/tests; Main coordinates, diagnoses source files read-only, tests actual configured Claude Opus 4.6 in an ignored copy, documents and releases. Agents do not switch branches or commit.

@@ -526,3 +526,14 @@ First promotion checks this immutable v1 baseline even if later edits remove
 current source refs. A newly saved Draft, or a formerly empty Draft that acquired
 text, prevents adoption of that stale first-draft proposal. Existing scene
 revision, continuation and legacy proposal routes retain their review gates.
+
+SG-028 adds optional `provenance.model_execution`, a non-secret
+`{profile_id, profile_name, protocol, model, task}` snapshot specified by
+`agent_runtime_v1`. Legacy records use null; model_ref remains compatible.
+Generation freezes it from the selected task connection. Review/submission and
+manual revisions preserve it, while a new LLM revision replaces it with that
+revision's execution snapshot. A new rule-based generation clears model_ref and
+model_execution, while an explicit author text edit preserves generation lineage. Adopted and composition-created Drafts carry the
+same snapshot in Draft provenance. Configuration edits cannot rewrite historical
+records. This records the requested provider model identifier and protocol, not
+verified vendor identity or hidden model reasoning.

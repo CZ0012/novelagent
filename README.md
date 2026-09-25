@@ -12,8 +12,8 @@ Windows update preparation: v0.1.15 waits for temporary sharing locks after back
 
 The writing workspace keeps the **outline on the left, manuscript in the middle, and Agent on the right**. Fold chapters and open scenes as documents. Continue a scene or discuss a selection without leaving the editor; inspect generated changes in **Proposals** before adopting them. Sources and advanced review tools remain separate views, and the right panel can close for focused writing.
 
-1. Create a project and choose its story language. Add a chapter/scene, or import a TXT, Markdown, or DOCX manuscript into Sources and review a proposed structure.
-2. Open **Settings** and save your provider's Chat Completions-compatible endpoint, key, and exact model ID. **Refresh available models** checks the provider's own listing. A model label does not establish its vendor or model family; missing/unsupported listing never changes your model automatically.
+1. Create a project and choose its story language. Add a chapter/scene, or import a TXT, Markdown, RTF, or DOCX manuscript into Sources and review a proposed structure.
+2. Open **Settings** and save your provider endpoint, key, exact model ID, and explicit protocol (Chat Completions, Responses, or Anthropic Messages). **Refresh available models** checks the provider's own listing. A model label does not establish its vendor or model family; missing/unsupported listing never changes your model automatically.
 3. Choose a writing preset: **Concise Chinese**, **Balanced narrative**, **Precise English**, or create your own System prompt. Presets persist in the local workspace and are shared by CLI, API, and desktop. Built-ins can be duplicated; custom presets can be edited and deleted.
 4. Save your scene, choose **Continue story**, describe what should happen, and check the input list. The Agent uses that exact saved version and explicitly selected sources. The server appends only new text to a separate proposal and preserves the original draft.
 5. Read the proposal and its version diff, edit it if needed, then explicitly adopt it as a scene draft. Candidate facts still require their own human review before canon changes. **Export text** downloads the visible draft or proposal without changing stored content.
@@ -22,7 +22,7 @@ Unsaved drafts and proposals are protected when changing projects, scenes, or co
 
 Historical English outline titles or summaries can be corrected through **Outline tools → Repair outline language**. This uses the configured provider and the project's story language to propose chapter/scene metadata changes. Compare the original and suggested text, submit for review, accept, then explicitly apply. Graph/timeline views refresh together; manuscript text, stable IDs and relationships remain unchanged. Known graph node and relationship labels have independent Chinese/English display translations.
 
-For localization extension, runtime boundaries, and verified behavior, see [Manuscript acceptance](docs/acceptance-0.1.16.md), [Localization](docs/localization.md), [Update and outline repair acceptance](docs/acceptance-0.1.15.md), [Workbench acceptance](docs/acceptance-0.1.14.md), [Provider and preset acceptance](docs/acceptance-0.1.12.md), and [Agent runtime contract](contracts/agent_runtime_v1.md).
+For localization extension, runtime boundaries, and verified behavior, see [Model routing and imports](docs/acceptance-0.1.17.md), [Manuscript acceptance](docs/acceptance-0.1.16.md), [Localization](docs/localization.md), [Update and outline repair acceptance](docs/acceptance-0.1.15.md), [Workbench acceptance](docs/acceptance-0.1.14.md), [Provider and preset acceptance](docs/acceptance-0.1.12.md), and [Agent runtime contract](contracts/agent_runtime_v1.md).
 
 ## Manuscript and Agent revisions (0.1.16)
 
@@ -54,7 +54,7 @@ A scene with incomplete planning metadata can still discuss and continue its sav
 - Canon-safe graph stores with explicit provenance and event log entries, including the local JSON graph backend and optional Neo4j backend.
 - SQLite stores for drafts, proposal artifacts, candidate facts, workflow runs, and deterministic local style samples.
 - Context Pack builder with P0-P7 budgeting metadata, graph and draft provenance, retrieved style samples, and `missing_context` gap reports.
-- Rule-based scene writer, optional OpenAI-compatible LLM scene writer, rule-based continuity checker, and rule-based candidate fact extractor.
+- Rule-based scene writer, optional protocol-configured LLM scene writer, rule-based continuity checker, and rule-based candidate fact extractor.
 - Review service that keeps generated `CandidateFact` records pending until a human accept, edit-accept, reject, or defer decision.
 - Human seed paths plus read-only project option lists for story-bible Characters, Locations, and graph relationships. Seed paths write canon only when the user supplies reviewer, rationale, source reference, and provenance.
 - Read-only graph query API and CLI commands for inspecting canon neighbors and relationships.
@@ -181,7 +181,7 @@ npm --prefix apps/desktop run build:installer
 The generated installer is:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.17_x64-setup.exe
 ```
 
 Other useful desktop commands:
@@ -201,10 +201,10 @@ Verified local build output from `npm --prefix apps/desktop run build:installer`
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.16_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.16_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.17_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.17_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.17_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.17_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -214,7 +214,7 @@ The in-app settings panel includes a `Version & Updates` section. In the Tauri d
 
 Version updates must keep `VERSION`, `pyproject.toml`, the FastAPI version in `apps/api/main.py`, both Web/Desktop package manifests and root lockfile entries, `apps/web/src/version.ts`, the desktop package entry in `apps/desktop/src-tauri/Cargo.lock`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` synchronized. GitHub usage here is only the software release/update channel; local story workspaces, Source Store documents, canon, drafts, project settings, and review state are not synchronized to GitHub.
 
-For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.16_x64-setup.exe.sig`, plus the no-space GitHub Release copies and `latest.json`. The backend sidecar is built with pinned PyInstaller 6.21.0. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
+For the verified Windows build, the updater-relevant local artifacts are the NSIS setup executable and its Tauri updater signature, `StoryGraph Agent_0.1.17_x64-setup.exe.sig`, plus the no-space GitHub Release copies and `latest.json`. The backend sidecar is built with pinned PyInstaller 6.21.0. Do not document a `nsis.zip` updater artifact unless the build output changes. This Tauri updater signature is separate from Windows Authenticode code signing; production Authenticode signing for the sidecar and installer is still a separate release step.
 
 What is still missing or unverified:
 
@@ -294,11 +294,11 @@ until the author explicitly chooses `explicit_reference`; `und` remains blocked.
 
 Structure analysis is a separate explicit action. `POST /projects/{project_id}/sources/{source_document_id}/structure-draft` reads one ready Source Document and creates only a non-canon, author-editable `project_structure_draft` Proposal Artifact. It does not create Chapter or Scene nodes until the author accepts the proposal and invokes the existing explicit apply action. New proposal provenance uses stable `source_document` refs; old `imported_document` refs remain legacy opaque records rather than persistent Source Store IDs. The language policy defaults to `project_only`; an explicit known-language mismatch requires `explicit_reference`, while `und` is always blocked.
 
-The initial Source Library does not support RTF, PDF, OCR, images, or PSD files. Those formats require later importer work and must not be reported as successful text imports today. Import itself never creates another store record. After loading a ready detail, the author may separately and explicitly save that text as a current-scene Draft, a non-canon Proposal, or a Style Sample. This creates the normal target-store boundary; CandidateFacts still require a real Draft Store source and the existing pending human-review path.
+The Source Library supports TXT, Markdown, DOCX, and plain-text extraction from RTF. PDF, OCR, images, and PSD remain unsupported and are skipped. RTF formatting, embedded objects, and images are not imported. Empty files and invalid containers have distinct diagnostics; Office temporary files beginning with `~$` are skipped. Import itself never creates another store record. After loading a ready detail, the author may separately and explicitly save that text as a current-scene Draft, a non-canon Proposal, or a Style Sample. This creates the normal target-store boundary; CandidateFacts still require a real Draft Store source and the existing pending human-review path.
 
 ## Agent Discussion And Selected-Text Revision
 
-The Web and desktop-hosted workbench include an `Agent` tab for discussing the current scene with the configured OpenAI-compatible LLM. The author can highlight a draft span, paste a marked passage, ask for a focused discussion, request a selected-span rewrite, or request a full-scene rewrite. Source Library documents are unselected by default. Only stable IDs that the author explicitly checks are sent as `source_document_ids`; the backend resolves those ready documents inside the route project. It never silently sends every library document or cached snippets from a previous request. The current Context Pack, current draft text, and optional web search remain separate explicit controls; disabling current-draft inclusion also prevents the editor text from being sent as `base_text`. Legacy inline sources must carry a valid source language; missing/invalid language is `422`, not a project-language default.
+The Web and desktop-hosted workbench include an `Agent` tab for discussing the current scene with the configured task connection. The author can highlight a draft span, paste a marked passage, ask for a focused discussion, request a selected-span rewrite, or request a full-scene rewrite. Source Library documents are unselected by default. Only stable IDs that the author explicitly checks are sent as `source_document_ids`; the backend resolves those ready documents inside the route project. It never silently sends every library document or cached snippets from a previous request. The current Context Pack, current draft text, and optional web search remain separate explicit controls; disabling current-draft inclusion also prevents the editor text from being sent as `base_text`. Legacy inline sources must carry a valid source language; missing/invalid language is `422`, not a project-language default.
 
 Before sending, the Agent panel shows an input manifest with the target Scene,
 project output language, exact saved Draft ID/version or explicit omission,
@@ -361,7 +361,7 @@ $env:STORYGRAPH_LLM_API_KEY="<your provider key>"
 $env:STORYGRAPH_LLM_MODEL="deepseek-chat"
 ```
 
-In the Web or desktop settings panel, entering an API key only stores the credential reference. It does not enable LLM drafting by itself. The author must choose the OpenAI-compatible LLM writing mode, save settings, have `read_generate` or `full` permission, and run with a valid project, scene, and Context Pack.
+In the Web or desktop settings panel, entering an API key only stores the credential reference. It does not enable LLM drafting by itself. The author must choose the LLM writing mode, save settings, have `read_generate` or `full` permission, and run with a valid project, scene, and Context Pack.
 
 The LLM writer reads `storygraph/prompts/scene_writer.md`, asks for JSON output, saves only to Draft Store, and locally rejects drafts that omit `must_include` items or contain literal `must_not_violate` constraints. Under `language_policy_v1`, its prose, title, summary, self-check, and deterministic fallback output use the server-derived `ContextPack.output_language`; author instructions and source language cannot override that snapshot. Desktop sidecar builds package `storygraph/prompts` and `storygraph/localization` as data files. It never receives a Graph Store handle; generated state changes still have to pass through CandidateFact extraction and human review.
 
@@ -452,3 +452,14 @@ python -m pytest tests/test_api_agent_settings.py tests/test_api_workflow_runs.p
 ## License
 
 StoryGraph Agent is licensed under the MIT License. See [LICENSE](LICENSE).
+
+
+## Model roles and imports (0.1.17)
+
+Keep one default connection for simple use, or expand **Model connections and task assignments** in Settings. Add named connections and assign planning, writing/continuation, revision, discussion, and fact extraction independently. Unassigned tasks inherit the default. Planning includes new chapter/volume structure and its initial prose in one request. Existing continuity/style checks remain rule-based. All generated proposals expose the requested model and protocol; switching a connection never rewrites historical provenance.
+
+Each connection explicitly selects Chat Completions, Responses, or Anthropic Messages. A model name does not choose the protocol or verify the actual upstream vendor. Existing settings migrate to Chat Completions without changing the model or key. Save a newly entered key only in the local backend workspace; a blank key keeps an existing key. Delete/clear actions are explicit, and no credentials are included in software releases. CLI scene generation loads the same saved task assignments.
+
+Responses uses completed text output and `store: false`; Anthropic uses its native headers, top-level system prompt and Messages body. These are synchronous text adapters for the existing local Agent workflow. Hosted tool execution, server-side memory and response-ID continuation are not enabled. Model listing is read-only and is not proof of generation or tool support. Unsupported protocols, truncated output and malformed JSON fail without switching models, paid retries or canon changes.
+
+RTF (Rich Text Format) is a rich-text document format. Imports retain readable text and paragraph breaks, including Unicode and supported Chinese code pages, with bounded local parsing. A 0-byte DOCX has no content to extract; retrying cannot restore bytes missing from the original file.

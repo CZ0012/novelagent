@@ -67,7 +67,7 @@ policy.
 
 Source language is independent BCP 47 metadata. `und` is never eligible for Agent or structure prompts. Language mismatches are rejected by default; `explicit_reference` requires a known language plus an explicit stable-source selection, does not translate the source, and does not change the server-derived project output language. Legacy inline/structure text requests without valid source language fail with `422`.
 
-RTF, PDF, OCR, images, and PSD are not supported by the initial Source Store. They are later importer work and must be shown as skipped/failed rather than silently treated as successful text imports. A ready Source Document may be analyzed through the source-backed structure route, but that action creates only a non-canon `project_structure_draft`; Chapter/Scene creation still requires explicit author acceptance and apply.
+RTF supports bounded local plain-text extraction; PDF, OCR, images, and PSD are not supported by the Source Store. They are later importer work and must be shown as skipped/failed rather than silently treated as successful text imports. A ready Source Document may be analyzed through the source-backed structure route, but that action creates only a non-canon `project_structure_draft`; Chapter/Scene creation still requires explicit author acceptance and apply.
 
 The hosted workbench includes `协作草稿箱`, backed by the same FastAPI Proposal Store routes used in the browser. Proposal artifacts are non-canon project data: accepting one does not write canon, and promotion to Draft Store or pending CandidateFacts still goes through backend permission and review boundaries.
 
@@ -147,10 +147,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.16_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.16_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.17_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.17_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.17_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.17_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -249,3 +249,10 @@ Select a chapter to read its saved scene drafts in order. Select a scene for **P
 Selected prose can be discussed or revised using a pinned saved Draft and exact UTF-16 offsets. Proposed edits remain separate from the manuscript and show deleted text in red and added text in green with text labels. Review and explicitly adopt the result. New chapter/volume generation similarly creates a reviewable plan and initial drafts before adding them to the project. Volume grouping uses the existing chapter volume index.
 
 Historical structure imports did not create scene prose or reliable source spans. Upgrading therefore cannot safely fill every empty scene from a summary or an entire imported document. Choose an exact source range, or explicitly generate a new draft. Verbatim source adoption requires the source and project languages to match; a foreign-language source can instead be explicitly selected as Agent reference.
+
+
+## Model routing and RTF (v0.1.17)
+
+The desktop hosts the same default connection, named profiles, five task assignments and protocol adapters as API + Web and CLI. Connections are stored locally in the configured workspace, never in release assets. Existing settings retain their exact model/key and default to Chat Completions. Responses and Anthropic Messages must be selected explicitly; there is no model-family detection or fallback. Protocol support is text generation, not automatic hosted tools or cloud memory.
+
+The WebView performs bounded RTF/TXT/Markdown/DOCX text extraction before the project-scoped Source API persists it. RTF objects and formatting are omitted, Office `~$` files are skipped, and empty files are distinguished from malformed containers. Importing remains separate from adoption into a Draft or reviewed canon changes. No migration automatically reimports files or rewrites existing source text.

@@ -224,7 +224,7 @@ Proposal Artifact 使用 `proposal_artifact_v1`，保存 `source_refs`、`target
 
 ### 5.4 Source Store：项目资料与来源追踪
 
-Source Store 按 `project_id` 持久保存作者导入的 Source Document，边界由 `source_document_v1` 定义。初版只接受 TXT、Markdown 和 DOCX，并保存稳定 ID、标题、规范化相对路径、media type、语言、原文件字节数与 `checksum_sha256`、抽取状态、字符数、warning/error、provenance 与时间戳。
+Source Store 按 `project_id` 持久保存作者导入的 Source Document，边界由 `source_document_v1` 定义。当前接受 TXT、Markdown、DOCX 和 RTF 纯文本抽取，并保存稳定 ID、标题、规范化相对路径、media type、语言、原文件字节数与 `checksum_sha256`、抽取状态、字符数、warning/error、provenance 与时间戳。
 
 本地 Web/Tauri 客户端负责从用户选择的文件抽取文本，并把 `extracted_text` 与 metadata 通过 JSON 提交给同一本地 FastAPI；初版 Source Store 不保存原文件字节。资料列表只返回不含 `extracted_text` 的 summary；只有同项目详情读取和作者显式选择的后端 Agent/结构分析可以取得全文。绝对本地路径、全文、API key 和私有资料不得进入 proposal ref、workflow event、协调 Markdown、日志或 Git。
 
@@ -1902,3 +1902,14 @@ v0.1.15 的原生更新准备在受管后端退出后，对 Windows sharing/lock
 新章节或卷先产生可审阅的结构与初稿提案。卷采用现有 Chapter.volume_index 和可读卷名组织，不新增隐式 Volume canon 类型。生成只保存 Proposal，应用需已接受的精确版本，使用稳定派生 ID 新建章节、场景和初稿，不能覆盖既有节点或正文；持久化与幂等恢复边界由对应合同和测试限定。项目大纲、明确选择的资料以及固定的正文上下文在发送前可见；模型来源由配置决定，不隐式更换第三方模型。
 
 新结构应用采用可恢复的分阶段持久化：先原子发布 JSON 图谱及事件，再批量保存 SQLite 草稿和提案派生记录，不宣称跨库事务。后续阶段失败会明确返回可重试错误，重复应用依据完整创建事件与节点/关系证据恢复，不能只凭 ID 或标题相同认定成功。当前该路径仅支持 JSON/内存 Graph Store，Neo4j 在具备等价能力前明确拒绝。
+
+
+## 29. 模型任务分工与协议适配
+
+默认连接保留原有平面配置，命名连接作为高级选项。planning、writing、revision、discussion、extraction 五类任务可引用连接，未指定时继承默认；模型 ID 不决定协议，也不证明第三方服务实际使用的厂商模型。旧配置缺少 llm_protocol 时沿用 chat_completions。场景工作流和 CLI 使用相同解析规则。规划任务包括新章/卷结构及其首稿的一次请求；当前质检与状态标记抽取仍为规则流程。
+
+每次请求冻结配置、任务、协议、确切模型 ID 和预设。进行中的调用不受后续设置变更影响。结果和 Proposal/Draft/工作流来源记录非敏感 model_execution，旧历史不得补造模型来源。局部修改和人工审阅保留原来源，新的模型生成记录新的执行快照。密钥只保存在本地配置；前端收到掩码与是否已配置，不保存明文到浏览器存储。
+
+适配 Chat Completions、Responses 和 Anthropic Messages 的同步文本请求；Responses 显式 store:false，Anthropic 使用原生鉴权和 system 字段。不启用远端工具循环、响应 ID 续接或托管记忆。返回值必须是已完成的正文文本，推理块不能成为正文，截断、工具调用或无效 JSON 明确失败。允许一个完整 JSON 围栏，不猜测修复无效 JSON，也不隐式更换协议或付费重试。模型清单查询只验证读取清单能力。
+
+RTF 导入遵循 Source 合同：本地有界纯文本解析支持 Unicode、中文 GBK 和段落，跳过内嵌对象与格式。零字节、读取字节不一致、容器无效、编码不支持与无正文分别报告；Office 临时文件先跳过。诊断不得回显原文、密钥或绝对路径。导入、模型生成和草稿继续不直接写正典。

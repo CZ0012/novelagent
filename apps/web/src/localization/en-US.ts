@@ -33,6 +33,15 @@ export const enUS = {
     proposalSuffix: "proposal"
   },
   ui: {
+    modelRouting: {
+      jsonPreference: "Prefer JSON output", jsonHelp: "Output still passes local format validation. Messages constrains JSON through task instructions rather than native structured output; provider support varies.",
+      defaultConnection: "Default model connection", defaultHelp: "Configure one default connection for all model tasks. Expand connections and task routing only when needed.", protocol: "Request protocol", protocols: { chat_completions: "Chat Completions", responses: "Responses", anthropic_messages: "Anthropic Messages" }, protocolHelp: "Choose an interface supported by your provider. The protocol does not identify the underlying model vendor. Failures never switch protocols or models automatically.",
+      connections: "Additional connections", connectionsHelp: "Save separate connections for providers or models. Use Save settings to apply your changes.", addConnection: "Add connection", newConnection: "New connection", connectionName: "Connection name", removeConnection: "Remove connection", removeHelp: "Tasks using this connection will inherit the default after you save settings.", defaultOption: "Inherit default connection", taskSection: "Models by task", taskHelp: "All tasks inherit the default unless explicitly assigned. Unavailable models or protocols cause an error; they never silently fall back.", roles: { planning: "Planning and structure", writing: "Drafting and continuation", revision: "Revision and editing", discussion: "Discussion and questions", extraction: "Fact extraction" }, qaRuleBased: "Continuity checks currently use rules and do not call a model.",
+      effective: "Configured model for this request", actual: "Actual request", saveFirst: "This connection has unsaved changes. Save settings before reading its model list.", savedConnection: "This action uses the saved connection configuration.", discoveryHelp: "Only reads the provider's model list. It does not generate text or verify text/tool-call compatibility. Manual model IDs remain supported.", discoveryUnavailable: "No model list is available for this connection. Check its protocol, URL and credentials, or enter the provider's model ID manually.", keyKeep: "Leave blank to retain the saved key. Keys are sent only to the local backend for storage.", keyConfigured: "Key saved", keyMissing: "No key configured", keyClear: "Clear saved key", inherited: "Default connection", missingAssignment: "This task connection is unavailable. Check settings.", requestedModel: "Requested model", historyModel: "Recorded model", presetCollapsed: "Writing presets and System prompt", credentialCleared: "Switching backends cleared unsaved credential inputs."
+    },
+    documentImport: {
+      empty_file: "The original file is empty (0 bytes) and contains no readable prose. Save valid content in Word or the original editor, then import it again.", file_read_failed: "The file could not be read completely. Check access permissions or select it again.", invalid_docx: "This is not a valid DOCX file, or its archive is damaged. Open it in Word and save a new DOCX copy.", empty_text: "No prose could be extracted. The file may contain only images or whitespace.", rtf_invalid: "The RTF file is invalid or incomplete. Save it again in the original editor.", rtf_unsupported_encoding: "This RTF encoding is not supported. Save it as UTF-8 TXT or DOCX.", unsupported_text_encoding: "The text encoding could not be read. Save the file as UTF-8 TXT and import again.", file_too_large: "The file exceeds the import size limit. Split it into chapters before importing.", text_too_large: "The extracted manuscript is too long. Split it into chapters before importing.", crypto_unavailable: "The file checksum cannot be calculated on this page. Retry in the local app or a supported local connection.", rtf_too_complex: "This RTF structure is too deeply nested. Save it as TXT or DOCX.", docx_too_large: "The expanded DOCX content exceeds the safe reading limit. Split or resave the document.", unsupported_format: "Unsupported file format. Choose TXT, Markdown, RTF or DOCX.", temporary_file: "This editor temporary file was skipped.", rtf_text_only: "RTF prose was imported. Formatting, images and embedded objects are excluded.", rtf_omitted_destinations: "RTF auxiliary information and unsupported groups were omitted.", docx_conversion_warnings: "Some non-prose DOCX content was omitted. Compare the extracted text with the original.", unknown_error: "The file could not be read. Check the original file and try again.", unknown_warning: "File conversion reported a warning. Compare the text with the original."
+    },
     manuscript: {
       saveWholeSource: "Save entire source as manuscript", sourceAdvanced: "Advanced source actions",
       localBackendOnly: "This operation requires a local JSON or memory graph backend. Safe application is not supported by the current connection.", compositionTooLarge: "The selected references exceed 100,000 characters. Select less material and try again.", compositionInvalid: "The outline and manuscript proposal does not meet its format or language requirements. Adjust your instructions and generate it again.", compositionStale: "The outline, volume position, or project language changed. Refresh and generate a new proposal.", sourceStale: "The source changed. Reopen it and select the passage again.",
@@ -230,7 +239,7 @@ export const enUS = {
       folderButton: "Import folder",
       refreshButton: "Refresh sources",
       emptyTitle: "This project has no sources yet",
-      emptyText: "Import TXT, Markdown, or DOCX files with their folder structure. They remain available after restart.",
+      emptyText: "Import TXT, Markdown, RTF, or DOCX files with their folder structure. They remain available after restart.",
       readerEmptyTitle: "Select a project source",
       readerEmptyText: "The list loads summaries only. Full text is loaded only after selection. Reading or importing never writes drafts, proposals, candidate facts, or canon automatically.",
       readerLoadingTitle: "Loading source text",
@@ -275,7 +284,7 @@ export const enUS = {
       importedStyleSummaryPrefix: "Style sample explicitly copied from project source: ",
       importedProposalTitlePrefix: "Imported source proposal: ",
       importedProposalNotePrefix: "Explicitly created by the author from project source: ",
-      formats: { txt: "TXT", markdown: "Markdown", docx: "DOCX" }
+      formats: { txt: "TXT", markdown: "Markdown", rtf: "RTF", docx: "DOCX" }
     },
     proposals: {
       ariaLabel: "Proposal workspace",
@@ -545,7 +554,7 @@ export const enUS = {
       modelSection: "Core model",
       writerMode: "Writing mode",
       ruleBasedMode: "Local rule-based mode",
-      llmMode: "OpenAI-compatible model",
+      llmMode: "Configured model",
       providerName: "Provider name",
       baseUrl: "Base URL",
       model: "Model",
@@ -751,7 +760,7 @@ export const enUS = {
       sourceDetailNotReady: "The full source text has not loaded successfully.",
       sourceEmptyText: "The file contains no usable text.",
       sourceUnsafePath: "The relative file path is unsafe, so import was stopped.",
-      sourceUnsupportedFormat: "Only TXT, Markdown, and DOCX are supported right now. This file was not imported.",
+      sourceUnsupportedFormat: "Only TXT, Markdown, RTF, and DOCX are supported right now. This file was not imported.",
       sourceRetryFormatMismatch: "The retry file format does not match the original source.",
       webCryptoUnavailable: "This runtime cannot calculate SHA-256, so the file cannot be imported safely.",
       docxExtractionFailed: (detail: string) => `DOCX text extraction failed: ${detail}`,
@@ -774,6 +783,11 @@ export const enUS = {
       noInstallableDesktopUpdate: "No installable desktop update is available. Check for updates first.",
       requestFailed: "The operation did not finish. Expand technical details, then try again.",
       generatedLanguageConflict: "The generated title or summary does not match the story language. Try again, or edit the proposal before applying it.",
+      invalidModelOutput: "The model returned an invalid content format. No draft was saved. Adjust the request and try again; retries and model changes are never automatic.",
+      modelIncompleteResponse: "The model did not return complete content. This output was not adopted. Check the service or reduce the request scope before retrying.",
+      modelUnsupportedOutput: "The provider returned an unsupported output type. Use a model and protocol that return complete text; the model will not change automatically.",
+      modelRequestFailed: "The provider could not complete the request. Check this task’s connection, model, and service status before retrying.",
+      modelMissingConfig: "This task’s assigned connection is incomplete. Set its address, model, and API key in Settings before retrying; another connection will not be used.",
       technicalDetails: "Technical details",
       sourceLanguageRequired: "Set this source language to Chinese or English first.",
       sourceContentLanguageMismatch: "Only a source in the story language can be copied directly into a draft, proposal, or style sample. Other-language sources may only be analyzed as explicit Agent references.",

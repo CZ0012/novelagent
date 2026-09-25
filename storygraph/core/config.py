@@ -33,6 +33,7 @@ class StoryGraphSettings:
             "OPENAI_API_KEY",
             "",
         )
+        self.llm_protocol = os.environ.get("STORYGRAPH_LLM_PROTOCOL", "chat_completions")
         self.llm_model = os.environ.get("STORYGRAPH_LLM_MODEL", "deepseek-chat")
         self.llm_timeout_seconds = float(os.environ.get("STORYGRAPH_LLM_TIMEOUT_SECONDS", "60"))
         self.llm_json_mode = os.environ.get("STORYGRAPH_LLM_JSON_MODE", "1").lower() not in {

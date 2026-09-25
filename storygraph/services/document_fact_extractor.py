@@ -7,10 +7,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from storygraph.core.errors import ContractError
+from storygraph.core.errors import ContractError, ModelOutputError
 from storygraph.core.ids import new_id, slug_id
 from storygraph.models.draft import Draft
 from storygraph.models.project import CrossLanguagePolicy, OutputLanguage, localized
+from storygraph.services.json_output import unwrap_json_fence
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
 from storygraph.services.project_language import (
     authoritative_language_message,
@@ -168,19 +169,15 @@ class LLMDocumentFactExtractor:
 
     @staticmethod
     def _parse_response(content: str) -> list[dict[str, Any]]:
-        cleaned = content.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.removeprefix("```json").removeprefix("```").strip()
-            cleaned = cleaned.removesuffix("```").strip()
         try:
-            payload = json.loads(cleaned)
-        except json.JSONDecodeError as exc:
-            raise ContractError("LLM document fact extractor response must be JSON") from exc
+            payload = json.loads(unwrap_json_fence(content))
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ModelOutputError("LLM document fact extractor response must be JSON") from exc
         if not isinstance(payload, dict):
-            raise ContractError("LLM document fact extractor response must be a JSON object")
+            raise ModelOutputError("LLM document fact extractor response must be a JSON object")
         facts = payload.get("facts")
         if not isinstance(facts, list):
-            raise ContractError("LLM document fact extractor response requires facts array")
+            raise ModelOutputError("LLM document fact extractor response requires facts array")
         return [fact for fact in facts if isinstance(fact, dict)]
 
     def _marker(

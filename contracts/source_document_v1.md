@@ -62,18 +62,36 @@ Required top-level fields:
 - `provenance`: local import provenance without secrets or absolute paths.
 - `created_at` and `updated_at`: UTC timestamps.
 
-## Initial Supported Formats
+## Supported Formats
 
-The first v1 implementation supports:
+The additive v1 implementation supports:
 
 - `.txt` as `text/plain`
 - `.md` and `.markdown` as `text/markdown`
+- `.rtf` as `application/rtf` (plain-text extraction; no rendering or embedded objects)
 - `.docx` as
   `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
 
-RTF, PDF, OCR, images, PSD, archives, and executable formats are not supported
-by this initial contract implementation. A client must report skipped or failed
+PDF, OCR, images, PSD, archives, and executable formats are not supported
+by this contract implementation. A client must report skipped or failed
 files honestly rather than relabeling them as successful text imports.
+
+Local extraction distinguishes empty input, failed/inconsistent reads, invalid
+document containers, unsupported encodings, empty extracted text and resource
+limits. A zero-byte original is an empty file, not proof that the importer
+corrupted it. A file whose reported size differs from bytes read must not be
+presented as a successful extraction. Errors are bounded stable categories with
+localized UI explanations; raw parser errors must not expose absolute paths or
+document content. Existing persisted parser errors remain readable, and an
+available recorded error must not be described as a missing backend error.
+
+Office owner/lock files beginning with `~$` are skipped as temporary files before
+extraction and persistence. They are not novel documents or import failures.
+RTF extraction is a bounded local text reader: preserve paragraphs, Unicode
+characters and supported code-page text; skip formatting metadata, pictures,
+embedded objects and field instructions. Never fetch external resources or
+execute/render embedded content. Unsupported encodings and malformed/over-limit
+inputs must fail explicitly rather than silently drop manuscript text.
 
 ## Extraction Status
 

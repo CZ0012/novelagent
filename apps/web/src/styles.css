@@ -2969,3 +2969,20 @@ body { min-width: 360px; }
   .proposal-list { max-height: 155px; border-right: 0; border-bottom: 1px solid var(--line); }
   .proposal-meta { grid-template-columns: minmax(0, 1fr); }
 }
+/* SG-028: keep one default connection visible; optional routing stays folded. */
+.model-connection-fields { display: grid; gap: 10px; min-width: 0; }
+.model-connection-fields small, .model-connections > small, .task-model-settings > small { display: block; color: var(--muted); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.model-connection-fields .checkbox-row { display: flex; grid-template-columns: none; align-items: start; gap: 7px; }
+.connection-key-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.connection-key-status code { font: inherit; overflow-wrap: anywhere; }
+.connection-profile { border: 1px solid var(--line); border-radius: 7px; margin: 12px 0; padding: 10px; }
+.connection-profile > summary { cursor: pointer; font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.connection-profile > summary small { display: block; margin: 5px 0 0 14px; font-size: 11px; font-weight: 400; color: var(--muted); }
+.connection-profile[open] > summary { margin-bottom: 12px; }
+.connection-profile > button { margin: 10px 0 6px; }
+.connection-profile > small { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.task-model-settings > label { margin-top: 14px; }
+.task-model-settings > label > small { font-size: 11px; color: var(--muted); line-height: 1.55; overflow-wrap: anywhere; }
+.model-qa-note { margin: 14px 0 0; border-top: 1px solid var(--line); padding-top: 12px; font-size: 12px; line-height: 1.65; color: var(--muted); }
+.model-execution-summary { font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.settings-panel > details[open] > .preset-panel { margin-top: 12px; }

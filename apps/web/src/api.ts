@@ -61,6 +61,7 @@ export type Draft = {
   text: string;
   summary?: string | null;
   discarded: boolean;
+  provenance?: Record<string, unknown> & { model_execution?: ModelExecution | null };
   created_at: string;
   updated_at: string;
 };
@@ -68,6 +69,7 @@ export type Draft = {
 export type SourceMediaType =
   | "text/plain"
   | "text/markdown"
+  | "application/rtf"
   | "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export type SourceExtractionStatus = "ready" | "failed" | "archived";
@@ -179,6 +181,7 @@ export type ProposalArtifact = {
     created_via: "manual" | "llm" | "import" | "workflow" | "api";
     workflow_run_id?: string | null;
     model_ref?: string | null;
+    model_execution?: ModelExecution | null;
     note?: string | null;
   };
   version: number;
@@ -264,6 +267,7 @@ export type AgentDiscussionRequest = {
 };
 
 export type AgentDiscussionResult = {
+  model_execution?: ModelExecution;
   proposal: ProposalArtifact;
   reply: string;
   web_results: Array<{
@@ -460,10 +464,21 @@ export type SceneRunResult = {
 
 export type AgentPermissionLevel = "read_only" | "read_generate" | "full";
 
+export type ModelProtocol = "chat_completions" | "responses" | "anthropic_messages";
+export type ModelTask = "planning" | "writing" | "revision" | "discussion" | "extraction";
+export type ModelExecution = { task: ModelTask; profile_id: string; profile_name: string; protocol: ModelProtocol; model: string };
+export type ConnectionProfile = { id: string; name: string; protocol: ModelProtocol; base_url: string; model: string; json_mode: boolean; api_key_configured: boolean; api_key_preview?: string | null };
+export type ConnectionProfileUpdate = Pick<ConnectionProfile, "id" | "name" | "protocol" | "base_url" | "model" | "json_mode"> & { api_key?: string | null; clear_api_key?: boolean };
+export type TaskAssignments = Partial<Record<ModelTask, string | null>>;
+
 export type AgentSettings = {
   selected_preset_id: string;
   agent_presets: AgentPreset[];
   scene_writer: "rule_based" | "llm";
+  llm_protocol?: ModelProtocol;
+  connection_profiles?: ConnectionProfile[];
+  task_assignments?: TaskAssignments;
+  resolved_tasks?: Partial<Record<ModelTask, ModelExecution>>;
   provider_label: string;
   llm_base_url: string;
   llm_model: string;
@@ -477,6 +492,9 @@ export type AgentSettings = {
 export type AgentSettingsUpdate = {
   selected_preset_id?: string;
   scene_writer: "rule_based" | "llm";
+  llm_protocol?: ModelProtocol;
+  connection_profiles?: ConnectionProfileUpdate[];
+  task_assignments?: TaskAssignments;
   provider_label: string;
   llm_base_url: string;
   llm_model: string;
@@ -497,6 +515,7 @@ export type AgentPreset = {
 export type AgentPresetInput = Pick<AgentPreset, "name" | "description" | "system_prompt">;
 
 export type AgentModels = {
+  model_execution?: ModelExecution;
   models: Array<{ id: string }>;
   current_model: string;
   current_model_available: boolean | null;
@@ -585,6 +604,10 @@ export class ApiRequestError extends Error {
 
 export function isGeneratedLanguageConflict(error: unknown): boolean {
   return error instanceof ApiRequestError && /Generated output field .+ clearly conflicts with output_language (?:zh-CN|en-US)\./.test(error.technicalDetails);
+}
+
+export function isInvalidModelOutput(error: unknown): boolean {
+  return error instanceof ApiRequestError && (error.category === "model_output_invalid" || /^Agent discussion response must be (?:JSON|a JSON object)\.?$/.test(error.technicalDetails));
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {

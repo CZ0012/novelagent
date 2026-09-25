@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
+from copy import copy
+from urllib.parse import urlsplit
 import hashlib
 import json
 import os
 from tempfile import NamedTemporaryFile
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator, ValidationError
 
 from storygraph.core.config import StoryGraphSettings
 
@@ -76,6 +79,66 @@ BUILTIN_AGENT_PRESETS = (
 )
 
 
+ProviderProtocol = Literal["chat_completions", "responses", "anthropic_messages"]
+AgentTask = Literal["planning", "writing", "revision", "discussion", "extraction"]
+AGENT_TASKS = ("planning", "writing", "revision", "discussion", "extraction")
+
+
+
+def _validate_provider_address(value: str) -> str:
+    if not value:
+        return value
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        raise ValueError("Invalid provider HTTP(S) address") from None
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("Provider address must be HTTP(S) without credentials, query or fragment")
+    return value
+
+
+class ConnectionProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
+    name: str = Field(min_length=1, max_length=80)
+    protocol: ProviderProtocol = "chat_completions"
+    base_url: str = Field(default="", max_length=2048)
+    model: str = Field(default="", max_length=200)
+    json_mode: bool = True
+    api_key: str = Field(default="", max_length=4096, repr=False)
+
+    _valid_address = field_validator("base_url")(_validate_provider_address)
+
+    @field_validator("id")
+    @classmethod
+    def reject_default_id(cls, value):
+        if value == "default":
+            raise ValueError("default is reserved for the primary connection")
+        return value
+
+
+class ConnectionProfileUpdate(ConnectionProfile):
+    api_key: str | None = Field(default=None, max_length=4096, repr=False)
+    clear_api_key: bool = False
+
+
+class TaskAssignments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    planning: str | None = None
+    writing: str | None = None
+    revision: str | None = None
+    discussion: str | None = None
+    extraction: str | None = None
+
+
+class ModelExecution(BaseModel):
+    profile_id: str
+    profile_name: str
+    protocol: ProviderProtocol
+    model: str
+    task: AgentTask
+
+
 class AgentRuntimeConfig(BaseModel):
     scene_writer: str = "rule_based"
     provider_label: str = "OpenAI-compatible"
@@ -83,9 +146,14 @@ class AgentRuntimeConfig(BaseModel):
     llm_model: str = "deepseek-chat"
     llm_api_key: str = ""
     llm_json_mode: bool = True
+    llm_protocol: ProviderProtocol = "chat_completions"
     permission_level: AgentPermissionLevel = AgentPermissionLevel.FULL
     selected_preset_id: str = DEFAULT_AGENT_PRESET_ID
     custom_presets: list[AgentPreset] = Field(default_factory=list, max_length=100)
+    connection_profiles: list[ConnectionProfile] = Field(default_factory=list, max_length=20)
+    task_assignments: TaskAssignments = Field(default_factory=TaskAssignments)
+
+    _valid_address = field_validator("llm_base_url")(_validate_provider_address)
 
     @model_validator(mode="after")
     def validate_presets(self) -> "AgentRuntimeConfig":
@@ -96,10 +164,18 @@ class AgentRuntimeConfig(BaseModel):
             ids.add(preset.id)
         if self.selected_preset_id not in ids:
             raise ValueError("Selected Agent preset does not exist")
+        profile_ids = [profile.id for profile in self.connection_profiles]
+        if len(profile_ids) != len(set(profile_ids)):
+            raise ValueError("Connection profile IDs must be unique")
+        if any(value is not None and value not in profile_ids
+               for value in self.task_assignments.model_dump().values()):
+            raise ValueError("Task assignment references an unknown connection profile")
         return self
 
 
 class AgentRuntimeConfigUpdate(BaseModel):
+    connection_profiles: list[ConnectionProfileUpdate] = Field(default_factory=list, max_length=20)
+    task_assignments: TaskAssignments = Field(default_factory=TaskAssignments)
     scene_writer: str = Field(default="rule_based", pattern="^(rule_based|llm)$")
     provider_label: str = "OpenAI-compatible"
     llm_base_url: str = ""
@@ -107,6 +183,7 @@ class AgentRuntimeConfigUpdate(BaseModel):
     llm_api_key: str | None = None
     clear_api_key: bool = False
     llm_json_mode: bool = True
+    llm_protocol: ProviderProtocol = "chat_completions"
     permission_level: AgentPermissionLevel = AgentPermissionLevel.FULL
     selected_preset_id: str = Field(default=DEFAULT_AGENT_PRESET_ID, min_length=1, max_length=100)
 
@@ -119,6 +196,10 @@ class AgentRuntimeConfigResponse(BaseModel):
     api_key_configured: bool
     api_key_preview: str | None
     llm_json_mode: bool
+    llm_protocol: ProviderProtocol
+    connection_profiles: list[dict]
+    task_assignments: TaskAssignments
+    resolved_tasks: dict[str, ModelExecution]
     permission_level: AgentPermissionLevel
     selected_preset_id: str
     agent_presets: list[AgentPreset]
@@ -138,11 +219,15 @@ def load_agent_config(settings: StoryGraphSettings) -> AgentRuntimeConfig:
         llm_model=settings.llm_model,
         llm_api_key=settings.llm_api_key,
         llm_json_mode=settings.llm_json_mode,
+        llm_protocol=getattr(settings, "llm_protocol", "chat_completions"),
     )
     if not settings.agent_config_path.exists():
         return config
-    payload = json.loads(settings.agent_config_path.read_text(encoding="utf-8"))
-    stored = AgentRuntimeConfig.model_validate(payload)
+    try:
+        payload = json.loads(settings.agent_config_path.read_text(encoding="utf-8"))
+        stored = AgentRuntimeConfig.model_validate(payload)
+    except (json.JSONDecodeError, ValidationError):
+        raise ValueError("Saved Agent configuration is invalid; check connection profiles and task assignments") from None
     if not stored.llm_api_key and settings.llm_api_key:
         stored.llm_api_key = settings.llm_api_key
     return stored
@@ -173,10 +258,25 @@ def update_agent_config(
     api_key = current.llm_api_key
     if update.clear_api_key:
         api_key = ""
-    elif update.llm_api_key is not None:
+    elif update.llm_api_key:
         api_key = update.llm_api_key
     values = current.model_dump()
-    values.update(update.model_dump(exclude_unset=True, exclude={"clear_api_key", "llm_api_key"}))
+    values.update(update.model_dump(exclude_unset=True, exclude={"clear_api_key", "llm_api_key", "connection_profiles", "task_assignments"}))
+    if "connection_profiles" in update.model_fields_set:
+        old_profiles = {profile.id: profile for profile in current.connection_profiles}
+        profiles = []
+        for profile in update.connection_profiles:
+            existing = old_profiles.get(profile.id)
+            secret = "" if profile.clear_api_key else (
+                profile.api_key or (existing.api_key if existing else "")
+            )
+            profiles.append({**profile.model_dump(exclude={"clear_api_key", "api_key"}), "api_key": secret})
+        values["connection_profiles"] = profiles
+    if "task_assignments" in update.model_fields_set:
+        values["task_assignments"] = {
+            **current.task_assignments.model_dump(),
+            **update.task_assignments.model_dump(exclude_unset=True),
+        }
     values["llm_api_key"] = api_key
     return AgentRuntimeConfig.model_validate(values)
 
@@ -187,7 +287,10 @@ def apply_agent_config(settings: StoryGraphSettings, config: AgentRuntimeConfig)
     settings.llm_api_key = config.llm_api_key
     settings.llm_model = config.llm_model
     settings.llm_json_mode = config.llm_json_mode
+    settings.llm_protocol = config.llm_protocol
     settings.agent_preset = selected_agent_preset(config).model_copy(deep=True)
+    # A single pointer publication is the request snapshot boundary.
+    settings.agent_runtime_config = config.model_copy(deep=True)
 
 
 def config_response(config: AgentRuntimeConfig) -> AgentRuntimeConfigResponse:
@@ -199,6 +302,13 @@ def config_response(config: AgentRuntimeConfig) -> AgentRuntimeConfigResponse:
         api_key_configured=bool(config.llm_api_key),
         api_key_preview=_preview_secret(config.llm_api_key),
         llm_json_mode=config.llm_json_mode,
+        llm_protocol=config.llm_protocol,
+        connection_profiles=[{
+            **p.model_dump(exclude={"api_key"}),
+            "api_key_configured": bool(p.api_key), "api_key_preview": _preview_secret(p.api_key),
+        } for p in config.connection_profiles],
+        task_assignments=config.task_assignments,
+        resolved_tasks={task: resolve_model_execution(config, task) for task in AGENT_TASKS},
         permission_level=config.permission_level,
         selected_preset_id=config.selected_preset_id,
         agent_presets=[*BUILTIN_AGENT_PRESETS, *config.custom_presets],
@@ -255,3 +365,32 @@ def _preview_secret(secret: str) -> str | None:
     if len(secret) <= 8:
         return "configured"
     return f"{secret[:4]}...{secret[-4:]}"
+
+
+def resolve_model_execution(config: AgentRuntimeConfig, task: AgentTask, *, profile_id=None) -> ModelExecution:
+    selected = profile_id if profile_id is not None else getattr(config.task_assignments, task)
+    if selected in (None, "default"):
+        return ModelExecution(profile_id="default", profile_name=config.provider_label,
+                              protocol=config.llm_protocol, model=config.llm_model, task=task)
+    profile = next((item for item in config.connection_profiles if item.id == selected), None)
+    if profile is None:
+        raise ValueError("Unknown connection profile")
+    return ModelExecution(profile_id=profile.id, profile_name=profile.name,
+                          protocol=profile.protocol, model=profile.model, task=task)
+
+
+def settings_for_task(settings: StoryGraphSettings, task: AgentTask, *, profile_id=None) -> StoryGraphSettings:
+    config = getattr(settings, "agent_runtime_config", None) or load_agent_config(settings)
+    config = config.model_copy(deep=True)
+    snapshot = copy(settings)
+    execution = resolve_model_execution(config, task, profile_id=profile_id)
+    apply_agent_config(snapshot, config)
+    if execution.profile_id != "default":
+        profile = next(item for item in config.connection_profiles if item.id == execution.profile_id)
+        snapshot.llm_base_url, snapshot.llm_api_key = profile.base_url, profile.api_key
+        snapshot.llm_model, snapshot.llm_json_mode = profile.model, profile.json_mode
+        snapshot.llm_protocol = profile.protocol
+    snapshot.model_execution = execution.model_dump()
+    snapshot.agent_runtime_config = None  # Already resolved; factories must not resolve it again.
+    snapshot.resolved_task = task
+    return snapshot

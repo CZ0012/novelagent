@@ -34,11 +34,11 @@ from storygraph.core.agent_config import (
     has_permission,
     load_agent_config,
     save_agent_config,
-    selected_agent_preset,
     update_agent_config,
+    settings_for_task,
 )
 from storygraph.core.config import StoryGraphSettings
-from storygraph.core.errors import ContractError, GraphStoreError
+from storygraph.core.errors import ContractError, GraphStoreError, ModelOutputError
 from storygraph.core.ids import new_id, slug_id
 from storygraph.core.time import utc_now
 from storygraph.demo import PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
@@ -350,6 +350,7 @@ class SourceDocumentImportRequest(BaseModel):
         "text/plain",
         "text/markdown",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/rtf",
     ]
     language: str = Field(..., min_length=1, max_length=35)
     byte_size: int = Field(..., ge=0)
@@ -537,7 +538,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.16")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.17")
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -648,15 +649,18 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             source_languages=[source_language],
             policy=cross_language_policy,
         )
-        if _llm_is_configured(settings):
+        runtime = settings_for_task(settings, "planning")
+        if runtime.model_execution["profile_id"] != "default":
+            _require_llm_configured(runtime)
+        if _llm_is_configured(runtime):
             analyzer = LLMProjectStructureAnalyzer(
-                provider=create_llm_provider(settings),
-                model=settings.llm_model,
+                provider=create_llm_provider(runtime),
+                model=runtime.llm_model,
                 output_language=output_language,
                 max_chapters=max_chapters,
                 max_scenes_per_chapter=max_scenes_per_chapter,
             )
-            model_ref = f"{agent_config.provider_label}/{settings.llm_model}"
+            model_ref = runtime.llm_model
         else:
             analyzer = RuleBasedProjectStructureAnalyzer(
                 output_language=output_language,
@@ -691,6 +695,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 created_by="agent",
                 created_via=draft.created_via,  # type: ignore[arg-type]
                 model_ref=model_ref,
+                model_execution=runtime.model_execution if model_ref else None,
                 note=localized(
                     output_language,
                     zh=(
@@ -711,6 +716,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         return {
             "proposal": stored.model_dump(),
             "outline": draft.outline,
+            "model_execution": runtime.model_execution if model_ref else None,
             "truncated": draft.truncated,
             "output_language": output_language,
             "cross_language_policy": cross_language_policy,
@@ -804,20 +810,25 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             try:
                 updated = update_agent_config(agent_config, request)
             except ValueError as exc:
-                raise HTTPException(status_code=422, detail="Selected Agent preset is invalid") from exc
+                raise HTTPException(status_code=422, detail="Agent preset, connection profile, or task assignment is invalid") from exc
             return persist_agent_settings(updated)
 
     @app.get("/settings/agent/models")
-    def get_agent_models() -> dict:
+    def get_agent_models(profile_id: str = "default") -> dict:
         require_permission(AgentPermissionLevel.READ_GENERATE)
-        current_model = agent_config.llm_model
         try:
-            _require_llm_configured(settings)
-            provider = create_llm_provider(settings)
+            runtime = settings_for_task(settings, "discussion", profile_id=profile_id)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Unknown connection profile") from None
+        current_model = runtime.llm_model
+        try:
+            _require_llm_configured(runtime)
+            provider = create_llm_provider(runtime)
             provider.timeout_seconds = min(provider.timeout_seconds, 15)
             models = provider.list_models()
             return {
                 "models": models,
+                "model_execution": runtime.model_execution,
                 "current_model": current_model,
                 "current_model_available": any(item["id"] == current_model for item in models),
                 "status": "ok",
@@ -828,7 +839,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         except (RuntimeError, ValueError) as exc:
             error_message = str(exc)
         return {
-            "models": [], "current_model": current_model, "current_model_available": None,
+            "models": [], "model_execution": runtime.model_execution, "current_model": current_model, "current_model_available": None,
             "status": "unavailable", "error": error_message,
         }
 
@@ -1402,12 +1413,13 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         require_permission(AgentPermissionLevel.READ_GENERATE)
         try:
             _ensure_project_exists(graph, project_id)
-            _require_llm_configured(settings)
+            runtime = settings_for_task(settings, "planning")
+            _require_llm_configured(runtime)
             return generate_composition(
                 graph=graph, proposal_store=proposal_store, source_store=source_store,
                 draft_store=draft_store, project_id=project_id, request=request,
-                provider=create_llm_provider(settings), model=settings.llm_model,
-                preset=selected_agent_preset(agent_config),
+                provider=create_llm_provider(runtime), model=runtime.llm_model,
+                preset=runtime.agent_preset,
             )
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
@@ -1452,10 +1464,11 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         try:
             _ensure_project_exists(graph, project_id)
             require_local_graph(graph)
-            _require_llm_configured(settings)
+            runtime = settings_for_task(settings, "planning")
+            _require_llm_configured(runtime)
             return generate_outline_language_proposal(
                 graph=graph, store=proposal_store, project_id=project_id,
-                provider=create_llm_provider(settings), model=settings.llm_model,
+                provider=create_llm_provider(runtime), model=runtime.llm_model,
             )
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
@@ -1607,13 +1620,16 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             body = request.body
             title = request.title
             generation_preset = None
+            generation_execution = None
             if body is None:
                 _ensure_proposal_artifact_type(existing, "scene_draft")
                 target_scene_id = _proposal_target_scene_id(existing)
                 context_pack = context_builder.build(project_id=project_id, scene_id=target_scene_id)
-                writer = create_scene_writer(settings, draft_store)
+                runtime = settings_for_task(settings, "revision")
+                writer = create_scene_writer(runtime, draft_store)
                 body = writer.draft(context_pack).text
                 generation_preset = getattr(writer, "agent_preset", None)
+                generation_execution = getattr(writer, "model_execution", None)
                 current_language = context_pack.output_language
                 if existing.content_language != current_language and title is None:
                     title = localized(
@@ -1645,6 +1661,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 ),
                 expected_version=request.expected_version,
                 status="agent_revised",
+                model_execution=generation_execution,
+                reset_model_execution=request.body is None,
             )
             return proposal.model_dump()
         except ContractError as exc:
@@ -1784,6 +1802,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     scene_id=request.scene_id,
                     content_language=content_language,
                     text=proposal.body,
+                    provenance={"proposal_id": proposal.id, "model_execution": proposal.provenance.model_execution.model_dump()} if proposal.provenance.model_execution else None,
                     summary=request.summary
                     or localized(
                         content_language,
@@ -2397,7 +2416,10 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         request: AgentDiscussionRequest,
     ) -> dict:
         require_permission(AgentPermissionLevel.READ_GENERATE)
-        _require_llm_configured(settings)
+        task = ("revision" if request.mode in {"revise_scene", "revise_selection"} else
+                "writing" if request.mode in {"continue_scene", "create_scene"} else "discussion")
+        runtime = settings_for_task(settings, task)
+        _require_llm_configured(runtime)
         try:
             graph_query.scene_node(project_id=project_id, scene_id=scene_id)
             output_language = resolve_project_output_language(graph, project_id)
@@ -2422,9 +2444,9 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 else None
             )
             service = AgentDiscussionService(
-                provider=create_llm_provider(settings),
-                model=settings.llm_model,
-                agent_preset=selected_agent_preset(agent_config),
+                provider=create_llm_provider(runtime),
+                model=runtime.llm_model,
+                agent_preset=runtime.agent_preset,
             )
             selected_source_documents = resolve_discussion_source_documents(
                 project_id,
@@ -2472,6 +2494,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     created_by="agent",
                     created_via="llm",
                     model_ref=service.model,
+                    model_execution=runtime.model_execution,
                     note=localized(
                         output_language,
                         zh=(
@@ -2493,6 +2516,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             return {
                 "proposal": stored.model_dump(),
                 "reply": result.reply,
+                "model_execution": runtime.model_execution,
                 "web_results": [
                     {
                         "title": item.title,
@@ -2605,7 +2629,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         request: DocumentFactExtractionRequest,
     ) -> dict:
         require_permission(AgentPermissionLevel.READ_GENERATE)
-        _require_llm_configured(settings)
+        runtime = settings_for_task(settings, "extraction")
+        _require_llm_configured(runtime)
         graph_query.scene_node(project_id=project_id, scene_id=scene_id)
         output_language = resolve_project_output_language(graph, project_id)
         try:
@@ -2638,8 +2663,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             updated_at=provisional_now,
         )
         extractor_service = LLMDocumentFactExtractor(
-            provider=create_llm_provider(settings),
-            model=settings.llm_model,
+            provider=create_llm_provider(runtime),
+            model=runtime.llm_model,
             max_facts=request.max_facts,
         )
         fact_draft = extractor_service.extract(
@@ -2683,6 +2708,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             provenance=ProposalProvenance(
                 created_by="agent",
                 created_via="llm",
+                model_ref=runtime.llm_model,
+                model_execution=runtime.model_execution,
                 note=localized(
                     output_language,
                     zh=(
@@ -2726,6 +2753,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             "candidate_previews": [candidate.model_dump() for candidate in candidate_previews],
             "truncated": fact_draft.truncated,
             "source_language": request.source_language,
+            "model_execution": runtime.model_execution,
             "output_language": output_language,
             "cross_language_policy": request.cross_language_policy,
         }
@@ -3491,6 +3519,8 @@ def _require_llm_configured(settings: StoryGraphSettings) -> None:
 
 
 def _contract_http_exception(exc: ContractError | GraphStoreError) -> HTTPException:
+    if isinstance(exc, ModelOutputError):
+        return HTTPException(status_code=409, detail={"category": "model_output_invalid", "message": "The model returned an invalid content format; no generated Draft was saved."})
     if isinstance(exc, GraphStoreError):
         return _graph_http_exception(exc)
     return HTTPException(status_code=409, detail={"category": "contract_error", "message": str(exc)})

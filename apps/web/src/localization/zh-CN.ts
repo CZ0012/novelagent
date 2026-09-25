@@ -31,6 +31,15 @@ export const zhCN = {
     proposalSuffix: "协作草稿"
   },
   ui: {
+    modelRouting: {
+      jsonPreference: "优先请求 JSON 输出", jsonHelp: "输出仍须通过本地格式校验。Messages 协议通过任务提示约束 JSON，不启用原生结构化输出；实际支持程度取决于服务商。",
+      defaultConnection: "默认模型连接", defaultHelp: "先配置一个默认连接，即可用于全部模型任务。需要时再展开连接配置和任务分工。", protocol: "请求协议", protocols: { chat_completions: "Chat Completions", responses: "Responses", anthropic_messages: "Anthropic Messages" }, protocolHelp: "按服务商支持的接口选择。协议名称不代表实际模型厂商；失败时不会自动更换协议或模型。",
+      connections: "更多连接配置", connectionsHelp: "为不同服务商或模型保存独立连接。修改后统一点击“保存设置”。", addConnection: "添加连接", newConnection: "新连接", connectionName: "连接名称", removeConnection: "移除此连接", removeHelp: "移除后，使用它的任务将恢复继承默认连接。保存设置后生效。", defaultOption: "继承默认连接", taskSection: "任务模型分工", taskHelp: "默认全部继承。每项可以显式选择独立连接；模型或协议不可用时直接报错，不会偷偷回退。", roles: { planning: "规划与结构", writing: "正文与续写", revision: "润色与改写", discussion: "讨论与问答", extraction: "事实提取" }, qaRuleBased: "连续性质检当前使用规则检查，不调用模型。",
+      effective: "本次配置模型", actual: "本次实际调用", saveFirst: "连接有未保存修改，请先保存设置，再读取该连接的模型列表。", savedConnection: "操作使用已保存的连接配置。", discoveryHelp: "仅读取服务商模型列表，不执行生成，不证明文本接口或工具调用兼容。手动填写模型 ID 仍受支持。", discoveryUnavailable: "此连接未返回可用模型列表。请检查协议、地址和授权，或手动填写服务商提供的模型 ID。", keyKeep: "留空保留已有密钥；密钥仅发送到本地后端保存。", keyConfigured: "已保存密钥", keyMissing: "尚未设置密钥", keyClear: "清除已保存密钥", inherited: "默认连接", missingAssignment: "任务连接不可用，请检查设置。", requestedModel: "请求模型", historyModel: "记录模型", presetCollapsed: "写作预设与 System prompt", credentialCleared: "切换后端已清除未保存的密钥输入。"
+    },
+    documentImport: {
+      empty_file: "原文件为空（0 字节），没有可读取的正文。请先在 Word 或原编辑器中保存有效内容，再重新导入。", file_read_failed: "无法完整读取该文件，请检查文件访问权限或重新选择文件。", invalid_docx: "文件不是有效的 DOCX 文档，或压缩内容已损坏。请用 Word 打开后重新另存为 DOCX。", empty_text: "文件中没有可提取的正文，可能仅含图片或空白。", rtf_invalid: "RTF 文件格式无效或内容不完整，请用原编辑器重新保存。", rtf_unsupported_encoding: "此 RTF 使用暂不支持的编码，请另存为 UTF-8 TXT 或 DOCX。", unsupported_text_encoding: "无法识别文本编码，请另存为 UTF-8 TXT 后导入。", file_too_large: "文件超过本地导入大小限制，请按章节拆分后导入。", text_too_large: "提取的正文过长，请按章节拆分后导入。", crypto_unavailable: "当前页面不能计算文件校验值，请通过本地应用或受支持的本地连接重试。", rtf_too_complex: "RTF 嵌套结构过于复杂，请另存为 TXT 或 DOCX。", docx_too_large: "DOCX 解压后的内容超过安全读取限制，请拆分或重新保存。", unsupported_format: "暂不支持此文件格式。请选择 TXT、Markdown、RTF 或 DOCX。", temporary_file: "这是编辑器临时文件，已跳过。", rtf_text_only: "已导入 RTF 正文；排版、图片和嵌入对象不作为正文导入。", rtf_omitted_destinations: "已跳过 RTF 的辅助信息和不支持的内容组。", docx_conversion_warnings: "DOCX 转换省略了部分非正文内容，请对照原文检查。", unknown_error: "文件未能完成读取，请检查原文件后重试。", unknown_warning: "文件转换有提示，请对照原文检查。"
+    },
     manuscript: {
       saveWholeSource: "整份资料另存为正文", sourceAdvanced: "资料高级操作",
       localBackendOnly: "此操作需要本地 JSON 或内存图谱后端。当前连接不支持安全应用。", compositionTooLarge: "选中的资料和正文超过 10 万字符。请减少参考资料后重试。", compositionInvalid: "结构与正文提案不符合格式或语言要求。请调整要求后重新生成。", compositionStale: "目录、卷位置或作品语言已经变化。请刷新目录并重新生成这份提案。", sourceStale: "资料已更新，请重新打开并选择原文。",
@@ -228,7 +237,7 @@ export const zhCN = {
       folderButton: "导入文件夹",
       refreshButton: "刷新资料",
       emptyTitle: "当前项目还没有资料",
-      emptyText: "可按原目录导入 TXT、Markdown 或 DOCX；导入结果会保存在当前项目，重启后仍可读取。",
+      emptyText: "可按原目录导入 TXT、Markdown、RTF 或 DOCX；导入结果会保存在当前项目，重启后仍可读取。",
       readerEmptyTitle: "选择一份项目资料",
       readerEmptyText: "列表只读取摘要；选择后才会从后端加载全文。阅读和导入都不会自动写入草稿、协作提案、候选事实或正典。",
       readerLoadingTitle: "正在读取资料全文",
@@ -276,7 +285,7 @@ export const zhCN = {
       formats: {
         txt: "TXT",
         markdown: "Markdown",
-        docx: "DOCX"
+        rtf: "RTF", docx: "DOCX"
       }
     },
     proposals: {
@@ -551,7 +560,7 @@ export const zhCN = {
       modelSection: "核心模型",
       writerMode: "写作模式",
       ruleBasedMode: "本地规则模式",
-      llmMode: "兼容接口的大模型",
+      llmMode: "已配置的大模型",
       providerName: "供应商名称",
       baseUrl: "基础网址",
       model: "模型",
@@ -757,7 +766,7 @@ export const zhCN = {
       sourceDetailNotReady: "资料全文尚未成功加载，或文本抽取未成功。",
       sourceEmptyText: "文件中没有可用文本。",
       sourceUnsafePath: "文件相对路径不安全，已停止导入。",
-      sourceUnsupportedFormat: "当前仅支持 TXT、Markdown 和 DOCX，此文件未导入。",
+      sourceUnsupportedFormat: "当前仅支持 TXT、Markdown、RTF 和 DOCX，此文件未导入。",
       sourceRetryFormatMismatch: "重试文件格式与原资料不一致，请重新选择同格式文件。",
       webCryptoUnavailable: "当前运行环境不支持文件指纹校验，无法安全导入。",
       docxExtractionFailed: (detail: string) => `DOCX 文本抽取失败：${detail}`,
@@ -780,6 +789,11 @@ export const zhCN = {
       noInstallableDesktopUpdate: "没有可安装的桌面更新，请先检查更新。"
       ,requestFailed: "操作未完成。请展开技术详情后重试。",
       generatedLanguageConflict: "生成的标题或摘要与项目语言不符。请重试，或编辑提案后再应用。",
+      invalidModelOutput: "模型返回的内容格式无效，未写入草稿。请调整要求后重试；不会自动重试或更换模型。",
+      modelIncompleteResponse: "模型没有返回完整内容，未采用这次输出。请检查服务状态或缩小请求范围后重试。",
+      modelUnsupportedOutput: "服务商返回了当前不支持的输出类型。请使用支持完整文本输出的模型与协议；不会自动更换模型。",
+      modelRequestFailed: "服务商未能完成请求。请检查本次任务的连接、模型和服务状态后重试。",
+      modelMissingConfig: "本次任务指定的连接尚未配置完整。请在设置中补全地址、模型和密钥后重试；不会改用其他连接。",
       technicalDetails: "技术详情",
       sourceLanguageRequired: "请先把资料语言修正为中文或英文。",
       sourceContentLanguageMismatch: "只有与小说内容语言相同的资料才能直接设为草稿、协作草稿或风格样本。异语资料只能在显式参考模式下交给智能体分析。",

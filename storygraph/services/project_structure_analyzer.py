@@ -9,8 +9,9 @@ from pathlib import Path
 import re
 from typing import Any
 
-from storygraph.core.errors import ContractError
+from storygraph.core.errors import ContractError, ModelOutputError
 from storygraph.models.project import CrossLanguagePolicy, OutputLanguage, localized
+from storygraph.services.json_output import unwrap_json_fence
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
 from storygraph.services.project_language import (
     authoritative_language_message,
@@ -441,16 +442,12 @@ class LLMProjectStructureAnalyzer(RuleBasedProjectStructureAnalyzer):
 
     @staticmethod
     def _parse_response(content: str) -> dict[str, Any]:
-        cleaned = content.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.removeprefix("```json").removeprefix("```").strip()
-            cleaned = cleaned.removesuffix("```").strip()
         try:
-            payload = json.loads(cleaned)
-        except json.JSONDecodeError as exc:
-            raise ContractError("LLM project structure analyzer response must be JSON") from exc
+            payload = json.loads(unwrap_json_fence(content))
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ModelOutputError("LLM project structure analyzer response must be JSON") from exc
         if not isinstance(payload, dict):
-            raise ContractError("LLM project structure analyzer response must be a JSON object")
+            raise ModelOutputError("LLM project structure analyzer response must be a JSON object")
         return payload
 
 

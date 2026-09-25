@@ -9,13 +9,14 @@ from pathlib import Path
 from typing import Any
 from urllib import parse, request
 
-from storygraph.core.errors import ContractError
+from storygraph.core.errors import ContractError, ModelOutputError
 from storygraph.core.agent_config import AgentPreset, agent_preset_system_message
 from storygraph.models.context import ContextPack
 from storygraph.models.draft import Draft
 from storygraph.models.proposal import ProposalArtifactType, ProposalBodyFormat, ProposalRef
 from storygraph.models.project import CrossLanguagePolicy, OutputLanguage, localized
 from storygraph.services.text_span import utf16_span
+from storygraph.services.json_output import unwrap_json_fence
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
 from storygraph.services.project_language import (
     authoritative_language_message,
@@ -388,7 +389,7 @@ class AgentDiscussionService:
 
         if mode == "continue_scene":
             if not continuation_text:
-                raise ContractError("continue_scene response requires non-empty continuation_text.")
+                raise ModelOutputError("continue_scene response requires non-empty continuation_text.")
             separator = "" if base_text.endswith("\n\n") else "\n" if base_text.endswith("\n") else "\n\n"
             return {
                 "reply": reply,
@@ -402,7 +403,7 @@ class AgentDiscussionService:
         if mode in {"revise_scene", "create_scene"}:
             body = proposal_body or replacement_text
             if not body:
-                raise ContractError("revise_scene response requires proposal_body.")
+                raise ModelOutputError("revise_scene response requires proposal_body.")
             return {
                 "reply": reply,
                 "proposal_title": proposal_title,
@@ -413,7 +414,7 @@ class AgentDiscussionService:
             }
 
         if not replacement_text:
-            raise ContractError("revise_selection response requires replacement_text.")
+            raise ModelOutputError("revise_selection response requires replacement_text.")
         applied = (base_text[:exact_span[0]] + replacement_text + base_text[exact_span[1]:]
                    if exact_span else _replace_unique(base_text, selected_text, replacement_text))
         if applied is None:
@@ -498,16 +499,12 @@ class AgentDiscussionService:
 
 
 def _parse_discussion_response(content: str) -> dict[str, Any]:
-    cleaned = content.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.removeprefix("```json").removeprefix("```").strip()
-        cleaned = cleaned.removesuffix("```").strip()
     try:
-        payload = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        raise ContractError("Agent discussion response must be JSON") from exc
+        payload = json.loads(unwrap_json_fence(content))
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ModelOutputError("Agent discussion response must be JSON") from exc
     if not isinstance(payload, dict):
-        raise ContractError("Agent discussion response must be a JSON object")
+        raise ModelOutputError("Agent discussion response must be a JSON object")
     return payload
 
 

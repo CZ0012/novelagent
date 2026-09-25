@@ -463,3 +463,11 @@ Acceptance: exercise real packaged-backend exit/file release, retain rejection o
 | SG-027 | completed | Main Agent | `codex/sg-027-manuscript-workspace` | Make selected manuscript content visible with preview/edit modes, selection discussion and red/green review; support new chapter and volume planning/drafts. | Implementation and review complete; 420 distinct backend and 117 Web tests passed. Browser and private-copy provider acceptance passed. Final signed package audit passed; v0.1.16 published and all three public assets downloaded and matched. |
 
 Acceptance: meaningful chapter/scene reading surface and empty-state actions; preview/edit share exact Draft state; scoped selection input; accessible added/deleted diff and explicit adoption; reviewed generated architecture and drafts; separate zh/en resources; original workspace untouched by testing; release privacy verified.
+
+## SG-028 — Model roles, provider protocols and import diagnostics (2026-09-25)
+
+| ID | Status | Owner | Branch | Goal | Next action |
+| --- | --- | --- | --- | --- | --- |
+| SG-028 | active | Main Agent | `codex/sg-028-model-routing-and-imports` | Diagnose the reported empty DOCX import, support text extraction from RTF, and provide explicit task-model routing across Chat Completions, Responses and Anthropic Messages. | Implementation, independent review, 199 Web tests, backend full plus targeted regressions, real RTF/protocol and production-browser checks complete. Final signed package privacy/signature verified; publishing software assets next. |
+
+Acceptance: precise non-alarmist import failures and temporary-file skips; bounded local RTF text extraction; backward-compatible default provider plus per-task assignments; no silent protocol/model fallback; model/protocol provenance visible; original data/config unchanged by tests; independent bilingual UI, API and package/privacy verification.

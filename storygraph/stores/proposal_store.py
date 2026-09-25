@@ -190,6 +190,8 @@ class SQLiteProposalStore(ProposalStore):
         note: str | None = None,
         expected_version: int | None = None,
         status: Literal["agent_revised", "author_revised"] = "author_revised",
+        model_execution: dict | None = None,
+        reset_model_execution: bool = False,
     ) -> ProposalArtifact:
         with self._lock:
             latest = self.get(proposal_id)
@@ -215,7 +217,8 @@ class SQLiteProposalStore(ProposalStore):
                         created_by=actor,
                         created_via=created_via,
                         workflow_run_id=latest.provenance.workflow_run_id,
-                        model_ref=latest.provenance.model_ref,
+                        model_ref=(model_execution["model"] if model_execution else None) if reset_model_execution else (model_execution["model"] if model_execution else latest.provenance.model_ref),
+                        model_execution=model_execution if reset_model_execution else (model_execution or latest.provenance.model_execution),
                         note=note,
                     ),
                     "version": latest.version + 1,
@@ -252,6 +255,7 @@ class SQLiteProposalStore(ProposalStore):
                         created_via="manual",
                         workflow_run_id=latest.provenance.workflow_run_id,
                         model_ref=latest.provenance.model_ref,
+                        model_execution=latest.provenance.model_execution,
                         note=note,
                     ),
                     "version": latest.version + 1,
@@ -289,6 +293,7 @@ class SQLiteProposalStore(ProposalStore):
                         created_via="manual",
                         workflow_run_id=latest.provenance.workflow_run_id,
                         model_ref=latest.provenance.model_ref,
+                        model_execution=latest.provenance.model_execution,
                         note=note,
                     ),
                     "version": latest.version + 1,
@@ -364,6 +369,7 @@ class SQLiteProposalStore(ProposalStore):
                         created_via="api",
                         workflow_run_id=latest.provenance.workflow_run_id,
                         model_ref=latest.provenance.model_ref,
+                        model_execution=latest.provenance.model_execution,
                         note=note,
                     ),
                     "version": latest.version + 1,

@@ -22,6 +22,13 @@ Safety rules:
 
 Return only a JSON object with these fields:
 
+Serialize valid JSON, without Markdown fences or commentary. Inside string
+values, escape every ASCII double quote as `\"`, every backslash as `\\`, and
+paragraph breaks as `\n`. For Chinese dialogue, prefer the typographic quotes
+“…” rather than unescaped ASCII quotes. Check that the entire response parses
+as one JSON object before returning it; never put literal line breaks inside
+a JSON string.
+
 - `reply`: concise explanation for the author.
 - `proposal_title`: short title in the authoritative output language.
 - `proposal_body`: required for `revise_scene`; optional for `discuss`.

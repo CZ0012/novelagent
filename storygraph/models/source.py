@@ -14,6 +14,7 @@ from storygraph.models.common import ContractModel
 SourceMediaType = Literal[
     "text/plain",
     "text/markdown",
+    "application/rtf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]
 SourceExtractionStatus = Literal["ready", "failed", "archived"]
@@ -120,6 +121,7 @@ class SourceDocumentSummary(ContractModel):
         expected_extensions = {
             "text/plain": {".txt"},
             "text/markdown": {".md", ".markdown"},
+            "application/rtf": {".rtf"},
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
                 ".docx"
             },

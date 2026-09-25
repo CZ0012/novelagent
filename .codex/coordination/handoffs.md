@@ -83,3 +83,8 @@ SG-026 closed: software commit 7715712/tag v0.1.15 and signed public release pub
 ## SG-027 final integration handoff (2026-09-25)
 
 Front delivered manuscript reading/editing, exact selection requests, composition UI and bilingual catalogs; Contract/Creation delivered frozen backend/contracts with 420 distinct tested cases. Review delivered bounded red/green diffs and cleared provenance, CAS, recovery and cross-scope guards. Main completed synthetic browser and authorized isolated private-provider acceptance, including targeted fixes for missing composition application and diff layout overflow. Check independently validates final source, sidecar, signed package and exclusion of private data before publication.
+
+
+## SG-028 final handoff
+
+All product owners are frozen. Independent reciprocal reviews repaired URL diagnostic leakage, inaccurate rule-based model attribution, explicit-profile fallback, RTF deletion visibility and DOCX entry-name ambiguity. Main verified real files and authorized third-party calls only in ignored copies; malformed model JSON remains a rejected result. Check approved the signed 0.1.17 installer, source/bytecode/assets correspondence and exclusion of credentials and novel workspace data. Main owns software-only publication and public-byte verification.

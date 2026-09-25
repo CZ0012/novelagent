@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 
 from storygraph.models.common import ContractModel, JsonDict
+from storygraph.core.agent_config import ModelExecution
 from storygraph.models.project import OutputLanguage
 from storygraph.models.source import validate_safe_source_metadata
 
@@ -69,6 +70,7 @@ class ProposalProvenance(ContractModel):
     created_via: ProposalCreatedVia = "manual"
     workflow_run_id: str | None = None
     model_ref: str | None = None
+    model_execution: ModelExecution | None = None
     note: str | None = Field(default=None, max_length=1000)
 
     @field_validator("note")

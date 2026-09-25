@@ -49,10 +49,11 @@ import {
   AgentDiscussionResult,
   AgentPermissionLevel,
   AgentSettings,
-  AgentModels,
   AgentSettingsUpdate,
+  ModelExecution,
   ApiRequestError,
   isGeneratedLanguageConflict,
+  isInvalidModelOutput,
   CandidateFact,
   ChapterOutline,
   ContextPack,
@@ -151,6 +152,11 @@ import {
 } from "./reviewPolicies";
 import { canHydrateDraftLoad, draftSaveCompletionPolicy, draftScopesMatch, type DraftScope } from "./draftProtection";
 import { AgentPresets } from "./AgentPresets";
+import { classifyDocumentFile, extractDocumentFile } from "./documentImport";
+import { importErrorCode, importFailureMessage, sourceImportFailureMessage, sourceImportWarningMessage } from "./documentImportMessages";
+import { ModelRoutingSettings, modelExecutionLabel } from "./ModelRoutingSettings";
+import { modelProviderFailureKey } from "./modelProviderErrors";
+import { discussionTask, resolvedTask, taskConnectionReady, settingsToForm, settingsSavePayload, settingsRequestIsCurrent } from "./modelRouting";
 import { exportAuthorText } from "./exportText";
 import { DEFAULT_API_BASE, loadBrowserApiBase, normalizeApiBase, saveBrowserApiBase } from "./clientPreferences";
 import { backendVersionCompatibility, backendVersionRequestIsCurrent, readBackendVersion, type BackendVersion } from "./backendVersion";
@@ -485,6 +491,8 @@ export default function App() {
   const [storyLocations, setStoryLocations] = useState<GraphNodePayload[]>([]);
   const [agentSettings, setAgentSettings] = useState<AgentSettings | null>(null);
   const [agentForm, setAgentForm] = useState<AgentSettingsUpdate>(defaultAgentForm);
+  const settingsRequestSequenceRef = useRef(0);
+  const settingsEditRevisionRef = useRef(0);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [clearApiKey, setClearApiKey] = useState(false);
   const [projectForm, setProjectForm] = useState<ProjectForm>(defaultProjectForm);
@@ -579,6 +587,11 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [technicalError, setTechnicalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    settingsRequestSequenceRef.current += 1; settingsEditRevisionRef.current += 1;
+    setApiKeyInput(""); setClearApiKey(false); setAgentSettings(null); setAgentForm(defaultAgentForm);
+  }, [apiBase]);
 
   const changeUiLocale = useCallback(async (locale: AppLocale) => {
     const request = ++localeRequestRef.current;
@@ -816,7 +829,8 @@ export default function App() {
       if (isLocalizedUserError(message)) {
         setError(message);
       } else {
-        setError(manuscriptFailureMessage(exc) ?? outlineLanguageFailureMessage(exc) ?? (isGeneratedLanguageConflict(exc) ? uiText.errors.generatedLanguageConflict : uiText.errors.requestFailed));
+        const providerKey = modelProviderFailureKey(exc);
+        setError(manuscriptFailureMessage(exc) ?? (providerKey ? uiText.errors[providerKey] : null) ?? outlineLanguageFailureMessage(exc) ?? (isInvalidModelOutput(exc) ? uiText.errors.invalidModelOutput : isGeneratedLanguageConflict(exc) ? uiText.errors.generatedLanguageConflict : uiText.errors.requestFailed));
         setTechnicalError(
           exc instanceof ApiRequestError ? exc.technicalDetails : toErrorMessage(exc)
         );
@@ -905,6 +919,7 @@ export default function App() {
   const importSourceFiles = useCallback(
     async (files: File[], retryTarget?: SourceDocumentSummary) => {
       if (!projectId) throw new Error(uiText.errors.selectProjectOrCreate);
+      const currentScope = () => activeApiBaseRef.current === apiBase && activeProjectIdRef.current === projectId;
       if (!files.length) {
         setNotice(uiText.notices.sourceImportNoSelection);
         return;
@@ -924,10 +939,13 @@ export default function App() {
       setSourceImportProgress({ ...progress });
       let firstPersistedId: string | null = null;
       for (const [index, file] of files.entries()) {
+        if (!currentScope()) return;
         progress.current = index + 1;
         progress.currentName = file.name;
         setSourceImportProgress({ ...progress });
-        const mediaType = getSourceMediaType(file.name);
+        const classified = classifyDocumentFile(file.name);
+        if (classified.kind === "temporary") { progress.skipped += 1; setSourceImportProgress({ ...progress }); continue; }
+        const mediaType = classified.kind === "supported" ? classified.mediaType : null;
         if (!mediaType) {
           if (retryTarget) {
             progress.failed += 1;
@@ -950,6 +968,7 @@ export default function App() {
             mediaType,
             retryTarget?.language
           );
+          if (!currentScope()) return;
           if (retryTarget) {
             request.title = retryTarget.title;
             request.relative_path = retryTarget.relative_path;
@@ -959,6 +978,7 @@ export default function App() {
             `/projects/${projectId}/sources`,
             request
           );
+          if (!currentScope()) return;
           firstPersistedId ??= result.document.id;
           if (result.created) progress.created += 1;
           else if (result.updated) progress.updated += 1;
@@ -967,20 +987,21 @@ export default function App() {
             progress.failed += 1;
             progress.issues.push({
               name: result.document.title,
-              message: uiText.library.unknownReadError,
-              technicalDetails: result.document.error ?? undefined
+              message: sourceImportFailureMessage(result.document),
+              technicalDetails: importErrorCode(result.document.error) ? undefined : result.document.error ?? undefined
             });
           }
           for (const path of getAncestorFolderPaths(result.document.relative_path)) {
             setExpandedLibraryPaths((current) => new Set(current).add(path));
           }
         } catch (exc) {
+          if (!currentScope()) return;
           progress.failed += 1;
           const detail = exc instanceof ApiRequestError ? exc.technicalDetails : toErrorMessage(exc);
           progress.issues.push({
             name: file.name,
-            message: isLocalizedUserError(detail) ? detail : uiText.errors.requestFailed,
-            technicalDetails: isLocalizedUserError(detail) ? undefined : detail
+            message: importFailureMessage(exc) ?? (isLocalizedUserError(detail) ? detail : uiText.documentImport.unknown_error),
+            technicalDetails: importFailureMessage(exc) || isLocalizedUserError(detail) ? undefined : detail
           });
         }
         setSourceImportProgress({ ...progress });
@@ -989,6 +1010,7 @@ export default function App() {
       progress.currentName = "";
       setSourceImportProgress({ ...progress });
       await refreshSources(projectId);
+      if (!currentScope()) return;
       if (firstPersistedId) setSelectedSourceDocumentId(firstPersistedId);
       setNotice(retryTarget ? uiText.notices.sourceRetryFinished : uiText.notices.sourceImportFinished);
     },
@@ -1192,41 +1214,33 @@ export default function App() {
     return payload.facts;
   }, [apiBase, projectId]);
 
+  const changeAgentForm: React.Dispatch<React.SetStateAction<AgentSettingsUpdate>> = useCallback((update) => {
+    settingsEditRevisionRef.current += 1; setAgentForm(update);
+  }, []);
+  const changeApiKeyInput = useCallback((value: string) => { settingsEditRevisionRef.current += 1; setApiKeyInput(value); }, []);
+  const changeClearApiKey = useCallback((value: boolean) => { settingsEditRevisionRef.current += 1; setClearApiKey(value); }, []);
+
   const refreshAgentSettings = useCallback(async () => {
+    const request = { apiBase, sequence: ++settingsRequestSequenceRef.current, revision: settingsEditRevisionRef.current };
     const settings = await apiGet<AgentSettings>(apiBase, "/settings/agent");
+    if (activeApiBaseRef.current !== apiBase || settingsRequestSequenceRef.current !== request.sequence) return;
     setAgentSettings(settings);
-    setAgentForm({
-      scene_writer: settings.scene_writer,
-      provider_label: settings.provider_label,
-      llm_base_url: settings.llm_base_url,
-      llm_model: settings.llm_model,
-      llm_json_mode: settings.llm_json_mode,
-      permission_level: settings.permission_level
-    });
-    setApiKeyInput("");
-    setClearApiKey(false);
+    if (!settingsRequestIsCurrent(request, { apiBase: activeApiBaseRef.current, sequence: settingsRequestSequenceRef.current, revision: settingsEditRevisionRef.current })) return;
+    setAgentForm(settingsToForm(settings)); setApiKeyInput(""); setClearApiKey(false);
   }, [apiBase]);
 
   const saveAgentSettings = useCallback(async () => {
-    const payload: AgentSettingsUpdate = {
-      ...agentForm,
-      llm_api_key: apiKeyInput ? apiKeyInput : null,
-      clear_api_key: clearApiKey
-    };
+    if (!agentSettings) return;
+    const request = { apiBase, sequence: ++settingsRequestSequenceRef.current, revision: settingsEditRevisionRef.current };
+    const payload = settingsSavePayload(agentForm, apiKeyInput, clearApiKey);
     const settings = await apiPut<AgentSettings>(apiBase, "/settings/agent", payload);
+    if (activeApiBaseRef.current !== apiBase || settingsRequestSequenceRef.current !== request.sequence) return;
     setAgentSettings(settings);
-    setAgentForm({
-      scene_writer: settings.scene_writer,
-      provider_label: settings.provider_label,
-      llm_base_url: settings.llm_base_url,
-      llm_model: settings.llm_model,
-      llm_json_mode: settings.llm_json_mode,
-      permission_level: settings.permission_level
-    });
-    setApiKeyInput("");
-    setClearApiKey(false);
+    if (settingsRequestIsCurrent(request, { apiBase: activeApiBaseRef.current, sequence: settingsRequestSequenceRef.current, revision: settingsEditRevisionRef.current })) {
+      setAgentForm(settingsToForm(settings)); setApiKeyInput(""); setClearApiKey(false);
+    }
     setNotice(uiText.notices.settingsSaved);
-  }, [agentForm, apiBase, apiKeyInput, clearApiKey]);
+  }, [agentForm, agentSettings, apiBase, apiKeyInput, clearApiKey]);
 
   const refreshBackendVersion = useCallback(async () => {
     const sequence = ++backendVersionSequenceRef.current;
@@ -2933,13 +2947,13 @@ export default function App() {
   const canReview = permission === "full";
   const writerNeedsKey =
     agentSettings?.scene_writer === "llm" &&
-    (!agentSettings.api_key_configured || !agentSettings.llm_base_url || !agentSettings.llm_model);
-  const llmConfigured = Boolean(
-    agentSettings?.api_key_configured && agentSettings.llm_base_url && agentSettings.llm_model
-  );
+    !taskConnectionReady(agentSettings, "writing");
+  const llmConfigured = taskConnectionReady(agentSettings, "writing");
+  const discussionConfigured = taskConnectionReady(agentSettings, discussionTask(agentDiscussionForm.mode));
+  const planningConfigured = taskConnectionReady(agentSettings, "planning");
   const projectLanguageReady = outputLanguageOrNull(selectedProject?.language) !== null;
   const canRunScene = hasScene && canGenerate && !writerNeedsKey && projectLanguageReady;
-  const canDiscussWithAgent = hasScene && canGenerate && llmConfigured && projectLanguageReady;
+  const canDiscussWithAgent = hasScene && canGenerate && discussionConfigured && projectLanguageReady;
   const toggleAgentSource = useCallback((sourceId: string) => {
     if (selectedAgentSourceIds.has(sourceId)) {
       setSelectedAgentSourceIds((current) => {
@@ -3203,8 +3217,9 @@ export default function App() {
           {selectedProject && <details className="outline-language-tools">
             <summary>{uiText.outlineLanguage.tools}</summary>
             <p>{uiText.outlineLanguage.help}</p>
+            <p>{modelExecutionLabel(resolvedTask(agentSettings, "planning"))}</p>
             <p>{uiText.language.projectLanguageLabel}: {selectedProject.language === "zh-CN" ? uiText.language.chinese : selectedProject.language === "en-US" ? uiText.language.english : uiText.common.notSet}</p>
-            <button type="button" disabled={busy !== null || !canGenerate} onClick={() => requestProposalNavigation(uiText.outlineLanguage.generate, () => {
+            <button type="button" disabled={busy !== null || !canGenerate || !planningConfigured} onClick={() => requestProposalNavigation(uiText.outlineLanguage.generate, () => {
               void runAction("outline-language-generate", generateOutlineLanguageProposal);
             })}><Wand2 size={14} /> {uiText.outlineLanguage.generate}</button>
           </details>}
@@ -3350,7 +3365,7 @@ export default function App() {
                   <FileUp size={15} />
                   {uiText.library.fileButton}
                   <input
-                    accept=".txt,.md,.markdown,.docx"
+                    accept=".txt,.md,.markdown,.rtf,.docx"
                     disabled={!projectId || !canGenerate || busy !== null}
                     multiple
                     onChange={handleLibraryInputChange}
@@ -3361,7 +3376,7 @@ export default function App() {
                   <FolderOpen size={15} />
                   {uiText.library.folderButton}
                   <DirectoryInput
-                    accept=".txt,.md,.markdown,.docx"
+                    accept=".txt,.md,.markdown,.rtf,.docx"
                     directory=""
                     disabled={!projectId || !canGenerate || busy !== null}
                     multiple
@@ -3418,6 +3433,8 @@ export default function App() {
               )}
               <DocumentReader
                 canAdoptSources={canReview}
+                structureReady={Boolean(agentSettings) && (planningConfigured || !agentSettings?.task_assignments?.planning)}
+                structureModelLabel={planningConfigured ? modelExecutionLabel(resolvedTask(agentSettings, "planning")) : agentSettings?.task_assignments?.planning ? uiText.modelRouting.missingAssignment : uiText.runtime.localRules}
                 busy={busy}
                 canGenerate={canGenerate}
                 document={selectedSourceDocument}
@@ -3607,7 +3624,7 @@ export default function App() {
             {draftSelection.trim() && <div className="manuscript-selection-bar"><span>{uiText.manuscript.selectionHelp}</span><button type="button" disabled={busy !== null} onClick={useDraftSelectionForAgent}><MessageSquare size={14} />{uiText.manuscript.selectionAction}</button></div>}
             {draftLoading ? <p className="manuscript-empty">{uiText.manuscript.loading}</p> : manuscriptMode === "preview" ? draftText.trim() ?
               <div className="manuscript-page">{draftDirty && <p className="manuscript-reading-hint">{uiText.manuscript.unsavedPreview}</p>}<ManuscriptProse text={draftText} onSelection={(range) => { setDraftSelection(range?.text ?? ""); setDraftSelectionRange(range); }} /></div> :
-              <div className="manuscript-empty"><BookOpen size={34} /><h2>{uiText.manuscript.emptyTitle}</h2><p>{uiText.manuscript.emptyHelp}</p><div><button type="button" className="primary" disabled={!canGenerate} onClick={() => setManuscriptMode("edit")}><FileText size={15} />{uiText.manuscript.startWriting}</button><button type="button" disabled={!canDiscussWithAgent || busy !== null} onClick={beginSceneDraft}><Wand2 size={15} />{uiText.manuscript.generateScene}</button><button type="button" onClick={() => setWorkspaceTab("sources")}><Library size={15} />{uiText.manuscript.openSources}</button></div></div> :
+              <div className="manuscript-empty"><BookOpen size={34} /><h2>{uiText.manuscript.emptyTitle}</h2><p>{uiText.manuscript.emptyHelp}</p><div><button type="button" className="primary" disabled={!canGenerate} onClick={() => setManuscriptMode("edit")}><FileText size={15} />{uiText.manuscript.startWriting}</button><button type="button" disabled={!hasScene || !canGenerate || !llmConfigured || !projectLanguageReady || busy !== null} onClick={beginSceneDraft}><Wand2 size={15} />{uiText.manuscript.generateScene}</button><button type="button" onClick={() => setWorkspaceTab("sources")}><Library size={15} />{uiText.manuscript.openSources}</button></div></div> :
               <div className="manuscript-edit-page"><textarea ref={draftTextareaRef} readOnly={draftLoading || !draftEditorScopeRef.current || !draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId }) || (busy !== null && busy !== "save" && busy !== "proposal-save-navigation")} value={draftText} onChange={handleDraftTextChange} onKeyUp={captureDraftSelection} onMouseUp={captureDraftSelection} onSelect={captureDraftSelection} spellCheck={false} aria-label={uiText.editor.draftBodyAria} /></div>}
             {manuscriptMode === "edit" && <input className="summary-input" readOnly={draftLoading || busy !== null} value={draftSummary} onChange={handleDraftSummaryChange} aria-label={uiText.editor.draftSummaryAria} placeholder={uiText.editor.draftSummaryAria} />}
           </section>
@@ -3654,7 +3671,7 @@ export default function App() {
           <AgentPresets compact apiBase={apiBase} settings={agentSettings} busy={busy !== null} onChange={setAgentSettings} onManage={() => setActiveTab("settings")} />
           </details>
           <div className="agent-target-tabs"><button type="button" className={agentTarget === "scene" ? "active" : ""} onClick={() => { setReadingChapterId(null); setAgentTarget("scene"); }}>{uiText.manuscript.currentScene}</button><button type="button" className={agentTarget === "composition" ? "active" : ""} onClick={() => setAgentTarget("composition")}>{uiText.manuscript.newWork}</button></div>
-          {agentTarget === "composition" ? <CompositionComposer key={`${apiBase}:${projectId}`} sourceLabels={Array.from(selectedAgentSourceIds).map((id) => { const source = sourceDocuments.find((item) => item.id === id); return source ? `${source.title} · ${formatSourceLanguage(source.language)} · ${id}` : uiText.agentDiscussion.sourceMissing; })} sourcePolicy={crossLanguagePolicy === "explicit_reference" ? uiText.language.explicitReference : uiText.language.projectOnly} draftLabel={!readingChapter && draft?.text.trim() && !draftDirty && draft.project_id === projectId && draft.scene_id === sceneId ? `${selectedScene?.title ?? ""} · v${draft.version} · ${draft.id}` : null} busy={busy !== null} canGenerate={Boolean(projectId) && canGenerate && llmConfigured} onGenerate={(input) => requestProposalNavigation(uiText.manuscript.generate, () => { void runAction("composition-generate", () => generateComposition(input)); })} /> : <AgentDiscussionPanel
+          {agentTarget === "composition" ? <CompositionComposer key={`${apiBase}:${projectId}`} sourceLabels={Array.from(selectedAgentSourceIds).map((id) => { const source = sourceDocuments.find((item) => item.id === id); return source ? `${source.title} · ${formatSourceLanguage(source.language)} · ${id}` : uiText.agentDiscussion.sourceMissing; })} sourcePolicy={crossLanguagePolicy === "explicit_reference" ? uiText.language.explicitReference : uiText.language.projectOnly} draftLabel={!readingChapter && draft?.text.trim() && !draftDirty && draft.project_id === projectId && draft.scene_id === sceneId ? `${selectedScene?.title ?? ""} · v${draft.version} · ${draft.id}` : null} busy={busy !== null} canGenerate={Boolean(projectId) && canGenerate && planningConfigured} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "planning"))} onGenerate={(input) => requestProposalNavigation(uiText.manuscript.generate, () => { void runAction("composition-generate", () => generateComposition(input)); })} /> : <AgentDiscussionPanel
             busy={busy}
             canDiscuss={canDiscussWithAgent}
             draft={draft}
@@ -3662,7 +3679,8 @@ export default function App() {
             draftSelection={draftSelection}
             form={agentDiscussionForm}
             hasScene={hasScene}
-            llmConfigured={llmConfigured}
+            llmConfigured={discussionConfigured}
+            modelExecution={resolvedTask(agentSettings, discussionTask(agentDiscussionForm.mode))}
             onFormChange={setAgentDiscussionForm}
             onOpenWriting={() => setWorkspaceTab("write")}
             onOpenProposal={() => {
@@ -3713,9 +3731,9 @@ export default function App() {
               desktopSettings={desktopSettings}
               form={agentForm}
               locale={uiLocale}
-              onApiKeyChange={setApiKeyInput}
-              onClearApiKeyChange={setClearApiKey}
-              onFormChange={setAgentForm}
+              onApiKeyChange={changeApiKeyInput}
+              onClearApiKeyChange={changeClearApiKey}
+              onFormChange={changeAgentForm}
               onLocaleChange={(locale) => { void changeUiLocale(locale); }}
               onBackendRefresh={() => runAction("desktop-backend", () => refreshDesktopBackend("status").then(() => undefined))}
               onBackendStart={() => runAction("desktop-backend", () => refreshDesktopBackend("start").then(() => undefined))}
@@ -3801,6 +3819,7 @@ function AgentDiscussionPanel({
   form,
   hasScene,
   llmConfigured,
+  modelExecution,
   onFormChange,
   onOpenWriting,
   onOpenProposal,
@@ -3828,6 +3847,7 @@ function AgentDiscussionPanel({
   form: AgentDiscussionForm;
   hasScene: boolean;
   llmConfigured: boolean;
+  modelExecution: ModelExecution | null;
   onFormChange: React.Dispatch<React.SetStateAction<AgentDiscussionForm>>;
   onOpenWriting: () => void;
   onOpenProposal: () => void;
@@ -3909,6 +3929,7 @@ function AgentDiscussionPanel({
           <strong>{sceneTitle || uiText.agentDiscussion.noSceneTitle}</strong>
           <span>{projectLanguage ? formatArtifactLanguage(projectLanguage, false) : uiText.language.projectLanguageNeedsReview} · {uiText.agentDiscussion.sourcePickerCount(selectedSourceIds.size)}</span>
           <code>{savedDraftManifest}</code>
+          <span className="model-execution-summary">{uiText.modelRouting.effective}: {modelExecutionLabel(modelExecution)}</span>
         </div>
         {form.includeLatestDraft && includedDraft.status !== "ready" && (draftDirty || Boolean(draft) || draftRequired) && <div className="agent-context-note warning">
           <span>{draftDirty ? uiText.authorWorkspace.saveBeforeSend : includedDraft.status === "blocked_scope" ? uiText.errors.agentDraftScopeMismatch : uiText.errors.agentIncludedDraftMustBeSaved}</span>
@@ -3985,6 +4006,7 @@ function AgentDiscussionPanel({
             label={uiText.agentDiscussion.manifestOutputLanguage}
             value={projectLanguage ? formatArtifactLanguage(projectLanguage, false) : uiText.language.projectLanguageNeedsReview}
           />
+          <MetricRow label={uiText.modelRouting.effective} value={modelExecutionLabel(modelExecution)} />
           <MetricRow label={uiText.agentDiscussion.manifestSavedDraft} value={savedDraftManifest} />
           <MetricRow label={uiText.agentDiscussion.manifestLocalDraftState} value={localDraftState} />
           <MetricRow
@@ -4202,6 +4224,7 @@ function AgentDiscussionPanel({
             <strong>{uiText.authorWorkspace.resultReady}</strong>
             <p>{uiText.authorWorkspace.resultBoundary}</p>
             <button type="button" className="primary" onClick={onOpenProposal}><SplitSquareVertical size={14} /> {uiText.authorWorkspace.reviewResult}</button>
+            {(result.model_execution ?? result.proposal.provenance.model_execution) && <MetricRow label={uiText.modelRouting.actual} value={modelExecutionLabel(result.model_execution ?? result.proposal.provenance.model_execution)} />}
             <MetricRow label={uiText.agentDiscussion.proposalMetric} value={`${result.proposal.title} / v${result.proposal.version}`} />
             <MetricRow
               label={uiText.agentDiscussion.replacementMetric}
@@ -4531,6 +4554,7 @@ function ProposalInbox({
                 : uiText.common.none
             }
           />
+          {selectedProposal?.provenance.model_execution ? <MetricRow label={uiText.modelRouting.actual} value={modelExecutionLabel(selectedProposal.provenance.model_execution)} /> : selectedProposal?.provenance.model_ref ? <MetricRow label={uiText.modelRouting.historyModel} value={selectedProposal.provenance.model_ref} /> : null}
           <MetricRow label={uiText.proposals.metadataCreatedVia} value={proposalCreationMethod(selectedProposal, versions) ? formatProvenanceMethod(proposalCreationMethod(selectedProposal, versions)) : versionsLoading ? uiText.common.loading : uiText.common.notSet} />
           {proposalType === "fact_draft" && (
             <label>
@@ -5833,6 +5857,8 @@ function DocumentReader({
   busy,
   canGenerate,
   canAdoptSources,
+  structureReady,
+  structureModelLabel,
   crossLanguagePolicy,
   document: doc,
   hasProject,
@@ -5854,6 +5880,8 @@ function DocumentReader({
   busy: string | null;
   canGenerate: boolean;
   canAdoptSources: boolean;
+  structureReady: boolean;
+  structureModelLabel: string;
   crossLanguagePolicy: CrossLanguagePolicy;
   document: SourceDocument | null;
   hasProject: boolean;
@@ -5914,7 +5942,7 @@ function DocumentReader({
   const canSourceAdopt = canSceneBridge && canAdoptSources;
   const canProjectBridge = ready && sameLanguage && canGenerate && hasProject && busy === null;
   const canAnalyzeStructure =
-    ready && canManageSource &&
+    ready && canManageSource && structureReady &&
     projectLanguage !== null &&
     doc.language !== "und" &&
     (doc.language === projectLanguage || crossLanguagePolicy === "explicit_reference");
@@ -6011,7 +6039,7 @@ function DocumentReader({
           >
             <MessageSquare size={14} /> {uiText.library.useWithAgent}
           </button>
-          <details className="source-advanced-actions"><summary>{uiText.manuscript.sourceAdvanced}</summary><small>{doc.id} · {formatFileSize(doc.byte_size)}</small><div>
+          <details className="source-advanced-actions"><summary>{uiText.manuscript.sourceAdvanced}</summary><small>{doc.id} · {formatFileSize(doc.byte_size)}</small><small>{uiText.library.buildStructure}: {structureModelLabel}</small><div>
           <button
             disabled={!canAnalyzeStructure}
             onClick={() => onAnalyzeStructure(summary)}
@@ -6084,8 +6112,8 @@ function DocumentReader({
         <div className="reader-error">
           <AlertTriangle size={17} />
           <strong>{uiText.library.readErrorTitle}</strong>
-          <span>{uiText.library.unknownReadError}</span>
-          {doc.error && (
+          <span>{sourceImportFailureMessage(doc)}</span>
+          {doc.error && !importErrorCode(doc.error) && (
             <details>
               <summary>{uiText.errors.technicalDetails}</summary>
               <code>{doc.error}</code>
@@ -6097,7 +6125,7 @@ function DocumentReader({
           {doc.warnings.length > 0 && (
             <div className="reader-warning">
               <AlertTriangle size={15} />
-              <span>{uiText.library.sourceWarningTitle}</span>
+              <span>{doc.warnings.slice(0, 2).map(sourceImportWarningMessage).join(" ")}</span>
               <details>
                 <summary>{uiText.errors.technicalDetails}</summary>
                 <code>{doc.warnings.slice(0, 2).join("\n")}</code>
@@ -6167,18 +6195,12 @@ function AgentSettingsInspector({
 }) {
   const [connectionInput, setConnectionInput] = useState(apiBase);
   useEffect(() => { setConnectionInput(apiBase); }, [apiBase]);
-  const [models, setModels] = useState<AgentModels | null>(null);
-  const [modelsLoading, setModelsLoading] = useState(false);
-  useEffect(() => { setModels(null); }, [apiBase, settings?.llm_base_url, settings?.api_key_preview]);
   const descriptions = defaultPermissionDescriptions;
-  const apiKeyStatus = settings?.api_key_configured
-    ? `${uiText.settings.configuredKey} (${settings.api_key_preview ?? uiText.settings.hiddenKey})`
-    : uiText.common.notConfigured;
   const updateTarget = updateStatus.installerUrl ?? updateStatus.releaseUrl;
 
   return (
     <div className="settings-panel">
-      <AgentPresets apiBase={apiBase} settings={settings} busy={busy !== null} onChange={onSettingsChange} />
+      <details className="settings-block settings-disclosure"><summary>{uiText.modelRouting.presetCollapsed}</summary><AgentPresets apiBase={apiBase} settings={settings} busy={busy !== null} onChange={onSettingsChange} /></details>
       <section className="settings-block">
         <div className="settings-title"><BookOpen size={15} /> {uiText.language.uiLocaleLabel}</div>
         <label>
@@ -6248,96 +6270,7 @@ function AgentSettingsInspector({
         </section>
       )}
 
-      <section className="settings-block">
-        <div className="settings-title"><Wand2 size={15} /> {uiText.settings.modelSection}</div>
-        <label>
-          <span>{uiText.settings.writerMode}</span>
-          <select
-            value={form.scene_writer}
-            onChange={(event) =>
-              onFormChange((current) => ({
-                ...current,
-                scene_writer: event.target.value as AgentSettingsUpdate["scene_writer"]
-              }))
-            }
-          >
-            <option value="rule_based">{uiText.settings.ruleBasedMode}</option>
-            <option value="llm">{uiText.settings.llmMode}</option>
-          </select>
-        </label>
-        <label>
-          <span>{uiText.settings.providerName}</span>
-          <input
-            value={form.provider_label}
-            onChange={(event) =>
-              onFormChange((current) => ({ ...current, provider_label: event.target.value }))
-            }
-          />
-        </label>
-        <label>
-          <span>{uiText.settings.baseUrl}</span>
-          <input
-            placeholder="https://provider.example/v1"
-            value={form.llm_base_url}
-            onChange={(event) =>
-              onFormChange((current) => ({ ...current, llm_base_url: event.target.value }))
-            }
-          />
-        </label>
-        <label>
-          <span>{uiText.settings.model}</span>
-          <input
-            list="provider-models"
-            value={form.llm_model}
-            onChange={(event) =>
-              onFormChange((current) => ({ ...current, llm_model: event.target.value }))
-            }
-          />
-        </label>
-        <datalist id="provider-models">{models?.models.map((model) => <option key={model.id} value={model.id} />)}</datalist>
-        <button type="button" disabled={modelsLoading || busy !== null || !settings?.api_key_configured} onClick={async () => {
-          setModelsLoading(true);
-          try { setModels(await apiGet<AgentModels>(apiBase, "/settings/agent/models")); }
-          catch { setModels({ models: [], current_model: "", current_model_available: null, status: "unavailable", error: null }); }
-          finally { setModelsLoading(false); }
-        }}><RefreshCw size={14} /> {modelsLoading ? uiText.common.loading : uiText.navigation.modelDiscovery}</button>
-        <small>{uiText.navigation.modelDiscoveryHelp}</small>
-        {models?.status === "unavailable" && <p className="preset-error">{uiText.navigation.modelsUnavailable}</p>}
-        {models?.current_model_available === false && <p className="preset-error">{uiText.navigation.currentModelUnavailable}</p>}
-        <label className="checkbox-row">
-          <input
-            checked={form.llm_json_mode}
-            onChange={(event) =>
-              onFormChange((current) => ({ ...current, llm_json_mode: event.target.checked }))
-            }
-            type="checkbox"
-          />
-          <span>{uiText.settings.requestJsonMode}</span>
-        </label>
-      </section>
-
-      <section className="settings-block">
-        <div className="settings-title"><KeyRound size={15} /> {uiText.settings.apiKeySection}</div>
-        <MetricRow label={uiText.settings.currentKey} value={apiKeyStatus} />
-        <label>
-          <span>{uiText.settings.replaceKey}</span>
-          <input
-            autoComplete="off"
-            placeholder={uiText.settings.keyPlaceholder}
-            type="password"
-            value={apiKeyInput}
-            onChange={(event) => onApiKeyChange(event.target.value)}
-          />
-        </label>
-        <label className="checkbox-row">
-          <input
-            checked={clearApiKey}
-            onChange={(event) => onClearApiKeyChange(event.target.checked)}
-            type="checkbox"
-          />
-          <span>{uiText.settings.clearKey}</span>
-        </label>
-      </section>
+      <ModelRoutingSettings key={apiBase} apiBase={apiBase} settings={settings} form={form} onFormChange={onFormChange} apiKeyInput={apiKeyInput} onApiKeyChange={onApiKeyChange} clearApiKey={clearApiKey} onClearApiKeyChange={onClearApiKeyChange} busy={busy !== null || !settings} />
 
       <section className="settings-block">
         <div className="settings-title"><Lock size={15} /> {uiText.settings.permissionSection}</div>
@@ -6346,6 +6279,7 @@ function AgentSettingsInspector({
             <label className={`permission-option ${form.permission_level === level ? "selected" : ""}`} key={level}>
               <input
                 checked={form.permission_level === level}
+                disabled={busy !== null || !settings}
                 name="permission"
                 onChange={() =>
                   onFormChange((current) => ({ ...current, permission_level: level }))
@@ -6412,7 +6346,7 @@ function AgentSettingsInspector({
         <button onClick={onUpdateCheck} type="button" disabled={busy !== null || ["downloading", "awaiting_edits", "installing"].includes(updateStatus.state)}>
           <RefreshCw size={15} /> {uiText.settings.checkUpdates}
         </button>
-        <button className="primary" onClick={onSave} type="button" disabled={busy !== null}>
+        <button className="primary" onClick={onSave} type="button" disabled={busy !== null || !settings}>
           <Save size={15} /> {uiText.settings.saveSettings}
         </button>
       </div>
@@ -6822,8 +6756,8 @@ function toPositiveInteger(value: string, fallback: number): number {
 function formatWriter(settings: AgentSettings | null): string {
   if (!settings) return uiText.common.loading;
   if (settings.scene_writer === "llm") {
-    return settings.api_key_configured
-      ? `${localizedTerms.llm} ${settings.llm_model}`
+    return taskConnectionReady(settings, "writing")
+      ? modelExecutionLabel(resolvedTask(settings, "writing"))
       : uiText.runtime.modelKeyMissing;
   }
   return uiText.runtime.localRules;
@@ -6857,50 +6791,16 @@ async function prepareSourceDocumentImport(
   mediaType: SourceMediaType,
   languageOverride?: SourceLanguage
 ): Promise<SourceDocumentImportRequest> {
-  const arrayBuffer = await file.arrayBuffer();
-  const checksum = await sha256Hex(arrayBuffer);
-  const warnings: string[] = [];
-  let extractedText: string | null = null;
-  let extractionStatus: "ready" | "failed" = "ready";
-  let extractionError: string | null = null;
-
-  try {
-    if (mediaType.includes("wordprocessingml")) {
-      const result = await readDocxText(arrayBuffer);
-      extractedText = normalizeImportedText(result.text);
-      warnings.push(...result.warnings);
-    } else {
-      extractedText = normalizeImportedText(new TextDecoder("utf-8").decode(arrayBuffer));
-    }
-    if (!extractedText) throw new Error("Source text is empty.");
-  } catch (exc) {
-    extractionStatus = "failed";
-    extractedText = null;
-    const message = toErrorMessage(exc);
-    extractionError = sanitizeSourceMetadata(
-      mediaType.includes("wordprocessingml") ? `DOCX extraction failed: ${message}` : message,
-      500
-    );
-  }
-
-  const language = languageOverride ?? detectSourceLanguage(extractedText ?? "");
+  const result = await extractDocumentFile(file);
+  const text = result.text === null ? null : normalizeImportedText(result.text);
+  const language = languageOverride ?? detectSourceLanguage(text ?? "");
   return {
-    title: file.name,
-    relative_path: getImportPath(file),
-    media_type: mediaType,
-    language,
-    byte_size: file.size,
-    checksum_sha256: checksum,
-    extraction_status: extractionStatus,
-    extracted_text: extractedText,
-    warnings: boundSourceWarnings(warnings),
-    error: extractionError,
-    provenance: {
-      imported_by: "author",
-      imported_via: "local_file",
-      source_last_modified_ms: file.lastModified,
-      note: "workbench.source.import"
-    }
+    title: file.name, relative_path: getImportPath(file), media_type: mediaType,
+    language, byte_size: result.byteSize, checksum_sha256: result.checksumSha256,
+    extraction_status: result.errorCode ? "failed" : "ready", extracted_text: text,
+    warnings: result.warnings.map((code) => `import_warning:${code}`),
+    error: result.errorCode ? `import_error:${result.errorCode}` : null,
+    provenance: { imported_by: "author", imported_via: "local_file", source_last_modified_ms: file.lastModified, note: "workbench.source.import" }
   };
 }
 
@@ -6945,51 +6845,6 @@ function formatArtifactLanguage(
   return `${label}${inferred ? uiText.language.inferredLanguage : ""}`;
 }
 
-async function sha256Hex(arrayBuffer: ArrayBuffer): Promise<string> {
-  if (!globalThis.crypto?.subtle) throw new Error(uiText.errors.webCryptoUnavailable);
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function readDocxText(arrayBuffer: ArrayBuffer): Promise<{ text: string; warnings: string[] }> {
-  type MammothApi = {
-    extractRawText: (input: { arrayBuffer: ArrayBuffer }) => Promise<{
-      value: string;
-      messages: Array<{ message: string }>;
-    }>;
-  };
-
-  const mammothModule = await import("mammoth/lib/index");
-  const mammoth =
-    (mammothModule as unknown as { default?: MammothApi }).default ??
-    (mammothModule as unknown as MammothApi);
-  const result = await mammoth.extractRawText({ arrayBuffer });
-
-  return {
-    text: result.value,
-    warnings: boundSourceWarnings(result.messages.map((message) => message.message))
-  };
-}
-
-function boundSourceWarnings(values: string[]): string[] {
-  const warnings: string[] = [];
-  let remainingCharacters = 2000;
-  for (const value of values) {
-    if (warnings.length >= 32 || remainingCharacters <= 0) break;
-    const warning = sanitizeSourceMetadata(value, Math.min(200, remainingCharacters));
-    if (!warning) continue;
-    warnings.push(warning);
-    remainingCharacters -= warning.length;
-  }
-  return warnings;
-}
-
-function sanitizeSourceMetadata(value: string, maxLength: number): string {
-  return value
-    .replace(/(?:\b[a-zA-Z]:[\\/]|\\\\)[^\s"'<>]+/g, uiText.library.redactedLocalPath)
-    .trim()
-    .slice(0, maxLength);
-}
 
 function buildLibraryTree(documents: SourceDocumentSummary[]): LibraryTreeNode {
   const root: LibraryTreeNode = {
@@ -7074,17 +6929,6 @@ function normalizeImportPath(path: string): string {
   return normalized;
 }
 
-function getSourceMediaType(fileName: string): SourceMediaType | null {
-  const normalizedName = fileName.toLowerCase();
-  if (normalizedName.endsWith(".txt")) return "text/plain";
-  if (normalizedName.endsWith(".md") || normalizedName.endsWith(".markdown")) {
-    return "text/markdown";
-  }
-  if (normalizedName.endsWith(".docx")) {
-    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  }
-  return null;
-}
 
 function normalizeImportedText(text: string): string {
   return text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
@@ -7124,12 +6968,14 @@ function outputLanguageOrNull(value: string | null | undefined): AppLocale | nul
 function sourceMediaTypeLabel(mediaType: SourceMediaType): string {
   if (mediaType === "text/plain") return uiText.library.formats.txt;
   if (mediaType === "text/markdown") return uiText.library.formats.markdown;
+  if (mediaType === "application/rtf") return uiText.library.formats.rtf;
   return uiText.library.formats.docx;
 }
 
 function sourceFileAccept(mediaType: SourceMediaType): string {
   if (mediaType === "text/plain") return ".txt";
   if (mediaType === "text/markdown") return ".md,.markdown";
+  if (mediaType === "application/rtf") return ".rtf";
   return ".docx";
 }
 
@@ -7197,7 +7043,7 @@ function manuscriptFailureMessage(error: unknown): string | null {
 }
 
 function isLocalizedUserError(message: string): boolean {
-  return [...Object.values(uiText.errors), ...Object.values(uiText.manuscript)].some(
+  return [...Object.values(uiText.errors), ...Object.values(uiText.manuscript), ...Object.values(uiText.documentImport)].some(
     (value) => typeof value === "string" && value === message
   );
 }

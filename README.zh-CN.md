@@ -12,7 +12,7 @@ Windows 更新准备修复：v0.1.15 会等待后端退出后的短暂文件占�
 
 写作工作区采用 **左侧目录、中间正文、右侧 Agent**。章节可以展开与收起，场景作为文稿打开；续写和选区讨论在正文旁进行，生成结果先到 **协作草稿** 比较、审阅，再由你采用。资料、工作流和检查功能保留独立入口；右侧面板可以收起，给正文留出空间。
 
-1. 新建项目并选择小说内容语言。可以添加章节与场景，也可以在资料页导入 TXT、Markdown 或 DOCX 小说，再审阅生成的结构提案。
+1. 新建项目并选择小说内容语言。可以添加章节与场景，也可以在资料页导入 TXT、Markdown、RTF 或 DOCX 小说，再审阅生成的结构提案。
 2. 打开 **设置**，保存第三方服务提供的兼容接口地址、密钥与准确模型名称。**刷新可用模型**读取该服务自己的模型列表；模型名称不代表已经验证了底层模型来源。列表不可用时仍允许手动填写，不会自动替换模型。
 3. 选择 **中文简练、均衡叙事、英文精炼**，或者新建自己的 System prompt 预设，例如“中文写作时少用状语”。预设保存在本机工作区，CLI、API 和桌面共用。内置预设可以复制，自定义预设可以编辑、切换和删除。
 4. 保存场景，点击 **续写**，说明情节方向并核对输入清单。Agent 使用清单中固定的已保存版本和显式选择的资料；服务端完整保留原文，只把新增内容追加为独立协作草稿。
@@ -22,7 +22,7 @@ Windows 更新准备修复：v0.1.15 会等待后端退出后的短暂文件占�
 
 历史目录的英文标题、摘要等内容，可通过 **目录工具 → 修复目录语言**，使用已配置模型生成符合项目内容语言的修订。先比较原文和建议，提交审阅、接受，再明确应用；左侧目录、图谱和时间线一起刷新，正文、节点 ID 和关系保持不变。图谱中已知的节点和关系类型另有独立中英文显示翻译。
 
-增加语言及验证说明见 [正文工作区验收](docs/acceptance-0.1.16.md)、[本地化](docs/localization.md)、[更新与目录修复验收](docs/acceptance-0.1.15.md)、[工作区验收](docs/acceptance-0.1.14.md)、[模型与预设验收](docs/acceptance-0.1.12.md) 与 [Agent 运行合同](contracts/agent_runtime_v1.md)。
+增加语言及验证说明见 [模型分工与导入验收](docs/acceptance-0.1.17.md)、[正文工作区验收](docs/acceptance-0.1.16.md)、[本地化](docs/localization.md)、[更新与目录修复验收](docs/acceptance-0.1.15.md)、[工作区验收](docs/acceptance-0.1.14.md)、[模型与预设验收](docs/acceptance-0.1.12.md) 与 [Agent 运行合同](contracts/agent_runtime_v1.md)。
 
 尚未填全规划信息的场景也可以讨论和续写已保存正文；缺失上下文会明确提示，不会自动补写正典。完整场景生成仍检查必要信息。
 
@@ -169,7 +169,7 @@ npm --prefix apps/desktop run build:installer
 生成的安装器路径是：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.17_x64-setup.exe
 ```
 
 其他常用桌面命令：
@@ -189,10 +189,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.16_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.16_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.16_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.17_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.17_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.17_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.17_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -202,7 +202,7 @@ apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 
 版本更新必须保持 `VERSION`、`pyproject.toml`、`apps/api/main.py` 的 FastAPI 版本、Web/桌面 package manifest 与根 lockfile 条目、`apps/web/src/version.ts`、`apps/desktop/src-tauri/Cargo.lock` 的桌面 package 条目、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json` 同步。这里的 GitHub 只作为软件发布/更新通道；本地小说 workspace、Source Store 资料、canon、草稿、项目设置和审阅状态不会自动同步到 GitHub。
 
-当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.16_x64-setup.exe.sig`，以及用于 GitHub Release 的无空格副本和 `latest.json`。后端 sidecar 固定使用 PyInstaller 6.21.0 构建。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
+当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.17_x64-setup.exe.sig`，以及用于 GitHub Release 的无空格副本和 `latest.json`。后端 sidecar 固定使用 PyInstaller 6.21.0 构建。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
 
 仍缺失或未验证：
 
@@ -270,7 +270,7 @@ Source Library 是私有来源资料层，不再只是浏览器内存树，也�
 
 结构分析是另一个显式动作。`POST /projects/{project_id}/sources/{source_document_id}/structure-draft` 读取一份 ready Source Document，只创建非 canon、可编辑的 `project_structure_draft` Proposal Artifact。只有作者接受 proposal 并调用现有显式 apply 动作后，系统才会创建 Chapter/Scene 节点。新 proposal 来源统一使用稳定的 `source_document` ref；旧 `imported_document` 只保留为不解析的 legacy provenance，不等于持久 Source Store ID。默认 `cross_language_policy = project_only`；只有本次显式选择的已知语言来源可通过 `explicit_reference` 跨语言引用，且不翻译、不改变输出语言。
 
-初版 Source Library 不支持 RTF、PDF、OCR、图片或 PSD；这些格式需要后续 importer 工作，目前不得伪装成成功文本导入。导入本身绝不会顺带创建其他 store 记录。作者打开一份 ready 详情后，可以另行显式把正文保存为当前场景 Draft、非 canon Proposal 或 Style Sample；此时走的是对应 store 的正常边界。CandidateFact 仍然必须引用真实 Draft Store 来源，并经过现有 pending 人工审阅路径。
+Source Library 支持 RTF 正文抽取；PDF、OCR、图片与 PSD 暂不支持，会明确跳过。RTF 的内嵌对象、图片及排版不导入。导入本身绝不会顺带创建其他 store 记录。作者打开一份 ready 详情后，可以另行显式把正文保存为当前场景 Draft、非 canon Proposal 或 Style Sample；此时走的是对应 store 的正常边界。CandidateFact 仍然必须引用真实 Draft Store 来源，并经过现有 pending 人工审阅路径。
 
 ## Agent 对话与选中文本修订
 
@@ -411,3 +411,12 @@ python -m pytest tests/test_api_agent_settings.py tests/test_api_workflow_runs.p
 ## License
 
 StoryGraph Agent 使用 MIT License 授权。详见 [LICENSE](LICENSE)。
+
+
+## 0.1.17：模型分工与 RTF 导入
+
+设置中保留一个默认连接，高级区域可添加多组连接，分别分配规划、写作/续写、修订、讨论、事实抽取任务。未分配的任务继承默认连接；规划包含新章/卷的结构与初稿，当前质检仍使用规则。结果显示实际请求的模型 ID 和协议，不据名称推断第三方背后的模型。
+
+每组连接可明确选择 Chat Completions、Responses 或 Anthropic Messages。旧配置、模型与密钥保持兼容；Responses 使用 store:false。当前兼容文本生成与本地 Agent 编排，未启用远端托管工具或云端记忆。协议失败不会自动切模型或付费重试。
+
+RTF 是富文本格式，现在可导入其中的正文与段落，内嵌图片、对象和排版不导入。TXT、Markdown、DOCX 继续支持；PDF 暂不支持。Office 的 ~$ 临时文件自动跳过。0 字节文件会明确提示为空，需从原文件备份或版本记录恢复内容，反复导入无法恢复缺失字节。

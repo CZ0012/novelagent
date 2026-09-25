@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import json
 from typing import Any, Protocol
 from urllib import error, request
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,12 @@ class OpenAICompatibleProvider:
         timeout_seconds: float = 60.0,
         json_mode: bool = True,
     ) -> None:
+        try:
+            parsed_url = urlsplit(base_url)
+        except ValueError:
+            raise ValueError("Invalid provider HTTP(S) address") from None
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc or parsed_url.username or parsed_url.password or parsed_url.query or parsed_url.fragment:
+            raise ValueError("Provider address must be an HTTP(S) URL without credentials, query or fragment")
         if not base_url:
             raise ValueError("base_url is required")
         if not api_key:
@@ -70,7 +77,7 @@ class OpenAICompatibleProvider:
         }
         if request_payload.max_tokens is not None:
             payload["max_tokens"] = request_payload.max_tokens
-        payload.update(request_payload.extra)
+        _reject_extra(request_payload)
         if self.json_mode and request_payload.response_format == "json_object":
             payload["response_format"] = {"type": "json_object"}
 
@@ -85,19 +92,30 @@ class OpenAICompatibleProvider:
             method="POST",
         )
         parsed = self._read_json_response(http_request)
+        if not isinstance(parsed, dict) or parsed.get("error"):
+            raise _invalid_response()
         try:
+            choice = parsed["choices"][0]
+            if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
+                raise _invalid_response()
+            if choice.get("finish_reason") not in (None, "stop"):
+                raise _invalid_response("incomplete_response")
+            if choice["message"].get("refusal") or choice["message"].get("tool_calls"):
+                raise _invalid_response("unsupported_output")
             content = parsed["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError("LLM provider response did not include choices[0].message.content") from exc
         if not isinstance(content, str):
             raise RuntimeError("LLM provider content must be a string")
-        return LLMResponse(content=content, raw=parsed)
+        if not content.strip():
+            raise _invalid_response()
+        return LLMResponse(content=content, raw=_safe_response_metadata(parsed, self.api_key))
 
     def list_models(self) -> list[dict[str, str]]:
-        base = self.base_url.removesuffix("/chat/completions")
+        base = _protocol_base(self.base_url)
         http_request = request.Request(
             f"{base}/models",
-            headers={"Authorization": f"Bearer {self.api_key}", "Accept": "application/json"},
+            headers={**self._auth_headers(), "Accept": "application/json"},
             method="GET",
         )
         parsed = self._read_json_response(http_request)
@@ -124,7 +142,7 @@ class OpenAICompatibleProvider:
             raise RuntimeError(
                 f"LLM provider HTTP {exc.code} [{category}]: {guidance}"
             ) from None
-        except (error.URLError, TimeoutError, OSError):
+        except (error.URLError, TimeoutError, OSError, ValueError):
             raise RuntimeError(
                 "LLM provider [connection_error]: Check the provider address, network, "
                 "and timeout settings, then retry."
@@ -138,10 +156,13 @@ class OpenAICompatibleProvider:
             raise RuntimeError("LLM provider [invalid_response]: Response is not valid JSON.") from None
         return parsed
 
+    def _auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.api_key}"}
+
     def _chat_completions_url(self) -> str:
         if self.base_url.endswith("/chat/completions"):
             return self.base_url
-        return f"{self.base_url}/chat/completions"
+        return f"{_protocol_base(self.base_url)}/chat/completions"
 
 
 def _http_error_guidance(status: int) -> tuple[str, str]:
@@ -156,3 +177,114 @@ def _http_error_guidance(status: int) -> tuple[str, str]:
     if status >= 500:
         return "provider_unavailable", "The provider is unavailable; retry later."
     return "request_failed", "Check provider settings and retry."
+
+
+def _protocol_base(url: str) -> str:
+    for suffix in ("/chat/completions", "/responses", "/messages"):
+        if url.endswith(suffix):
+            return url[:-len(suffix)]
+    return url
+
+
+def _invalid_response(category="invalid_response") -> RuntimeError:
+    return RuntimeError(f"LLM provider [{category}]: The provider did not return complete supported text.")
+
+
+def _reject_extra(payload: LLMRequest) -> None:
+    if payload.extra:
+        raise ValueError("Custom provider request fields are unsupported")
+
+
+def _safe_response_metadata(parsed: dict, secret: str) -> dict:
+    # No provider payload, hidden thinking, tool arguments or echoed credentials escape.
+    model = parsed.get("model")
+    return {"model": model} if isinstance(model, str) and len(model) <= 200 and secret not in model else {}
+
+
+class ResponsesProvider(OpenAICompatibleProvider):
+    """Responses text transport. No implicit tools, history storage, polling or retries."""
+
+    def generate(self, request_payload: LLMRequest) -> LLMResponse:
+        _reject_extra(request_payload)
+        payload = {
+            "model": request_payload.model or self.model,
+            "instructions": "\n\n".join(m.content for m in request_payload.messages if m.role in {"system", "developer"}),
+            "input": [{"role": m.role, "content": m.content} for m in request_payload.messages if m.role not in {"system", "developer"}],
+            "temperature": request_payload.temperature,
+            "store": False,
+        }
+        if request_payload.max_tokens is not None:
+            payload["max_output_tokens"] = request_payload.max_tokens
+        if self.json_mode and request_payload.response_format == "json_object":
+            payload["text"] = {"format": {"type": "json_object"}}
+        http_request = request.Request(f"{_protocol_base(self.base_url)}/responses",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={**self._auth_headers(), "Content-Type": "application/json"}, method="POST")
+        parsed = self._read_json_response(http_request)
+        if not isinstance(parsed, dict) or parsed.get("error") or parsed.get("status") != "completed":
+            raise _invalid_response("incomplete_response")
+        output = parsed.get("output")
+        if not isinstance(output, list):
+            raise _invalid_response()
+        texts = []
+        for item in output:
+            if not isinstance(item, dict):
+                raise _invalid_response()
+            if item.get("type") == "reasoning":
+                continue
+            if item.get("type") != "message" or item.get("role") != "assistant" or item.get("status", "completed") != "completed":
+                raise _invalid_response("unsupported_output")
+            blocks = item.get("content")
+            if not isinstance(blocks, list):
+                raise _invalid_response()
+            for block in blocks:
+                if not isinstance(block, dict) or block.get("type") != "output_text" or not isinstance(block.get("text"), str):
+                    raise _invalid_response("unsupported_output")
+                texts.append(block["text"])
+        content = "".join(texts)
+        if not content.strip():
+            raise _invalid_response()
+        return LLMResponse(content=content, raw=_safe_response_metadata(parsed, self.api_key))
+
+
+class AnthropicMessagesProvider(OpenAICompatibleProvider):
+    """Anthropic Messages transport for providers explicitly exposing that protocol."""
+
+    def _auth_headers(self) -> dict[str, str]:
+        return {"x-api-key": self.api_key, "anthropic-version": "2023-06-01"}
+
+    def generate(self, request_payload: LLMRequest) -> LLMResponse:
+        _reject_extra(request_payload)
+        payload = {
+            "model": request_payload.model or self.model,
+            "system": "\n\n".join(m.content for m in request_payload.messages if m.role in {"system", "developer"}),
+            "messages": [{"role": m.role, "content": m.content} for m in request_payload.messages if m.role not in {"system", "developer"}],
+            "max_tokens": request_payload.max_tokens or 2048,
+            "temperature": request_payload.temperature,
+        }
+        if any(m["role"] not in {"user", "assistant"} for m in payload["messages"]):
+            raise ValueError("Unsupported message role")
+        http_request = request.Request(f"{_protocol_base(self.base_url)}/messages",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={**self._auth_headers(), "Content-Type": "application/json"}, method="POST")
+        parsed = self._read_json_response(http_request)
+        if not isinstance(parsed, dict) or parsed.get("type") != "message" or parsed.get("role") != "assistant":
+            raise _invalid_response()
+        if parsed.get("stop_reason") not in ("end_turn", "stop_sequence"):
+            raise _invalid_response("incomplete_response")
+        blocks = parsed.get("content")
+        if not isinstance(blocks, list):
+            raise _invalid_response()
+        texts = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                raise _invalid_response()
+            if block.get("type") in ("thinking", "redacted_thinking"):
+                continue
+            if block.get("type") != "text" or not isinstance(block.get("text"), str):
+                raise _invalid_response("unsupported_output")
+            texts.append(block["text"])
+        content = "".join(texts)
+        if not content.strip():
+            raise _invalid_response()
+        return LLMResponse(content=content, raw=_safe_response_metadata(parsed, self.api_key))

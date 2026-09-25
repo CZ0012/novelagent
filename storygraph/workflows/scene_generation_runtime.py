@@ -278,6 +278,7 @@ class LocalSceneGenerationRuntime:
                 created_by="agent",
                 created_via="workflow",
                 workflow_run_id=run.id,
+                model_execution=getattr(self.writer, "model_execution", None),
                 note=localized(
                     context_pack.output_language,
                     zh="场景生成结果已写入提案工作区，而非草稿库。",
@@ -298,6 +299,9 @@ class LocalSceneGenerationRuntime:
         artifact_refs: dict | None = None,
     ) -> WorkflowRun:
         if name == "write_draft":
+            execution = getattr(self.writer, "model_execution", None)
+            if execution:
+                artifact_refs = {**(artifact_refs or {}), **{f"model_{k}": v for k, v in execution.items()}}
             snapshot = agent_preset_snapshot(getattr(self.writer, "agent_preset", None))
             if snapshot:
                 artifact_refs = {

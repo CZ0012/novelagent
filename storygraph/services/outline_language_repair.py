@@ -44,7 +44,7 @@ def safe_provider_failure(exc: RuntimeError) -> dict:
     match = re.match(
         r"^LLM provider(?: HTTP ([1-5]\d\d))? \[(invalid_credentials|rate_limit|"
         r"endpoint_not_found|invalid_request|provider_unavailable|request_failed|"
-        r"connection_error|invalid_response)\]:", str(exc),
+        r"connection_error|invalid_response|incomplete_response|unsupported_output)\]:", str(exc),
     )
     result = {
         "category": "outline_language_provider_failed",
@@ -224,12 +224,13 @@ def generate_outline_language_proposal(
             source_refs=[ProposalRef(kind="project", ref=project_id)],
             provenance=ProposalProvenance(
                 created_by="agent", created_via="llm", model_ref=model,
+                    model_execution=getattr(provider, "model_execution", None),
                 note=localized(language, zh="仅翻译已有目录元数据，须审阅并明确应用。",
                                en="Existing outline metadata only; review and explicit application required."),
             ),
             version=1, created_at=now, updated_at=now,
         ))
-    return {"proposal": proposal.model_dump(), "output_language": language, "change_count": len(changes)}
+    return {"proposal": proposal.model_dump(), "model_execution": getattr(provider, "model_execution", None), "output_language": language, "change_count": len(changes)}
 
 
 def apply_outline_language_proposal(

@@ -384,6 +384,7 @@ def generate_composition(
                     created_by="agent",
                     created_via="llm",
                     model_ref=model,
+                    model_execution=getattr(provider, "model_execution", None),
                     note="Explicit instruction; reviewed new structure and separate initial Drafts."
                     + agent_preset_provenance(preset),
                 ),
@@ -392,7 +393,7 @@ def generate_composition(
                 updated_at=now,
             )
         )
-    return {"proposal": proposal.model_dump(), "output_language": language}
+    return {"proposal": proposal.model_dump(), "model_execution": getattr(provider, "model_execution", None), "output_language": language}
 
 
 def apply_composition(
@@ -629,6 +630,7 @@ def apply_composition(
                         summary=scene.summary,
                         provenance={
                             "kind": "composition",
+                            **({"model_execution": proposal.provenance.model_execution.model_dump()} if proposal.provenance.model_execution else {}),
                             "proposal_id": proposal.id,
                             "body_sha256": body_hash,
                             "text_sha256": hashlib.sha256(scene.prose.encode()).hexdigest(),

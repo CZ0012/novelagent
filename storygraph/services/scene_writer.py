@@ -7,11 +7,12 @@ import json
 from pathlib import Path
 import re
 
-from storygraph.core.errors import ContractError
+from storygraph.core.errors import ContractError, ModelOutputError
 from storygraph.core.agent_config import AgentPreset, agent_preset_system_message
 from storygraph.models.context import ContextPack
 from storygraph.models.draft import Draft
 from storygraph.models.project import localized
+from storygraph.services.json_output import unwrap_json_fence
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
 from storygraph.services.project_language import authoritative_language_message
 from storygraph.services.project_language import validate_generated_output_language
@@ -117,6 +118,7 @@ class LLMSceneWriter:
         agent_preset: AgentPreset | None = None,
     ) -> None:
         self.provider = provider
+        self.model_execution = getattr(provider, "model_execution", None)
         self.model = model
         self.draft_store = draft_store
         self.temperature = temperature
@@ -146,6 +148,7 @@ class LLMSceneWriter:
             content_language=context_pack.output_language,
             text=result.text,
             summary=result.summary,
+            provenance={"model_execution": self.model_execution} if self.model_execution else None,
         )
 
     def _messages(self, context_pack: ContextPack) -> list[LLMMessage]:
@@ -218,28 +221,22 @@ def _validate_rule_based_context_language(context_pack: ContextPack) -> None:
 
 
 def _parse_llm_draft(content: str) -> DraftResult:
-    cleaned = _strip_json_fence(content)
     try:
-        payload = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        raise ContractError("LLM scene writer response must be JSON") from exc
+        payload = json.loads(unwrap_json_fence(content))
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ModelOutputError("LLM scene writer response must be JSON") from exc
     if not isinstance(payload, dict):
-        raise ContractError("LLM scene writer response must be a JSON object")
+        raise ModelOutputError("LLM scene writer response must be a JSON object")
     text = payload.get("text")
     summary = payload.get("summary")
     self_check = payload.get("self_check")
     if not isinstance(text, str) or not text.strip():
-        raise ContractError("LLM scene writer response requires non-empty text")
+        raise ModelOutputError("LLM scene writer response requires non-empty text")
     if not isinstance(summary, str) or not summary.strip():
-        raise ContractError("LLM scene writer response requires non-empty summary")
+        raise ModelOutputError("LLM scene writer response requires non-empty summary")
     if not isinstance(self_check, list) or not all(isinstance(item, str) for item in self_check):
-        raise ContractError("LLM scene writer response requires string self_check items")
+        raise ModelOutputError("LLM scene writer response requires string self_check items")
     return DraftResult(text=text.strip(), summary=summary.strip(), self_check=self_check)
-
-
-def _strip_json_fence(content: str) -> str:
-    match = re.fullmatch(r"\s*```(?:json)?\s*(.*?)\s*```\s*", content, flags=re.DOTALL)
-    return match.group(1) if match else content.strip()
 
 
 def _validate_draft_result(*, context_pack: ContextPack, result: DraftResult) -> None:

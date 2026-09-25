@@ -9,6 +9,10 @@ class ContractError(StoryGraphError):
     """Raised when a contract invariant is violated."""
 
 
+class ModelOutputError(ContractError):
+    """Provider text does not satisfy the required output schema."""
+
+
 class GraphStoreError(StoryGraphError):
     """Graph store error with a contract category."""
 

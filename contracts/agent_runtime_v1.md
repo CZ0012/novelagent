@@ -121,8 +121,8 @@ Provider HTTP diagnostics include status plus stable categories such as
 or `provider_unavailable`. Transport and malformed responses use
 `connection_error` or `invalid_response`. Arbitrary provider error bodies,
 network reasons, credentials, and manuscript text must not appear in UI errors
-or persisted workflow failure messages. Successful generation continues to use
-the configured generic Chat Completions-compatible endpoint and exact model ID.
+or persisted workflow failure messages. Successful generation uses the explicitly configured protocol and exact model ID
+as extended by the task-routing section below.
 
 ## Empty scene drafting and exact selected passages
 
@@ -147,3 +147,104 @@ ambiguity fallback. Generated text and UI selection/diff state never mutate cano
 Project-level `composition-proposals` follows the separate bounded schema and
 review/apply path in `proposal_artifact_v1`. Its full explicit source and Draft
 inputs are rejected if too large rather than silently clipped.
+
+## Explicit protocols and task routing (SG-028, additive)
+
+The default connection remains the legacy flat settings fields. `llm_protocol`
+is one of `chat_completions` (migration default), `responses`, or
+`anthropic_messages`; the model identifier is opaque and does not select a
+protocol or prove the provider's underlying model vendor. A saved legacy config
+continues to use its exact model and credentials. No request silently switches
+models, protocols or providers, and there are no automatic paid retries.
+
+`connection_profiles` contains at most 20 reusable connections. Each has a unique
+`id` (1–80 ASCII letters/digits/underscore/hyphen, except reserved `default`),
+`name` (1–80 characters), `protocol`, `base_url` (at most 2048 characters), `model`
+(at most 200 characters), `json_mode`, and locally persisted `api_key`.
+`GET /settings/agent` returns these profiles with `api_key_configured` and
+`api_key_preview`, never the key. A PUT containing this array replaces profile
+membership; for existing IDs an omitted, null or empty key preserves the stored
+key, and only `clear_api_key: true` removes it. The same empty-key preservation
+applies to the default connection. Omitted profile and routing fields preserve
+all existing configuration. Profile and preset persistence still precedes live
+publication and uses the existing atomic file replacement.
+
+`task_assignments` has exactly these optional keys: `planning`, `writing`,
+`revision`, `discussion`, `extraction`. Each value is an existing profile ID or
+null (inherit the default connection). An omitted task key preserves its prior
+assignment; deleting a referenced profile without updating assignments rejects
+the whole settings write. Unknown IDs, duplicate IDs and invalid protocols fail
+before configuration changes. `resolved_tasks` returns each resolved non-secret
+`ModelExecution` object: `{profile_id, profile_name, protocol, model, task}`.
+The `model` is the exact requested provider identifier, not verified vendor
+identity. Historical records do not get fabricated snapshots during migration.
+
+Task mapping is explicit:
+
+- planning: source-to-outline structure, outline language repair, and new chapter/
+  volume composition (including its initial prose);
+- writing: scene generation, workflow scene generation, empty-scene drafting,
+  and continuation;
+- revision: Agent scene/selection revision and generated scene Proposal revision;
+- discussion: ordinary Agent discussion;
+- extraction: LLM document fact extraction.
+
+Existing deterministic state-marker extraction, continuity and style checks are
+rule-based; these do not acquire fictional model assignments. Rule-based scene
+writing also remains available. CLI and API factories use the same persisted
+routing. A request freezes a complete settings/preset snapshot before provider
+construction; changes made while it is in flight do not change its endpoint,
+key, protocol, model, preferences or execution provenance. Creative presets
+remain subordinate to the established language, schema and canon constraints.
+
+`GET /settings/agent/models?profile_id=<id>` explicitly checks that connection
+(`default` when omitted); the existing permission and timeout apply. It returns
+the original listing shape plus `model_execution`, uses protocol-specific
+authentication, never generates prose, and does not imply generation support.
+
+Transport boundaries:
+
+- Chat Completions posts to `/chat/completions`, retaining legacy messages and
+  optional `response_format: {type: json_object}`.
+- Responses posts to `/responses`, joins system messages into `instructions`,
+  sends user/assistant turns as `input`, maps the budget to `max_output_tokens`,
+  explicitly sets `store: false`, and uses `text.format` only when JSON mode is
+  enabled. Only completed typed assistant output-text blocks are accepted;
+  incomplete, failed, queued, refusal, tool-only and unsupported output fail
+  without treating reasoning blocks as prose.
+- Anthropic Messages posts to `/messages`, uses `x-api-key` plus
+  `anthropic-version: 2023-06-01`, top-level `system`, user/assistant `messages`
+  and required `max_tokens`. It does not send generic `response_format`.
+  Only final `end_turn`/`stop_sequence` text blocks are accepted; partial, refusal,
+  tool-use and paused turns fail. Thinking blocks are not manuscript text.
+
+A configured URL may include the versioned base or a known full endpoint suffix;
+the explicitly selected protocol determines the endpoint. URLs containing
+credentials, query strings or fragments are rejected. HTTP/network/JSON failures
+are sanitized, including invalid-header exceptions, without provider bodies,
+private source text or credential values. Successful transport results retain
+only requested text and bounded reported model metadata, not hidden thinking or
+raw provider bodies. Services accept plain JSON or one complete JSON Markdown
+fence, rejecting surrounding prose, truncated fences and multiple fenced blocks.
+
+This release implements synchronous text protocol adapters, not server-side
+Agent tool loops, hosted memory, response-ID continuation, or automatic tool
+execution. Existing local orchestration and human review stay authoritative.
+
+Generated responses expose `model_execution` and generated Proposal provenance
+adds nullable `model_execution` alongside legacy `model_ref`. Review transitions
+preserve the snapshot; a new model revision records its own snapshot; a newly generated rule-based
+revision explicitly clears model provenance instead of retaining an old model. Generated
+Drafts and Drafts derived from proposals preserve it in Draft provenance, and
+scene-generation workflow artifact refs expose non-secret model fields. None of
+these records contains keys, endpoint URLs or full System prompt text.
+
+An explicitly assigned planning profile must be fully configured before source
+structure analysis; it cannot silently fall back to the rule-based analyzer.
+The legacy default connection may still use local rule-based structure analysis
+when no model is configured, reporting `model_execution: null`.
+
+Malformed model JSON/schema in the standard contract-error API path returns
+`409` with `category: model_output_invalid` and a safe static message. It does
+not save a generated Draft or relax JSON parsing. Specialized composition and
+outline routes retain their existing bounded schema-error categories.

@@ -220,3 +220,7 @@ Known graph model labels are UI-localized. Historical chapter/scene titles and p
 ## SG-027 — Actual manuscript rather than blank outline forms
 
 Chapter selection projects saved scene prose, and empty planned scenes receive explicit source-adoption/writing/generation choices. Preview/Edit keep one Draft state. Exact UTF-16 range plus pinned saved Draft supports repeated-text revision. Red/green review stays client-only and does not mutate story content. New chapter/volume generation is a strict reviewed composition proposal; volume grouping uses existing Chapter.volume_index and readable metadata. Source adoption preserves original text with explicit range/language/freshness checks, never inventing links from legacy opaque import refs.
+
+## SG-028 execution boundary
+
+Protocol compatibility is explicit: default legacy Chat Completions remains stable; Responses and Anthropic Messages are selected by saved endpoint profiles and tested independently. A role may inherit the default or use an explicit profile/model; failures never silently fall back or trigger another paid call. Responses transport support does not imply enabling remote built-in tools, conversation storage or autonomous canon writes. Preserve the author's current exact model identifier in live tests; no substitution.
