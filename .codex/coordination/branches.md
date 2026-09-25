@@ -221,4 +221,4 @@ SG-024 delivery complete: software commit `78c36f7` synchronized to main and rep
 
 Branch: `codex/sg-025-novel-editor-workbench`; base: clean `4c8856b`.
 Front owns apps/web; Contract/Creation owns backend output-language validation and relevant contracts/tests; Main owns documentation, version/release work and private acceptance; Review and Check inspect independently. Shared checkout, no agent branch switches or commits.
-Check/review: passed. Final Python suite 316 passed/1 skipped; 62 Web tests and production-browser acceptance passed. Final package signature, payload/source equality and credential/privacy scans passed. Software publication pending; local story content and credentials remain excluded.
+Check/review: passed. Final Python suite 316 passed/1 skipped; 62 Web tests and production-browser acceptance passed. Final package signature, payload/source equality and credential/privacy scans passed. Software commit fc30027 and v0.1.14 are synchronized; public release assets were downloaded and matched. Local story content and credentials remain excluded.

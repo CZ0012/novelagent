@@ -66,7 +66,7 @@ Review reproduced the main-before-backend-before-registry failure path and destr
 
 ## SG-025 — Novel editor verification
 
-Status: code, production-browser acceptance and independent final installer verification complete; software publication pending.
+Status: closed. Code, production-browser acceptance, independent package verification and public v0.1.14 software release complete. Re-downloaded installer, signature and latest.json exactly match the verified local files.
 
 Front delivered a real folding outline, adjacent Agent and scoped title/metadata edits. Review found stale metadata targeting and malformed language-input cases; owners fixed and rechecked them. Production browser acceptance additionally found nullable planning fields causing ContextPack validation500 for minimal scenes; Creation normalized projections with explicit gaps and kept the complete-generation safety gate. Final Python suite316 passed/1skipped, Web62passed and productionbuild passed. Root verified same-scene dirty preservation, exact saved-Draft continuation/selection proposals, pinned chapter metadata and bilingual/responsive behavior using only isolated synthetic fixtures. No author workspace mutation or external model call in this task.
 

@@ -444,6 +444,6 @@ Acceptance: installer preflight runs before replacing software; managed backend 
 
 | ID | Status | Owner | Branch | Goal | Next action |
 | --- | --- | --- | --- | --- | --- |
-| SG-025 | active | Main Agent | `codex/sg-025-novel-editor-workbench` | Correct misleading outline controls and generated-language gaps; keep manuscript editing and Agent collaboration together in an approachable author workbench. | Code, production-browser acceptance and independent package/signature/privacy verification passed; Main synchronizes software and publishes signed 0.1.14 assets. |
+| SG-025 | completed | Main Agent | `codex/sg-025-novel-editor-workbench` | Correct misleading outline controls and generated-language gaps; keep manuscript editing and Agent collaboration together in an approachable author workbench. | v0.1.14 published; all three downloaded release assets match the independently verified local package. 316 Python/62 Web tests and production-browser acceptance passed. |
 
 Acceptance: real chapter folding and scene leaf navigation; independently localized metadata; editor and Agent visible together on desktop with a usable narrow layout; exact Draft references, unsaved text guards and explicit Proposal review preserved; no implicit rewrite of historical project content; no private data in software delivery.

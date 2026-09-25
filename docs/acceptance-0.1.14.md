@@ -27,3 +27,7 @@ The 32,285,666-byte installer has SHA256 `35bffebe654a9c8272ec79dac2d9e75765721d
 The packaged backend matches the final sidecar exactly, including the language checks and nullable Context Pack fix. All six production JS/CSS assets, including independent Chinese/English catalogs, match the verified Web build. Native version metadata is 0.1.14; the native executable differs from the build only by Tauri's expected NSIS bundle marker. The packaged Windows update guard matches source, and the native lifecycle/installer guard implementation is unchanged from the verified 0.1.13 release.
 
 Exact local credential comparisons and generic secret/path scans found no actual credentials or private workspace files in the changed software files or 4,143 decoded package items. Source pattern candidates were reviewed as documentation or synthetic test placeholders. These checks do not require uploading credentials or private story text.
+
+## Publication
+
+Software commit `fc30027` and tag `v0.1.14` were synchronized to GitHub. The public stable release contains the installer, `.exe.sig` and `latest.json`. All three were downloaded again and matched the verified local files byte for byte. Novel workspaces, private acceptance fixtures and API credentials were excluded. The running local installation was left for the author to update through the existing signed update flow.
