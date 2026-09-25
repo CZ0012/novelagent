@@ -41,6 +41,7 @@
     "stop_backend": "无法停止应用管理的后端：{error}",
     "stop_backend_tree": "未能停止应用管理的后端进程树，更新已取消。",
     "stop_backend_timeout": "应用管理的后端未能及时退出，更新已取消。",
-    "backend_update_in_progress": "正在安装更新，后端启动已暂停。"
+    "backend_update_in_progress": "正在安装更新，后端启动已暂停。",
+    "backend_update_prepare": "无法完成更新准备：{error}"
   }
 }

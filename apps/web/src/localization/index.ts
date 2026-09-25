@@ -67,6 +67,14 @@ export function localizeSystemValue(value: string | null | undefined): string {
   return activeLocale.demoText[value as keyof typeof activeLocale.demoText] ?? value;
 }
 
+/** Only graph schema labels belong here; persisted titles remain author text. */
+export function localizeGraphLabel(value: string | null | undefined): string {
+  if (!value) return "";
+  return Object.prototype.hasOwnProperty.call(activeLocale.graphLabels, value)
+    ? activeLocale.graphLabels[value as keyof typeof activeLocale.graphLabels]
+    : value;
+}
+
 export function localizeStatus(value: string | null | undefined): string {
   if (!value) return "";
   return activeLocale.statuses[value as keyof typeof activeLocale.statuses] ?? value;

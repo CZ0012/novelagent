@@ -280,14 +280,20 @@ fn ensure_backend_start_allowed(state: &BackendProcess) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn prepare_backend_update(state: tauri::State<'_, BackendProcess>) -> Result<(), String> {
-    prepare_backend_update_with(&state, || {
-        stop_managed_backend(&state)?;
-        if let Some(path) = sidecar_backend_path() {
-            check_replacement_ready(&path)?;
-        }
-        Ok(())
+async fn prepare_backend_update(app: AppHandle) -> Result<(), String> {
+    // Keep the window responsive while Windows releases the terminated sidecar.
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<BackendProcess>();
+        prepare_backend_update_with(&state, || {
+            stop_managed_backend(&state)?;
+            if let Some(path) = sidecar_backend_path() {
+                check_replacement_ready(&path)?;
+            }
+            Ok(())
+        })
     })
+    .await
+    .map_err(|error| native_message("backend_update_prepare", &[("error", &error.to_string())]))?
 }
 
 fn prepare_backend_update_with(

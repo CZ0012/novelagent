@@ -2857,3 +2857,14 @@ body { min-width: 360px; }
 .scene-title-editor { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; }
 .scene-title-editor input { min-width: 0; max-width: 280px; border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
 .scene-title-editor button { font-size: 11px; min-height: 29px; }
+/* Outline language proposals keep author text separate from graph label UI. */
+.outline-language-tools { padding: 16px; border-top: 1px solid var(--line); }
+.outline-language-tools summary { cursor: pointer; font-weight: 700; }
+.outline-language-tools p { font-size: 12px; line-height: 1.6; }
+.outline-language-review { padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
+.outline-language-review h3, .outline-language-review h4 { margin: 0 0 10px; overflow-wrap: anywhere; }
+.outline-language-review p { font-size: 13px; line-height: 1.6; }
+.outline-language-review section + section { margin-top: 18px; }
+.outline-language-review table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.outline-language-review th, .outline-language-review td { text-align: left; vertical-align: top; padding: 8px; border: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+.outline-language-review th:first-child { width: 18%; }

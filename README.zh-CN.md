@@ -6,6 +6,8 @@ StoryGraph Agent 是一个面向长篇小说创作的本地 MVP。它围绕结�
 
 Windows 更新修复：v0.1.13 在安装前检查后端退出与文件可写状态，并分别显示桌面和所连接后端的版本。旧版本更新时若出现 backend 写入错误，请先保存内容、从托盘退出，再将最新版安装器安装到原目录。仅看到新界面版本不能证明后端也已更新。详见 [更新恢复说明](docs/windows-update-recovery.md)。
 
+Windows 更新准备修复：v0.1.15 会等待后端退出后的短暂文件占用。若 0.1.13/0.1.14 客户端因 `os error 32` 无法进入安装，请保存编辑、从托盘退出，再把最新安装器安装到原目录一次；无需卸载或删除小说工作区。详见 [更新恢复说明](docs/windows-update-recovery.md)。
+
 ## 开始写作
 
 写作工作区采用 **左侧目录、中间正文、右侧 Agent**。章节可以展开与收起，场景作为文稿打开；续写和选区讨论在正文旁进行，生成结果先到 **协作草稿** 比较、审阅，再由你采用。资料、工作流和检查功能保留独立入口；右侧面板可以收起，给正文留出空间。
@@ -18,7 +20,9 @@ Windows 更新修复：v0.1.13 在安装前检查后端退出与文件可写状�
 
 切换项目、场景或后端连接时会保护未保存文字；保存过程中继续输入的内容也会保留。草稿读取失败时保持编辑锁定，重试成功后再恢复。界面语言和小说内容语言互相独立，切换中英界面不会翻译原稿或改动输出语言。
 
-增加语言及验证说明见 [本地化](docs/localization.md)、[工作区验收](docs/acceptance-0.1.14.md)、[模型与预设验收](docs/acceptance-0.1.12.md) 与 [Agent 运行合同](contracts/agent_runtime_v1.md)。
+历史目录的英文标题、摘要等内容，可通过 **目录工具 → 修复目录语言**，使用已配置模型生成符合项目内容语言的修订。先比较原文和建议，提交审阅、接受，再明确应用；左侧目录、图谱和时间线一起刷新，正文、节点 ID 和关系保持不变。图谱中已知的节点和关系类型另有独立中英文显示翻译。
+
+增加语言及验证说明见 [本地化](docs/localization.md)、[更新与目录修复验收](docs/acceptance-0.1.15.md)、[工作区验收](docs/acceptance-0.1.14.md)、[模型与预设验收](docs/acceptance-0.1.12.md) 与 [Agent 运行合同](contracts/agent_runtime_v1.md)。
 
 尚未填全规划信息的场景也可以讨论和续写已保存正文；缺失上下文会明确提示，不会自动补写正典。完整场景生成仍检查必要信息。
 
@@ -158,7 +162,7 @@ npm --prefix apps/desktop run build:installer
 生成的安装器路径是：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.14_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.15_x64-setup.exe
 ```
 
 其他常用桌面命令：
@@ -178,10 +182,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.14_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.14_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.14_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.14_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.15_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.15_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.15_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.15_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -191,7 +195,7 @@ apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 
 版本更新必须保持 `VERSION`、`pyproject.toml`、`apps/api/main.py` 的 FastAPI 版本、Web/桌面 package manifest 与根 lockfile 条目、`apps/web/src/version.ts`、`apps/desktop/src-tauri/Cargo.lock` 的桌面 package 条目、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json` 同步。这里的 GitHub 只作为软件发布/更新通道；本地小说 workspace、Source Store 资料、canon、草稿、项目设置和审阅状态不会自动同步到 GitHub。
 
-当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.14_x64-setup.exe.sig`，以及用于 GitHub Release 的无空格副本和 `latest.json`。后端 sidecar 固定使用 PyInstaller 6.21.0 构建。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
+当前已验证的 Windows 构建中，与 updater 相关的本地产物是 NSIS setup 可执行文件及其 Tauri updater 签名 `StoryGraph Agent_0.1.15_x64-setup.exe.sig`，以及用于 GitHub Release 的无空格副本和 `latest.json`。后端 sidecar 固定使用 PyInstaller 6.21.0 构建。除非构建输出实际改变，不要再写 `nsis.zip` updater artifact。Tauri updater 签名只用于程序内更新校验，和 Windows Authenticode 代码签名不同；后端 sidecar 与安装器的生产级 Authenticode 签名仍是单独发布步骤。
 
 仍缺失或未验证：
 

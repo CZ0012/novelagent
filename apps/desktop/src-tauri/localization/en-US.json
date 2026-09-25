@@ -41,6 +41,7 @@
     "stop_backend": "Could not stop the managed backend: {error}",
     "stop_backend_tree": "The managed backend process tree could not be stopped. The update was cancelled.",
     "stop_backend_timeout": "The managed backend did not exit in time. The update was cancelled.",
-    "backend_update_in_progress": "An update is being installed; backend startup is paused."
+    "backend_update_in_progress": "An update is being installed; backend startup is paused.",
+    "backend_update_prepare": "Could not finish preparing the update: {error}"
   }
 }

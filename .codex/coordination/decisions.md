@@ -212,3 +212,7 @@ The identified NSIS copy order allowed a new shell with an old locked backend. R
 ## SG-025 — Editor-first collaboration and historical titles
 
 Keep the existing backend contracts and unique parent editor state while moving Agent interaction beside prose. Chapters disclose child scenes; scene leaves open the editor. Generated changes retain Proposal review and exact-Draft comparison. Known genre enums localize for display, but persisted author titles are edited only through explicit metadata saves. New structure generation and first application validate language, including short headings; verified completed applications retain retry compatibility. No automatic model retry or historical content translation.
+
+## SG-026 — Explicit repair rather than hidden title translation
+
+Known graph model labels are UI-localized. Historical chapter/scene titles and planning summaries are author data: an explicit metadata-only generation creates a narrow canon_patch for review, then a separate apply preserves original node IDs and relationships. New structure-language validation also covers timeline_position. Update readiness retries transient sharing locks only; diagnostics and delivery do not stop the author application.

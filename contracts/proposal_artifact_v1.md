@@ -331,6 +331,81 @@ structure only when:
   Scene nodes, avoid duplicate Graph Store writes, and reject only when a target
   node id is already owned by unrelated provenance.
 
+## Explicit outline language repair
+
+The existing `canon_patch` type may carry the narrow structured JSON body
+`outline_language_patch_v1`. This does not authorize executing arbitrary
+`canon_patch` content. Its shape is:
+
+```json
+{
+  "schema": "outline_language_patch_v1",
+  "project_id": "project_sample",
+  "output_language": "zh-CN",
+  "changes": [
+    {"node_id": "chapter_opening", "node_type": "Chapter", "field": "title",
+     "before": "The Long Road", "after": "漫长归途"}
+  ]
+}
+```
+
+`POST /projects/{project_id}/outline/localization-proposal` accepts an empty
+object and requires generation permission and a configured provider. It reads
+only nonempty text metadata from existing canon Chapter/Scene nodes in that
+project, freezes its output language and original strings, and generates a
+non-canon Proposal. Chapter fields are `title`, `summary`, `purpose`; Scene
+fields are `title`, `summary`, `goal`, `conflict`, `timeline_position`, `outcome`,
+`emotional_turn`. It sends no Draft, Source Document, graph fact, character/place
+label, prompt preset, or credential as model input. Stable node IDs and field
+names accompany the text for exact targeting. Existing names and acronyms must
+be preserved within translated text. Generation is explicitly requested; neither
+upgrading nor changing UI language invokes it. It performs one provider call,
+with no automatic paid retry.
+
+The request is bounded to 512 nonempty fields, 2,000 characters per field and
+60,000 input text characters. Oversize input is rejected, never silently
+truncated. Provider output may identify only supplied node/field pairs and new
+text; the server supplies original values and node types. Generated `after`
+values follow the same short-field language guard as structure generation.
+Titles/IDs and `before` values are not UI strings and remain verbatim.
+
+Authors may review/edit replacement text or omit changes through existing
+Proposal APIs, then accept the Proposal. Accepting it alone never mutates the
+graph. `POST /projects/{project_id}/proposals/{proposal_id}/apply/outline-language`
+is a separate full-author-permission action requiring `expected_version`, a
+reviewer, and rationale. First application requires an accepted, confirmed-language
+Proposal, matching current project language, strict schema/field validation,
+unique node/field changes, unchanged IDs/types/original values from Proposal
+version 1, and exact frozen target refs. All targets must remain canon nodes of
+the recorded type within the project; all current field values must equal their
+recorded original strings. Any failed check rejects the entire batch before
+node, event, or derived-reference writes.
+
+Application is a narrow human-seed metadata update with Proposal provenance,
+not automated fact promotion. It updates existing node IDs only, changes no
+relationship, manuscript, Source, CandidateFact, or other story-bible object,
+and emits one `update_node` event per changed node. It must not reuse project
+structure creation, which derives new IDs from titles. Metadata translation
+must not fabricate a Draft or source span to bypass CandidateFact provenance.
+
+The local JSON/memory implementation serializes with other graph mutations,
+stages the complete graph/event delta on a separate snapshot, atomically saves
+that JSON snapshot, then publishes the in-memory state. A staging or ordinary
+save failure leaves the old graph and event log intact. Neo4j is rejected before
+generation/application until an equivalent transactional path exists.
+
+Proposal derived refs are `canon_event` references to the complete deterministic
+event set. Events bind the Proposal ID and complete normalized patch hash to
+each exact target and property update. Complete matching event evidence allows
+a retry carrying the original accepted version to return `already_applied`
+without creating new events or overwriting subsequent author edits. Partial or
+mismatched evidence, or foreign derived refs, fails closed. A failure recording
+SQLite derived refs after graph persistence can be retried, including after a
+restart, to repair those refs without repeating graph writes. This is recovery
+across two stores, not a claim of a cross-file hard-crash transaction. Accepted
+Proposal content is immutable under the Proposal Store lock, so concurrent
+content edits cannot race an accepted apply.
+
 ## Canon Safety Invariants
 
 - A selected source language never changes `content_language`; cross-language

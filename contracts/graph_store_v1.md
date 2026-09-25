@@ -127,6 +127,15 @@ Returns foreshadowing items that are seeded but not paid off, optionally filtere
 
 ## Required Write Operations
 
+Explicit outline language repair is the narrowly reviewed human-seed operation
+defined by `proposal_artifact_v1` / `outline_language_patch_v1`. For local
+JSON/memory graphs it stages all existing-node text updates and audit events
+under the mutation/persistence lock, atomically saves the staged snapshot before
+publishing it, and never modifies stable IDs or relationships. Unsupported
+backends must reject the operation instead of applying a partial batch. Complete
+deterministic event evidence supports a read-only retry and repair of missing
+Proposal derived refs; arbitrary `canon_patch` bodies remain non-executable.
+
 ### `create_node`
 
 Creates a non-conflicting node in a non-canon status unless the caller is an approved canon commit path.

@@ -1,6 +1,7 @@
 use crate::localization::native_message;
 use std::{
     fs::OpenOptions,
+    io,
     path::Path,
     process::Child,
     thread,
@@ -16,19 +17,53 @@ use std::{
 /// Probe replacement permissions without truncating or changing the executable.
 /// The installer repeats this check immediately before copying either binary.
 pub fn check_replacement_ready(path: &Path) -> Result<(), String> {
+    wait_for_replacement_ready(path, Duration::from_secs(10), Duration::from_millis(100))
+}
+
+fn probe_replacement_ready(path: &Path) -> io::Result<()> {
     let mut options = OpenOptions::new();
     options.read(true).write(true);
     #[cfg(windows)]
     options.share_mode(0);
-    options.open(path).map(|_| ()).map_err(|error| {
-        native_message(
+    options.open(path).map(|_| ())
+}
+
+fn is_transient_file_lock(error: &io::Error) -> bool {
+    #[cfg(windows)]
+    return matches!(error.raw_os_error(), Some(32 | 33));
+    #[cfg(not(windows))]
+    {
+        let _ = error;
+        false
+    }
+}
+
+fn wait_for_replacement_ready(
+    path: &Path,
+    timeout: Duration,
+    interval: Duration,
+) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let error = match probe_replacement_ready(path) {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        // Windows can keep a terminated one-file executable mapped briefly after
+        // taskkill and the retained parent handle report exit. External readers
+        // may also hold short-lived locks. Wait without killing another process.
+        if is_transient_file_lock(&error) && Instant::now() < deadline {
+            thread::sleep(interval.min(deadline.saturating_duration_since(Instant::now())));
+            continue;
+        }
+        return Err(native_message(
             "backend_update_locked",
             &[
                 ("path", &path.to_string_lossy()),
                 ("error", &error.to_string()),
             ],
-        )
-    })
+        ));
+    }
 }
 
 /// Stop only the process whose retained Child handle we own and its descendants.
@@ -103,7 +138,83 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn replacement_probe_rejects_a_running_executable() {
-        assert!(check_replacement_ready(&std::env::current_exe().unwrap()).is_err());
+        let started = Instant::now();
+        assert!(wait_for_replacement_ready(
+            &std::env::current_exe().unwrap(),
+            Duration::from_millis(80),
+            Duration::from_millis(10),
+        )
+        .is_err());
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn replacement_wait_accepts_a_released_lock_without_changing_bytes() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../.storygraph/update-repair/native-tests");
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(format!("transient-{}.exe", std::process::id()));
+        std::fs::write(&path, b"original executable bytes").unwrap();
+        let reader = OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        assert!(probe_replacement_ready(&path).is_err());
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(120));
+            drop(reader);
+        });
+        let result =
+            wait_for_replacement_ready(&path, Duration::from_secs(2), Duration::from_millis(20));
+        release.join().unwrap();
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"original executable bytes");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn replacement_wait_times_out_on_a_persistent_sharing_lock_without_changing_bytes() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../.storygraph/update-repair/native-tests");
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(format!("persistent-{}.exe", std::process::id()));
+        let original = b"original executable remains locked";
+        std::fs::write(&path, original).unwrap();
+        let reader = OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        assert_eq!(
+            probe_replacement_ready(&path).unwrap_err().raw_os_error(),
+            Some(32)
+        );
+        let started = Instant::now();
+        let result =
+            wait_for_replacement_ready(&path, Duration::from_millis(80), Duration::from_millis(10));
+        let elapsed = started.elapsed();
+        assert!(result.is_err());
+        assert!(elapsed >= Duration::from_millis(80), "{elapsed:?}");
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+        assert_eq!(
+            probe_replacement_ready(&path).unwrap_err().raw_os_error(),
+            Some(32)
+        );
+        drop(reader);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_sharing_and_lock_violations_are_retryable() {
+        assert!(is_transient_file_lock(&io::Error::from_raw_os_error(32)));
+        assert!(is_transient_file_lock(&io::Error::from_raw_os_error(33)));
+        assert!(!is_transient_file_lock(&io::Error::from_raw_os_error(5)));
+        assert!(!is_transient_file_lock(&io::Error::from_raw_os_error(2)));
     }
 
     #[test]
@@ -111,7 +222,9 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../.storygraph/update-repair/missing-executable.exe");
         assert!(!path.exists());
+        let started = Instant::now();
         assert!(check_replacement_ready(&path).is_err());
+        assert!(started.elapsed() < Duration::from_secs(2));
         assert!(!path.exists());
     }
 

@@ -41,6 +41,8 @@ import {
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { OutlineLanguagePreview } from "./OutlineLanguagePreview";
+import { canApplyOutlineLanguagePatch, outlineLanguageApplicationRecorded, outlineLanguageFailureKey, outlineLanguageScopeMatches, parseOutlineLanguagePatch } from "./outlineLanguage";
 import {
   AgentDiscussionMode,
   AgentDiscussionRequest,
@@ -101,6 +103,7 @@ import {
   localeRegistry,
   SUPPORTED_UI_LOCALES,
   localizedTerms,
+  localizeGraphLabel,
   localizeSystemValue,
   permissionLabels,
   proposalStatusLabels,
@@ -111,7 +114,7 @@ import {
   type AppLocale,
   normalizeAppLocale
 } from "./localization";
-import { APP_VERSION, GITHUB_LATEST_RELEASE_API } from "./version";
+import { APP_VERSION, GITHUB_LATEST_RELEASE_API, GITHUB_REPOSITORY } from "./version";
 import {
   DEFAULT_SOURCE_PANE_LAYOUT,
   SOURCE_PANE_STACK_BREAKPOINT_PX,
@@ -153,7 +156,7 @@ import { AgentPresets } from "./AgentPresets";
 import { exportAuthorText } from "./exportText";
 import { DEFAULT_API_BASE, loadBrowserApiBase, normalizeApiBase, saveBrowserApiBase } from "./clientPreferences";
 import { backendVersionCompatibility, backendVersionRequestIsCurrent, readBackendVersion, type BackendVersion } from "./backendVersion";
-import { DesktopUpdateFailure, runSafeDesktopUpdate } from "./safeDesktopUpdate";
+import { DesktopUpdateFailure, isWindowsUpdateFileLock, runSafeDesktopUpdate } from "./safeDesktopUpdate";
 import { ProjectTree } from "./ProjectTree";
 import { genreLabel } from "./genreLabels";
 import { changedMetadataFields, chapterEditorMatches, chapterTitleIsDirty, chapterTitleUpdate, type ChapterTitleEditor, type ChapterEditorScope } from "./chapterEditing";
@@ -489,6 +492,11 @@ export default function App() {
   const [sceneMetadataTarget, setSceneMetadataTarget] = useState<{ apiBase: string; projectId: string; sceneId: string; baseline: SceneForm } | null>(null);
   const sceneMetadataDirty = Boolean(sceneMetadataTarget && JSON.stringify(sceneForm) !== JSON.stringify(sceneMetadataTarget.baseline));
   const sceneEditsDirty = sceneTitleDirty || sceneMetadataDirty;
+  const metadataEditorsRef = useRef({ chapterDirty: false, sceneDirty: false, chapterEditing: false, sceneEditing: false });
+  metadataEditorsRef.current = {
+    chapterDirty: chapterEditsDirty, sceneDirty: sceneEditsDirty,
+    chapterEditing: Boolean(chapterMetadataTarget || chapterTitleEditor), sceneEditing: Boolean(sceneMetadataTarget || sceneTitleEditor)
+  };
   const [characterForm, setCharacterForm] = useState<CharacterForm>(defaultCharacterForm);
   const [locationForm, setLocationForm] = useState<LocationForm>(defaultLocationForm);
   const [worldRuleForm, setWorldRuleForm] = useState<WorldRuleForm>(defaultWorldRuleForm);
@@ -798,7 +806,7 @@ export default function App() {
       if (isLocalizedUserError(message)) {
         setError(message);
       } else {
-        setError(isGeneratedLanguageConflict(exc) ? uiText.errors.generatedLanguageConflict : uiText.errors.requestFailed);
+        setError(outlineLanguageFailureMessage(exc) ?? (isGeneratedLanguageConflict(exc) ? uiText.errors.generatedLanguageConflict : uiText.errors.requestFailed));
         setTechnicalError(
           exc instanceof ApiRequestError ? exc.technicalDetails : toErrorMessage(exc)
         );
@@ -2239,11 +2247,17 @@ export default function App() {
         return;
       }
       const failure = error instanceof DesktopUpdateFailure ? error : null;
+      const fileLocked = isWindowsUpdateFileLock(failure?.cause ?? error);
       setUpdateStatus({
         state: "error", channel: "desktop", latestVersion: update.version,
-        message: () => `${uiText.runtime.updateInstallFailed} ${failure?.recovery === "restored" ? uiText.runtime.backendRecovered : failure?.recovery === "restore_failed" ? uiText.runtime.backendRecoveryFailed : failure?.recovery === "cancel_failed" ? uiText.runtime.updateCancelFailed : failure?.recovery === "external_untouched" ? uiText.runtime.updateExternalUntouched : ""}`.trim(),
+        message: () => [
+          failure?.stage === "download" ? uiText.runtime.updateDownloadFailed : failure?.stage === "preparation" ? uiText.runtime.updatePreparationFailed : uiText.runtime.updateInstallFailed,
+          failure?.recovery === "restored" ? uiText.runtime.backendRecovered : failure?.recovery === "restore_failed" ? uiText.runtime.backendRecoveryFailed : failure?.recovery === "cancel_failed" ? uiText.runtime.updateCancelFailed : failure?.recovery === "external_untouched" ? uiText.runtime.updateExternalUntouched : "",
+          fileLocked ? uiText.runtime.updateFileLockHelp : ""
+        ].filter(Boolean).join(" "),
         technicalDetails: [technicalErrorMessage(failure?.cause ?? error), failure?.recoveryError ? technicalErrorMessage(failure.recoveryError) : null].filter(Boolean).join("\n"),
-        canInstall: failure?.recovery !== "cancel_failed"
+        releaseUrl: fileLocked ? `https://github.com/${GITHUB_REPOSITORY}/releases/latest` : undefined,
+        canInstall: failure?.canRetry ?? true
       });
       void refreshBackendVersion();
     } finally {
@@ -2251,6 +2265,73 @@ export default function App() {
       unlockAction();
     }
   }, [desktopUpdate, refreshBackendVersion, requestProposalNavigation]);
+
+  const generateOutlineLanguageProposal = useCallback(async () => {
+    if (!projectId) throw new Error(uiText.errors.selectProject);
+    const target = { apiBase, projectId };
+    const currentScope = () => outlineLanguageScopeMatches(target, activeApiBaseRef.current, activeProjectIdRef.current);
+    if (!currentScope()) throw new Error(uiText.errors.outlineLanguageScopeChanged);
+    let result: { proposal: ProposalArtifact; output_language: string; change_count: number };
+    try {
+      result = await apiPost(apiBase, `/projects/${encodeURIComponent(projectId)}/outline/localization-proposal`, {});
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status === 403) throw new Error(uiText.errors.outlineLanguagePermission);
+      throw error;
+    }
+    if (!currentScope()) return;
+    await refreshProposals(projectId);
+    if (!currentScope()) return;
+    setProposalStatusFilter("all");
+    setCreatingNewProposal(false);
+    setSelectedProposalId(result.proposal.id);
+    hydrateProposalEditor(result.proposal);
+    setWorkspaceTab("proposals");
+    setNotice(uiText.outlineLanguage.generated(result.change_count));
+  }, [apiBase, projectId, refreshProposals, hydrateProposalEditor]);
+
+  const applyOutlineLanguageProposal = useCallback(async () => {
+    const proposal = selectedProposal;
+    const target = { apiBase, projectId };
+    const currentScope = () => outlineLanguageScopeMatches(target, activeApiBaseRef.current, activeProjectIdRef.current);
+    if (!currentScope()) throw new Error(uiText.errors.outlineLanguageScopeChanged);
+    if (!canApplyOutlineLanguagePatch(proposal, proposalDirty, projectId)) throw new Error(uiText.errors.proposalActionUnavailable);
+    let result: { proposal: ProposalArtifact; applied_count: number; already_applied: boolean };
+    try {
+      result = await apiPost(apiBase, `/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposal!.id)}/apply/outline-language`, {
+        expected_version: proposal!.version, reviewer: "author", rationale: "workbench.outline_language.apply"
+      });
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status === 403) throw new Error(uiText.errors.outlineLanguagePermission);
+      throw error;
+    }
+    if (!currentScope()) return;
+    // Refresh only outline/proposal/graph metadata; leave the current Draft and
+    // its editor version untouched, including when returning from another tab.
+    const [workspace, preview] = await Promise.all([
+      apiGet<{ projects: ProjectOutline[] }>(apiBase, "/projects"),
+      apiGet<ProjectGraphPreview>(apiBase, `/projects/${encodeURIComponent(projectId)}/graph/preview`)
+    ]);
+    if (!currentScope()) return;
+    setProjects(workspace.projects);
+    setGraphPreview(preview);
+    setContextPack(null);
+    if (metadataEditorsRef.current.chapterEditing && !metadataEditorsRef.current.chapterDirty) {
+      setChapterTitleEditor(null);
+      setChapterMetadataTarget(null);
+      setChapterForm(defaultChapterForm);
+    }
+    if (metadataEditorsRef.current.sceneEditing && !metadataEditorsRef.current.sceneDirty) {
+      setSceneTitleEditor(null);
+      setSceneMetadataTarget(null);
+      setSceneForm(defaultSceneForm);
+    }
+    await refreshProposals(projectId);
+    if (!currentScope()) return;
+    setCreatingNewProposal(false);
+    setSelectedProposalId(result.proposal.id);
+    hydrateProposalEditor(result.proposal);
+    setNotice(uiText.outlineLanguage.applied(result.applied_count, result.already_applied));
+  }, [apiBase, projectId, proposalDirty, selectedProposal, refreshProposals, hydrateProposalEditor]);
 
   const submitProposalReview = useCallback(async () => {
     if (!selectedProposal || !projectId) throw new Error(uiText.errors.selectProposal);
@@ -3003,6 +3084,14 @@ export default function App() {
             workspaceLoadError={workspaceLoadError}
             worldRuleForm={worldRuleForm}
           />
+          {selectedProject && <details className="outline-language-tools">
+            <summary>{uiText.outlineLanguage.tools}</summary>
+            <p>{uiText.outlineLanguage.help}</p>
+            <p>{uiText.language.projectLanguageLabel}: {selectedProject.language === "zh-CN" ? uiText.language.chinese : selectedProject.language === "en-US" ? uiText.language.english : uiText.common.notSet}</p>
+            <button type="button" disabled={busy !== null || !canGenerate} onClick={() => requestProposalNavigation(uiText.outlineLanguage.generate, () => {
+              void runAction("outline-language-generate", generateOutlineLanguageProposal);
+            })}><Wand2 size={14} /> {uiText.outlineLanguage.generate}</button>
+          </details>}
         </aside>
 
         <main className="editor">
@@ -3282,6 +3371,10 @@ export default function App() {
             onApplyProjectStructure={() =>
               runAction("proposal-structure", applyProjectStructureProposal)
             }
+            onApplyOutlineLanguage={() => requestProposalNavigation(uiText.outlineLanguage.apply, () => {
+              void runAction("outline-language-apply", applyOutlineLanguageProposal);
+            })}
+            currentProjectId={projectId}
             onCreateNew={() =>
               requestProposalNavigation(uiText.proposals.navigateNewProposal, () => { void runAction("proposal-new", startNewProposal); })
             }
@@ -4029,6 +4122,7 @@ function ProposalInbox({
   canReview,
   currentDraftId,
   currentSceneId,
+  currentProjectId,
   derivedDraftRef,
   diffRows,
   dirty,
@@ -4036,6 +4130,7 @@ function ProposalInbox({
   hasScene,
   onAccept,
   onApplyProjectStructure,
+  onApplyOutlineLanguage,
   onCreateNew,
   onExtractCandidates,
   onFilterChange,
@@ -4072,6 +4167,7 @@ function ProposalInbox({
   canReview: boolean;
   currentDraftId: string;
   currentSceneId: string;
+  currentProjectId: string;
   derivedDraftRef: UniqueRefResolution;
   diffRows: ReviewDiffRow[];
   dirty: boolean;
@@ -4079,6 +4175,7 @@ function ProposalInbox({
   hasScene: boolean;
   onAccept: () => void;
   onApplyProjectStructure: () => void;
+  onApplyOutlineLanguage: () => void;
   onCreateNew: () => void;
   onExtractCandidates: () => void;
   onFilterChange: (filter: ProposalStatus | "all") => void;
@@ -4139,6 +4236,19 @@ function ProposalInbox({
     Boolean(actionPolicy?.canPromote) &&
     selectedProposal?.artifact_type === "project_structure_draft";
   const sortedVersions = [...versions].sort((left, right) => right.version - left.version);
+  const storedOutlinePatch = parseOutlineLanguagePatch(selectedProposal);
+  const editedOutlinePatch = selectedProposal ? parseOutlineLanguagePatch({ ...selectedProposal, body: proposalText }) : null;
+  const isOutlinePatch = Boolean(storedOutlinePatch || editedOutlinePatch);
+  const outlineApplied = outlineLanguageApplicationRecorded(selectedProposal);
+  const canApplyOutlineLanguage = canReview && canApplyOutlineLanguagePatch(selectedProposal, dirty, currentProjectId);
+  const bodyEditor = <textarea
+    className="proposal-textarea"
+    value={proposalText}
+    onChange={(event) => onTextChange(event.target.value)}
+    spellCheck={false}
+    aria-label={uiText.proposals.bodyAria}
+    disabled={locked}
+  />;
 
   return (
     <section className="proposal-panel" aria-label={uiText.proposals.ariaLabel}>
@@ -4209,14 +4319,10 @@ function ProposalInbox({
               disabled={locked}
             />
           </div>
-          <textarea
-            className="proposal-textarea"
-            value={proposalText}
-            onChange={(event) => onTextChange(event.target.value)}
-            spellCheck={false}
-            aria-label={uiText.proposals.bodyAria}
-            disabled={locked}
-          />
+          {isOutlinePatch ? <>
+            {editedOutlinePatch ? <OutlineLanguagePreview patch={editedOutlinePatch} /> : <p className="proposal-inline-warning">{uiText.outlineLanguage.invalidPreview}</p>}
+            <details><summary>{uiText.outlineLanguage.advanced}</summary>{bodyEditor}</details>
+          </> : bodyEditor}
           <div className="proposal-actions">
             <button type="button" disabled={!proposalText.trim()} onClick={() => exportAuthorText(proposalTitle || "StoryGraph", proposalText)}><Download size={14} /> {uiText.navigation.exportText}</button>
             {(!selectedProposal || actionPolicy?.editable) && (
@@ -4244,6 +4350,9 @@ function ProposalInbox({
                 <BookOpen size={14} /> {uiText.proposals.applyStructure}
               </button>
             )}
+            {(canApplyOutlineLanguage || (canReview && outlineApplied && !dirty)) && <button type="button" disabled={busy !== null || outlineApplied} onClick={onApplyOutlineLanguage}>
+              <BookOpen size={14} /> {outlineApplied ? uiText.outlineLanguage.alreadyApplied : uiText.outlineLanguage.apply}
+            </button>}
           </div>
           {dirty && selectedProposal && (
             <p className="proposal-inline-warning">{uiText.proposals.dirtyActionHelp}</p>
@@ -4321,6 +4430,8 @@ function ProposalInbox({
                 </button>
               </div>
           )}
+          <details open={isOutlinePatch ? undefined : true}>
+          <summary>{uiText.outlineLanguage.auditDetails}</summary>
           <ListBlock
             title={uiText.proposals.refsSource}
             items={formatProposalRefs(selectedProposal?.source_refs ?? [])}
@@ -4333,6 +4444,7 @@ function ProposalInbox({
             title={uiText.proposals.refsDerived}
             items={formatProposalRefs(selectedProposal?.derived_refs ?? [])}
           />
+          </details>
         </div>
       </div>
       {selectedProposal && reviewProposal && (
@@ -4340,7 +4452,7 @@ function ProposalInbox({
           <div className="proposal-review-head">
             <div>
               <strong>{uiText.proposals.reviewTitle}</strong>
-              <span>{uiText.proposals.reviewHelp}</span>
+              <span>{isOutlinePatch ? uiText.outlineLanguage.historyHelp : uiText.proposals.reviewHelp}</span>
             </div>
             {versionsLoading && <RefreshCw className="spin" size={15} />}
           </div>
@@ -4375,7 +4487,7 @@ function ProposalInbox({
             <strong>{reviewProposal.title}</strong>
             <pre>{reviewProposal.body}</pre>
           </details>
-          <ProposalReviewDiff baseline={baseline} rows={diffRows} />
+          {!isOutlinePatch && <ProposalReviewDiff baseline={baseline} rows={diffRows} />}
         </section>
       )}
     </section>
@@ -6170,7 +6282,7 @@ function AgentSettingsInspector({
               <Download size={14} /> {uiText.settings.installUpdate}
             </button>
           )}
-          {updateStatus.state === "available" && !updateStatus.canInstall && updateTarget && (
+          {((updateStatus.state === "available" && !updateStatus.canInstall) || updateStatus.state === "error") && updateTarget && (
             <a href={updateTarget} target="_blank" rel="noreferrer">
               <Download size={14} /> {uiText.settings.downloadInstaller}
             </a>
@@ -6272,7 +6384,7 @@ function FactsInspector({
         <div className="fact-row" key={fact.id}>
           <div>
             <strong>{localizeSystemValue(fact.fact_type)}</strong>
-            <span>{fact.subject_id} {localizeSystemValue(fact.relation)} {fact.object_id}</span>
+            <span>{fact.subject_id} {localizeGraphLabel(fact.relation)} {fact.object_id}</span>
           </div>
           <p>{fact.rationale}</p>
           <div className="fact-actions">
@@ -6314,7 +6426,7 @@ function GraphPreview({
           preview.relationships.map((edge) => (
             <div key={edge.id}>
               <span title={edge.source_id}>{edge.source_label}</span>
-              <b>{localizeSystemValue(edge.type)}</b>
+              <b>{localizeGraphLabel(edge.type)}</b>
               <span title={edge.target_id}>{edge.target_label}</span>
             </div>
           ))
@@ -6956,6 +7068,11 @@ function formatDateTime(value: string): string {
 
 function technicalErrorMessage(exc: unknown): string {
   return exc instanceof ApiRequestError ? exc.technicalDetails : toErrorMessage(exc);
+}
+
+function outlineLanguageFailureMessage(error: unknown): string | null {
+  const key = outlineLanguageFailureKey(error);
+  return key ? uiText.errors[key] : null;
 }
 
 function isLocalizedUserError(message: string): boolean {

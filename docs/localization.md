@@ -26,3 +26,13 @@ Known project genre identifiers are localized only for display. Unknown genre va
 Structure generation and first application validate authored title/summary fields against the frozen project output language, including obvious short foreign-language headings. This is a conservative heuristic, not general language identification; proper-name labels and verified completed applications retain their compatibility boundaries. No rejected output triggers an automatic paid retry.
 
 已保存的英文目录属于历史作品内容，升级不会自动翻译；可通过章节/场景信息明确改名并保存。新结构会校验标题与摘要的项目语言，减少短英文标题漏检；AI、人物和地点专名仍允许保留原样。
+
+## Reviewed historical outline repair (v0.1.15)
+
+**Outline tools → Repair outline language** creates a `canon_patch` Proposal with the narrow `outline_language_patch_v1` schema. The configured provider sees only existing chapter/scene metadata, with server-fixed node IDs and original values. The UI compares fields before and after; submission, acceptance and explicit application remain separate actions. Complete application receipts disable the action; incomplete receipts can be recovered through the same idempotent endpoint.
+
+Only chapter title/summary/purpose and scene title/summary/goal/conflict/timeline position/outcome/emotional turn are eligible. Application preserves IDs, relationships, drafts, sources and character facts, rejects stale original values or changed project language, and writes provenance with the accepted proposal. JSON and in-memory graph backends are supported; Neo4j is rejected until it has an equivalent atomic implementation. A provider error does not silently switch models or trigger a paid retry.
+
+Known graph labels (12 node types and 27 relationship types) use the separate UI catalogs. Unknown custom labels and story content remain verbatim. A Chinese project can therefore display Chinese story titles with English interface relationship labels, or the reverse.
+
+**目录工具 → 修复目录语言** 会创建逐字段对照提案，先审阅、接受，再明确应用。仅调整章节/场景标题、摘要和规划说明；正文、资料、人物事实、节点 ID 和关系不变。若原字段或项目语言已经改变，旧提案不能直接覆盖。当前支持本地 JSON/内存图，Neo4j 尚不支持该批量应用。服务商调用失败时会提示检查实际模型、认证、额度或连接，不会偷偷切换模型或付费重试。

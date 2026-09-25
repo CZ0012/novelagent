@@ -447,3 +447,11 @@ Acceptance: installer preflight runs before replacing software; managed backend 
 | SG-025 | completed | Main Agent | `codex/sg-025-novel-editor-workbench` | Correct misleading outline controls and generated-language gaps; keep manuscript editing and Agent collaboration together in an approachable author workbench. | v0.1.14 published; all three downloaded release assets match the independently verified local package. 316 Python/62 Web tests and production-browser acceptance passed. |
 
 Acceptance: real chapter folding and scene leaf navigation; independently localized metadata; editor and Agent visible together on desktop with a usable narrow layout; exact Draft references, unsaved text guards and explicit Proposal review preserved; no implicit rewrite of historical project content; no private data in software delivery.
+
+## SG-026 — Windows update preparation recovery (2026-09-25)
+
+| ID | Status | Owner | Branch | Goal | Next action |
+| --- | --- | --- | --- | --- | --- |
+| SG-026 | active | Main Agent | `codex/sg-026-update-readiness` | Repair Windows update preparation and graph-language gaps; provide safe reviewed correction of historical outline metadata. | Implementation and independent review complete: 377 Python/75 Web/11 Rust tests, 35 lifecycle and 5 NSIS checks passed; browser and authorized private-copy provider acceptance passed. Signed package privacy verified; publishing v0.1.15. |
+
+Acceptance: exercise real packaged-backend exit/file release, retain rejection of persistent locks, distinguish preparation from installation failures, never interrupt author edits or touch novel data during diagnostics.

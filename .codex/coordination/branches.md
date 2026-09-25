@@ -222,3 +222,11 @@ SG-024 delivery complete: software commit `78c36f7` synchronized to main and rep
 Branch: `codex/sg-025-novel-editor-workbench`; base: clean `4c8856b`.
 Front owns apps/web; Contract/Creation owns backend output-language validation and relevant contracts/tests; Main owns documentation, version/release work and private acceptance; Review and Check inspect independently. Shared checkout, no agent branch switches or commits.
 Check/review: passed. Final Python suite 316 passed/1 skipped; 62 Web tests and production-browser acceptance passed. Final package signature, payload/source equality and credential/privacy scans passed. Software commit fc30027 and v0.1.14 are synchronized; public release assets were downloaded and matched. Local story content and credentials remain excluded.
+
+## SG-026 branch strategy
+
+Branch: `codex/sg-026-update-readiness`; base: clean `c60fd93`. Creation owns native readiness and regression fixtures; Front owns stage-aware update errors and Web tests; Main owns docs/version/release and independent verification. Shared checkout; agents do not switch branches or commit. User supplied error identifies Windows sharing violation 32 at the preparation probe; root keeps the live author application untouched.
+
+SG-026 scope addition: Contract/Creation owns outline_language_repair service, two scoped API routes, narrow canon_patch/Graph contract clarification and tests. Front owns graph label coverage and review/apply UI. Main owns isolated provider/browser acceptance and release; Review independently audits transaction, language, provenance and UI scope guards.
+
+SG-026 delivery: all owners frozen, independent review passed and final signed package verified. Final source/build baseline carries 0.1.15 in all 13 version locations. Main publishes only software and signed release assets; no private fixture, story workspace or credential is staged.

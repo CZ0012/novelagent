@@ -55,3 +55,13 @@ Publication verified on 2026-09-13: [v0.1.13](https://github.com/CZ0012/novelage
 此前的安装器先覆盖桌面主程序，再覆盖后端。后端仍被占用时，安装可能中断，出现“界面版本已更新、后端还是旧版”的情况。旧版“已是最新版”只核对界面版本，不能代表整个应用更新成功。
 
 修复时应先保存内容、从托盘退出，再将最新安装器安装到原目录；无需删除小说工作区。v0.1.13 在覆盖文件前检查并释放本安装目录的后端，失败就中止；界面也分别核对桌面与后端版本。安装记录、文件版本和实际运行接口应保持一致。
+
+## v0.1.15 preparation sharing-lock fix
+
+A later incident left both installed components at 0.1.13 and reported Windows `os error 32` from `prepare_backend_update`. The installer had not started: the Web recovery path restored the managed backend. Unlike the installer guard, the new 0.1.13 native preflight tried exclusive access only once immediately after shutdown. A temporary file lock could therefore reject a safe update.
+
+The native check now waits up to 10 seconds, retrying only Windows sharing/lock violations 32/33 without terminating unrelated processes. Missing files, access denial and other errors remain immediate failures; a lasting sharing lock still blocks replacement. The wait uses a blocking worker, keeping the window responsive. Errors show their actual stage and the separate recovery result.
+
+The old client cannot receive this fix until installed. For this one-time recovery, save edits, quit from the system tray, then install the latest signed package into the existing installation directory. The installer already has its own bounded guard. Do not uninstall or remove the novel workspace.
+
+Verification includes a real read-sharing handle released after 120ms, persistent-lock and permanent-error cases, plus repeated real PyInstaller one-file parent/child shutdown using `test:update-lifecycle`. One early ten-run fixture observed an immediate probe failure that subsequently cleared; it did not record the error code, so it cannot identify the exact process responsible for the author's incident. The final instrumented 35-run fixture passed every readiness check and preserved executable bytes. Diagnostics did not stop the author's application.

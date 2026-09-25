@@ -53,6 +53,7 @@ class CapturingProvider:
     ("purpose", "Reveal the secret"),
     ("goal", "Find the key"),
     ("conflict", "The gate is shut"),
+    ("timeline_position", "Before the old calendar began"),
 ])
 def test_chinese_structure_rejects_short_english_narrative_without_retry_or_text_leak(field, value):
     outline = chinese_outline()
@@ -93,7 +94,7 @@ def test_structure_preserves_acronyms_and_declared_proper_names(name):
     chapter["scenes"][0]["title"] = name
     chapter["scenes"][0]["location_label"] = name
     outline["source_title"] = "Original English source title"
-    chapter["scenes"][0]["timeline_position"] = "Before the old calendar began"
+    chapter["scenes"][0]["timeline_position"] = "旧历开始之前"
     validate_project_structure_output_language(outline=outline, output_language="zh-CN")
     assert chapter["title"] == name
 

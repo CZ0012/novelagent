@@ -6,6 +6,18 @@
 user interface, project-authored content, Agent output, imported sources, and
 persisted generated artifacts.
 
+An author may explicitly request translation of already persisted outline
+metadata through the reviewed `outline_language_patch_v1` subtype of
+`canon_patch`, defined in `proposal_artifact_v1`. This exception is an explicit
+content rewrite with before/after review, never a UI-language side effect,
+automatic migration, metadata relabel, or translation of source/manuscript text.
+The original project language, node IDs, and original strings are frozen; only
+the separately accepted and explicitly applied replacements update the existing
+outline. Structure generation also checks natural-language `timeline_position`.
+The shared generated-output guard rejects obvious short English sentences in
+Chinese output while preserving ambiguous proper names and machine identifiers;
+it remains a conservative heuristic rather than comprehensive language detection.
+
 The initial product supports `zh-CN` and `en-US` for UI and project output.
 Imported sources may carry another valid BCP 47 language tag because the tag
 describes the source rather than granting permission to mix or translate it.

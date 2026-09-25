@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { ApiRequestError, isGeneratedLanguageConflict } from "./api";
+import { describe, expect, it, vi } from "vitest";
+import { ApiRequestError, apiPost, isGeneratedLanguageConflict } from "./api";
 
 describe("generated output language failures", () => {
   it("classifies safe localized guidance without treating all backend failures as language failures", () => {
@@ -8,4 +8,15 @@ describe("generated output language failures", () => {
     expect(isGeneratedLanguageConflict(new ApiRequestError(500, "Provider unavailable"))).toBe(false);
     expect(isGeneratedLanguageConflict(new Error("Generated output field text clearly conflicts with output_language zh-CN."))).toBe(false);
   });
+});
+
+it("retains a stable outline conflict category separately from diagnostic text", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: {
+    category: "outline_language_stale", message: "Outline snapshot is no longer current"
+  } }), { status: 409 }));
+  vi.stubGlobal("fetch", fetch);
+  try {
+    await expect(apiPost("http://127.0.0.1:8766", "/projects/project-a/proposals/proposal-a/apply/outline-language", { expected_version: 2 }))
+      .rejects.toMatchObject({ status: 409, category: "outline_language_stale", technicalDetails: "Outline snapshot is no longer current" });
+  } finally { vi.unstubAllGlobals(); }
 });

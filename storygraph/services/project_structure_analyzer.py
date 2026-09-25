@@ -472,6 +472,7 @@ def _outline_language_fields(outline: dict[str, Any]) -> dict[str, str | None]:
                 "summary",
                 "goal",
                 "conflict",
+                "timeline_position",
             ):
                 value = scene.get(key)
                 fields[f"{scene_prefix}.{key}"] = value if isinstance(value, str) else None

@@ -570,12 +570,14 @@ export async function apiDelete<T>(baseUrl: string, path: string): Promise<T> {
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly technicalDetails: string;
+  readonly category: string | null;
 
-  constructor(status: number, technicalDetails: string) {
+  constructor(status: number, technicalDetails: string, category: string | null = null) {
     super("API request failed");
     this.name = "ApiRequestError";
     this.status = status;
     this.technicalDetails = technicalDetails;
+    this.category = category;
   }
 }
 
@@ -598,7 +600,8 @@ async function parseResponse<T>(response: Response): Promise<T> {
     const detail = payload?.detail?.message ?? payload?.detail ?? response.statusText;
     throw new ApiRequestError(
       response.status,
-      typeof detail === "string" ? detail : JSON.stringify(detail)
+      typeof detail === "string" ? detail : JSON.stringify(detail),
+      typeof payload?.detail?.category === "string" ? payload.detail.category : null
     );
   }
   return payload as T;

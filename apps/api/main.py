@@ -98,6 +98,13 @@ from storygraph.services.project_language import resolve_project_output_language
 from storygraph.services.project_language import enforce_source_language_policy
 from storygraph.services.project_language import project_language_projection
 from storygraph.services.project_structure_analyzer import validate_project_structure_output_language
+from storygraph.services.outline_language_repair import (
+    apply_outline_language_proposal,
+    generate_outline_language_proposal,
+    require_local_graph,
+    safe_provider_failure,
+)
+from storygraph.stores.json_graph import save_json_graph
 from storygraph.workflows import SceneGenerationWorkflow
 
 
@@ -114,6 +121,25 @@ class CreateProjectRequest(BaseModel):
     @classmethod
     def legacy_project_language(cls, value):
         return {"zh_CN": "zh-CN", "en_US": "en-US"}.get(value, value)
+
+
+class OutlineLanguageGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class OutlineLanguageApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1)
+    reviewer: str = Field(default="author", min_length=1, max_length=200)
+    rationale: str = Field(default="Author reviewed and applied outline language repair.", min_length=1, max_length=1000)
+
+
+    @field_validator("reviewer", "rationale")
+    @classmethod
+    def nonblank_audit_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Review provenance must not be blank.")
+        return value.strip()
 
 class UpdateProjectRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -500,7 +526,7 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.14")
+    app = FastAPI(title="StoryGraph Agent", version="0.1.15")
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -1359,6 +1385,47 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/outline/localization-proposal")
+    def create_outline_language_proposal(
+        project_id: str, request: OutlineLanguageGenerateRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        try:
+            _ensure_project_exists(graph, project_id)
+            require_local_graph(graph)
+            _require_llm_configured(settings)
+            return generate_outline_language_proposal(
+                graph=graph, store=proposal_store, project_id=project_id,
+                provider=create_llm_provider(settings), model=settings.llm_model,
+            )
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=safe_provider_failure(exc)) from exc
+
+    @app.post("/projects/{project_id}/proposals/{proposal_id}/apply/outline-language")
+    def apply_outline_language_patch(
+        project_id: str, proposal_id: str, request: OutlineLanguageApplyRequest,
+    ) -> dict:
+        require_permission(AgentPermissionLevel.FULL)
+        try:
+            return apply_outline_language_proposal(
+                graph=graph, store=proposal_store, project_id=project_id, proposal_id=proposal_id,
+                expected_version=request.expected_version, reviewer=request.reviewer,
+                rationale=request.rationale,
+                persist_snapshot=lambda snapshot: save_json_graph(snapshot, settings.graph_path)
+                if configured_graph.backend == "json" else None,
+            )
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+        except Exception as exc:
+            # Neither filesystem details nor stored prose belong in UI errors.
+            # A graph-committed / Proposal-ref failure can safely be retried.
+            raise HTTPException(status_code=503, detail={
+                "category": "outline_language_persistence_failed",
+                "message": "Outline language repair could not finish saving. Retry the same proposal.",
+            }) from exc
 
     @app.post("/projects/{project_id}/proposals")
     def create_proposal(project_id: str, request: ProposalCreateRequest) -> dict:

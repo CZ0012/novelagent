@@ -6,6 +6,8 @@ The desktop hosts the same bilingual author workflow and preset APIs as the brow
 
 作者工作台采用左侧目录、中间正文、右侧 Agent。章节支持真实折叠，场景以文稿叶节点打开；续写和选区讨论保留正文可见，结果仍走现有提案比较与采用流程。工作流和检查复用可关闭的右侧面板。中英文 Web 语言包按需加载；原生窗口、托盘和错误提示分别来自 `src-tauri/localization/zh-CN.json`、`en-US.json`。新增语言步骤见 [本地化说明](../../docs/localization.md)。
 
+历史英文目录可在 **目录工具 → 修复目录语言** 生成逐字段修订，提交审阅并接受后再明确应用。该功能使用项目内容语言和已配置服务商模型，仅修改章节/场景的标题、摘要及规划说明，保留正文、ID 和关系；图谱/时间线同步刷新。更新软件和切换界面语言不会自动改写作品。已知图谱节点与关系标签独立本地化，未知自定义标签保留原样。
+
 设置页和 Agent 面板支持持久化 System prompt 预设；中文简练预设包含“中文写作时少用状语”。模型列表来自用户保存的第三方兼容服务，不代表底层模型来源验证。保存草稿后可发起续写，新增段落先进入独立协作提案，原稿与正典保持不变。CLI 也读取同一工作区的模型与预设配置。
 
 未填全规划信息的场景可以讨论和续写已保存正文，缺失上下文仍明确报告；完整场景生成保留必要信息检查。
@@ -145,10 +147,10 @@ npm --prefix apps/desktop run dev
 apps/desktop/src-tauri/binaries/storygraph-backend-x86_64-pc-windows-msvc.exe
 apps/desktop/src-tauri/target/release/storygraph-backend.exe
 apps/desktop/src-tauri/target/release/storygraph-agent-desktop.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.14_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.14_x64-setup.exe.sig
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.14_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.14_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.15_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.15_x64-setup.exe.sig
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.15_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph.Agent_0.1.15_x64-setup.exe.sig
 apps/desktop/src-tauri/target/release/bundle/nsis/latest.json
 ```
 
@@ -231,3 +233,11 @@ Agent settings persist with the backend workspace. Saving the permission level i
 
 - Add automated desktop smoke tests for start/connect, health reporting, workbench load, workspace persistence, and installer install/uninstall.
 - Add automated updater-channel smoke tests against a test `latest.json` and signed fixture artifact.
+
+## v0.1.15 update preparation
+
+The native readiness probe retries only Windows sharing/lock violations 32/33 for up to 10 seconds after managed-backend shutdown. Other errors return immediately, and persistent locks still prevent installation. Preparation runs off the window thread. Web errors distinguish download/verification, preparation and installer startup, with recovery results reported separately.
+
+Clients 0.1.13/0.1.14 retain their old one-shot probe until updated. If it blocks with error 32, save work, quit using the tray menu, and run the latest official installer in the existing installation directory. No uninstall or workspace deletion is needed.
+
+`npm --prefix apps/desktop run test:update-lifecycle` builds an isolated PyInstaller 6.21.0 one-file process fixture and exercises the production native shutdown/readiness module. It requires normal Windows process permissions, opens no network port, and does not use the installed application or author workspace. The script supports Windows PowerShell 5.1 and PowerShell on Windows. `test:update-guard` separately covers actual NSIS replacement and persistent-lock rejection.

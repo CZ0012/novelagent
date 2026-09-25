@@ -82,6 +82,12 @@ def enforce_source_language_policy(
 _HAN_CHARACTER = re.compile(r"[\u3400-\u9fff]")
 _LATIN_LETTER = re.compile(r"[A-Za-z]")
 _LATIN_WORD = re.compile(r"[A-Za-z]+(?:['’-][A-Za-z]+)*")
+_ENGLISH_FUNCTION_WORDS = frozenset({
+    "a", "an", "the", "of", "to", "in", "at", "from", "with", "for", "and",
+    "but", "or", "by", "on", "into", "before", "after", "he", "she", "they",
+    "it", "his", "her", "their", "is", "are", "was", "were", "has", "have",
+    "had", "will", "would", "should", "must",
+})
 
 
 def validate_generated_output_language(
@@ -112,6 +118,19 @@ def validate_generated_output_language(
             mismatched = latin_count >= 20 and latin_words >= 3 and (
                 han_count < 4 or latin_count >= han_count * 2
             )
+            # Short complete English phrases used to fall below the length
+            # threshold. Keep ambiguous names (The Who, King's Landing, NASA)
+            # and machine identifiers; reject recognizable sentence grammar.
+            words = _LATIN_WORD.findall(value)
+            if not han_count and len(words) >= 2 and not re.fullmatch(
+                r"[A-Za-z0-9]+(?:[_:/][A-Za-z0-9_.-]+)+", value.strip()
+            ):
+                has_grammar = any(word.casefold() in _ENGLISH_FUNCTION_WORDS for word in words)
+                has_lower_content = any(
+                    word[0].islower() and word.casefold() not in _ENGLISH_FUNCTION_WORDS
+                    for word in words
+                )
+                mismatched = mismatched or (has_grammar and has_lower_content)
         if mismatched:
             raise ContractError(
                 f"Generated output field {field_name} clearly conflicts with "
