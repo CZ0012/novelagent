@@ -468,6 +468,6 @@ Acceptance: meaningful chapter/scene reading surface and empty-state actions; pr
 
 | ID | Status | Owner | Branch | Goal | Next action |
 | --- | --- | --- | --- | --- | --- |
-| SG-028 | active | Main Agent | `codex/sg-028-model-routing-and-imports` | Diagnose the reported empty DOCX import, support text extraction from RTF, and provide explicit task-model routing across Chat Completions, Responses and Anthropic Messages. | Implementation, independent review, 199 Web tests, backend full plus targeted regressions, real RTF/protocol and production-browser checks complete. Final signed package privacy/signature verified; publishing software assets next. |
+| SG-028 | completed | Main Agent | `codex/sg-028-model-routing-and-imports` | Diagnose the reported empty DOCX import, support text extraction from RTF, and provide explicit task-model routing across Chat Completions, Responses and Anthropic Messages. | Implementation, independent review, 199 Web tests, backend full plus targeted regressions, real RTF/protocol and production-browser checks complete. Final signed package privacy/signature verified; v0.1.17 published and all three re-downloaded public assets match the audited package. |
 
 Acceptance: precise non-alarmist import failures and temporary-file skips; bounded local RTF text extraction; backward-compatible default provider plus per-task assignments; no silent protocol/model fallback; model/protocol provenance visible; original data/config unchanged by tests; independent bilingual UI, API and package/privacy verification.

@@ -88,3 +88,6 @@ Front delivered manuscript reading/editing, exact selection requests, compositio
 ## SG-028 final handoff
 
 All product owners are frozen. Independent reciprocal reviews repaired URL diagnostic leakage, inaccurate rule-based model attribution, explicit-profile fallback, RTF deletion visibility and DOCX entry-name ambiguity. Main verified real files and authorized third-party calls only in ignored copies; malformed model JSON remains a rejected result. Check approved the signed 0.1.17 installer, source/bytecode/assets correspondence and exclusion of credentials and novel workspace data. Main owns software-only publication and public-byte verification.
+
+
+SG-028 closed after signed release publication and three-asset download comparison. Backend, Front and Import owners completed reciprocal review; Main verified user-facing bilingual behavior and preserved original configuration/data. Check approved final source, sidecar and installer. See docs/acceptance-0.1.17.md for results and protocol limitations.

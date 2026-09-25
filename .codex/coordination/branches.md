@@ -244,3 +244,6 @@ SG-027 publication complete: software 510df35 and tag v0.1.16 synchronized to ma
 ## SG-028 branch strategy
 
 Branch `codex/sg-028-model-routing-and-imports`, base clean 3e2f917. Shared checkout: Backend owns provider/config/API/task routing and contracts; Front owns settings and import UI wiring; Import owner owns isolated document parser/helpers/tests; Main coordinates, diagnoses source files read-only, tests actual configured Claude Opus 4.6 in an ignored copy, documents and releases. Agents do not switch branches or commit.
+
+
+SG-028 publication complete: software 5fb634f/tag v0.1.17 synchronized to main and the integration branch. All three public assets match the independently verified package; no original application/workspace changed, no private data published. Protocol compatibility is distinguished from successful structured generation; the documented rejected Anthropic task is not claimed as a successful revision.

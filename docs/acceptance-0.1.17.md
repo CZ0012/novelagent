@@ -34,4 +34,4 @@ The final installer was statically unpacked and independently audited; it was no
 - SHA-256: `985088c16d601550e5cc87fe66112a4133c0d5b9476903c9653e449248fb2096`
 - Tauri updater signing is separate from Windows Authenticode signing.
 
-GitHub publication and re-download verification are pending. The author installation and workspaces remain untouched.
+Published [v0.1.17](https://github.com/CZ0012/novelagent/releases/tag/v0.1.17) from software commit `5fb634f`. All three public assets were downloaded again and match the audited local files byte for byte; the release is stable, not a draft or prerelease. The author installation and workspaces remain untouched.
