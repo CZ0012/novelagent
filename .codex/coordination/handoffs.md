@@ -97,3 +97,8 @@ SG-028 closed after signed release publication and three-asset download comparis
 Final backend full regression:755 passed,1skipped. Front245 fulltests plus20focused finaldisplay checks/build passed. Local Windows0.2.0 installer static/signature/tamper/privacy audit and isolatedpersistentbackend/restart smoke passed; no installation orpublication. Source16newruntime modules/75compiledsource matches and7Webassets verified. Offline browser exercised complete21stage bookbundle review/accept/apply and100chapter/200scene directory; fixtures clearly labeled synthetic.
 
 Full real-provider book acceptance remains open under SG-031-BUDGET. Implementation/package evidence is not a substitute for that goal criterion. See docs/acceptance-0.2.0.md; author workspace/key material and generated acceptance outputs remain outside Git.
+
+
+## 2026-10-25 Front final source and browser follow-up
+
+Front fixed Context evidence, dirty Draft omission, source_changed recovery guidance, explicit Context build/refresh, and large-project inspector layout. Complete frontend259tests passed before the final button/layout additions; latest14focusedchecks/build passed. Main verified the isolated100chapter/200scene UI in Edge: Context action populates approvedplan/budget/seed protection, graph collapsed and expanded keep Context readable. Evidence remains in ignored UI-fixture folder; no real novel quality claim, paid model call, or author workspace mutation from UI test. Role rules mirrored by Main because Front could not write protected coordination files.

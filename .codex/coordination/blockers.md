@@ -4,7 +4,7 @@ Use this file for blockers that cannot be solved inside the current owner scope.
 
 ## Open Blockers
 
-One open decision: SG-031-BUDGET below; full real-model acceptance awaits explicit budget authorization.
+No open user-authorization blockers. SG-031-BUDGET was explicitly approved; live acceptance is running within its cap.
 
 ## Blocker Template
 
@@ -39,4 +39,4 @@ Blocking condition: automatic approval review rejected the proposed up-to80paid-
 Affected scope: the full real-model100chapter/200scene plan run only. Offline tests, UI verification and local packaging continue.
 Prepared safe result: an isolated acceptance runner with80-call cap and30CNY conservative preflight reservation using verified official peak prices, balance checks, persistent unknown-call reservations and explicit pause behavior. Offline budget guard tests passed; no batch model call began.
 Needed decision: the async user question asks approval for up to80calls with30CNY budget, or offline-only acceptance. Do not bypass the rejection with smaller indirect loops or another agent.
-Status: awaiting user answer.
+Status: closed — user explicitly approved up to80calls and30CNY, then requested consideration of4.1 Flash. Main uses Flash for the primary flow, with all comparison and acceptance calls sharing the same cap.

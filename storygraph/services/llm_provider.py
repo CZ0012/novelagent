@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from http.client import HTTPException
 import json
 from typing import Any, Protocol
 from urllib import error, request
 from urllib.parse import urlsplit
 
-from storygraph.core.agent_config import ThinkingMode, validate_thinking_mode
+from storygraph.core.agent_config import ReasoningEffort, ThinkingMode, validate_thinking_mode
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,23 @@ class LLMProvider(Protocol):
         ...
 
 
+class ProviderError(RuntimeError):
+    """Safe outcome classification; never carries provider bodies or reasons."""
+
+    def __init__(self, category: str, *, outcome_known: bool, status: int | None = None):
+        categories = {"invalid_response", "incomplete_response", "unsupported_output", "connection_error",
+            "invalid_credentials", "rate_limit", "endpoint_not_found", "invalid_request", "provider_unavailable", "request_failed"}
+        self.category = category if category in categories else "request_failed"
+        self.outcome_known = outcome_known is True
+        self.status = status if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599 else None
+        guidance = ("Check the provider address, network, and timeout settings, then retry."
+                    if self.category == "connection_error" else "The provider did not return complete supported text.")
+        if self.status is not None:
+            _, guidance = _http_error_guidance(self.status)
+        prefix = f"LLM provider HTTP {self.status}" if self.status is not None else "LLM provider"
+        super().__init__(f"{prefix} [{self.category}]: {guidance}")
+
+
 class OpenAICompatibleProvider:
     """Small Chat Completions client for third-party OpenAI-compatible APIs."""
 
@@ -52,6 +70,7 @@ class OpenAICompatibleProvider:
         timeout_seconds: float = 60.0,
         json_mode: bool = True,
         thinking_mode: ThinkingMode = "provider_default",
+        reasoning_effort: ReasoningEffort | None = None,
     ) -> None:
         try:
             parsed_url = urlsplit(base_url)
@@ -65,16 +84,17 @@ class OpenAICompatibleProvider:
             raise ValueError("api_key is required")
         if not model:
             raise ValueError("model is required")
-        validate_thinking_mode(base_url, self.protocol, thinking_mode)
+        validate_thinking_mode(base_url, self.protocol, thinking_mode, reasoning_effort)
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.json_mode = json_mode
         self.thinking_mode = thinking_mode
+        self.reasoning_effort = reasoning_effort
 
     def generate(self, request_payload: LLMRequest) -> LLMResponse:
-        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode)
+        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode, self.reasoning_effort)
         payload: dict[str, Any] = {
             "model": request_payload.model or self.model,
             "messages": [
@@ -88,6 +108,8 @@ class OpenAICompatibleProvider:
         _reject_extra(request_payload)
         if self.thinking_mode != "provider_default":
             payload["thinking"] = {"type": self.thinking_mode}
+        if self.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.reasoning_effort
         if self.json_mode and request_payload.response_format == "json_object":
             payload["response_format"] = {"type": "json_object"}
 
@@ -113,10 +135,10 @@ class OpenAICompatibleProvider:
             if choice["message"].get("refusal") or choice["message"].get("tool_calls"):
                 raise _invalid_response("unsupported_output")
             content = parsed["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError("LLM provider response did not include choices[0].message.content") from exc
+        except (KeyError, IndexError, TypeError):
+            raise _invalid_response() from None
         if not isinstance(content, str):
-            raise RuntimeError("LLM provider content must be a string")
+            raise _invalid_response()
         if not content.strip():
             raise _invalid_response()
         return LLMResponse(content=content, raw=_safe_response_metadata(parsed, self.api_key))
@@ -130,7 +152,7 @@ class OpenAICompatibleProvider:
         )
         parsed = self._read_json_response(http_request)
         if not isinstance(parsed, dict) or not isinstance(parsed.get("data"), list):
-            raise RuntimeError("LLM provider [invalid_response]: Model listing is unsupported.")
+            raise _invalid_response()
         identifiers = {
             item["id"] for item in parsed["data"]
             if isinstance(item, dict) and isinstance(item.get("id"), str)
@@ -138,32 +160,31 @@ class OpenAICompatibleProvider:
             and self.api_key not in item["id"]
         }
         if len(identifiers) > 1000:
-            raise RuntimeError("LLM provider [invalid_response]: Model listing exceeds 1000 entries.")
+            raise _invalid_response()
         return [{"id": identifier} for identifier in sorted(identifiers)]
 
     def _read_json_response(self, http_request: request.Request) -> Any:
         try:
             with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
-                response_body = response.read().decode("utf-8")
+                response_bytes = response.read()
         except error.HTTPError as exc:
             # Provider bodies and error reasons may echo credentials or private prose.
-            category, guidance = _http_error_guidance(exc.code)
+            category, _ = _http_error_guidance(exc.code)
             exc.close()
-            raise RuntimeError(
-                f"LLM provider HTTP {exc.code} [{category}]: {guidance}"
-            ) from None
-        except (error.URLError, TimeoutError, OSError, ValueError):
-            raise RuntimeError(
-                "LLM provider [connection_error]: Check the provider address, network, "
-                "and timeout settings, then retry."
-            ) from None
+            raise ProviderError(category, outcome_known=True, status=exc.code) from None
+        except (error.URLError, TimeoutError, OSError, ValueError, HTTPException):
+            raise ProviderError("connection_error", outcome_known=False) from None
+        if not isinstance(response_bytes, (bytes, bytearray)):
+            raise _invalid_response()
+        try:
+            response_body = response_bytes.decode("utf-8")
         except UnicodeError:
-            raise RuntimeError("LLM provider [invalid_response]: Response is not valid UTF-8.") from None
+            raise _invalid_response() from None
 
         try:
             parsed = json.loads(response_body)
         except json.JSONDecodeError:
-            raise RuntimeError("LLM provider [invalid_response]: Response is not valid JSON.") from None
+            raise _invalid_response() from None
         return parsed
 
     def _auth_headers(self) -> dict[str, str]:
@@ -197,7 +218,7 @@ def _protocol_base(url: str) -> str:
 
 
 def _invalid_response(category="invalid_response") -> RuntimeError:
-    return RuntimeError(f"LLM provider [{category}]: The provider did not return complete supported text.")
+    return ProviderError(category, outcome_known=True)
 
 
 def _reject_extra(payload: LLMRequest) -> None:
@@ -217,7 +238,7 @@ class ResponsesProvider(OpenAICompatibleProvider):
     protocol = "responses"
 
     def generate(self, request_payload: LLMRequest) -> LLMResponse:
-        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode)
+        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode, self.reasoning_effort)
         _reject_extra(request_payload)
         payload = {
             "model": request_payload.model or self.model,
@@ -269,7 +290,7 @@ class AnthropicMessagesProvider(OpenAICompatibleProvider):
         return {"x-api-key": self.api_key, "anthropic-version": "2023-06-01"}
 
     def generate(self, request_payload: LLMRequest) -> LLMResponse:
-        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode)
+        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode, self.reasoning_effort)
         _reject_extra(request_payload)
         payload = {
             "model": request_payload.model or self.model,

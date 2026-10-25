@@ -122,6 +122,14 @@ def register_planning_run_routes(
         except Exception as exc:
             raise failure(exc) from None
 
+    @app.post("/projects/{project_id}/planning-runs/{run_id}/copy-blueprint")
+    def copy_blueprint(project_id: str, run_id: str, request: PlanningRunControl):
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        try:
+            return {"proposal": service.copy_blueprint(project_id, run_id, request).model_dump(mode="json")}
+        except Exception as exc:
+            raise failure(exc) from None
+
     @app.post("/projects/{project_id}/planning-runs/{run_id}/resume")
     def resume_run(project_id: str, run_id: str, request: PlanningRunResume):
         require_permission(AgentPermissionLevel.READ_GENERATE)

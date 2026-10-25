@@ -67,12 +67,21 @@ class LongformRevisionRequest(StrictModel):
 
 class TargetedRevisionChange(StrictModel):
     path: str = Field(min_length=1, max_length=500)
-    before: str = Field(min_length=1, max_length=12000)
-    after: str = Field(min_length=1, max_length=12000)
+    before: Annotated[str, Field(min_length=1, max_length=12000)] | Annotated[list[Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]{0,63}$")]], Field(max_length=60)] | None
+    after: Annotated[str, Field(min_length=1, max_length=12000)] | Annotated[list[Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]{0,63}$")]], Field(max_length=60)] | None
 
 
 class TargetedRevisionOutput(StrictModel):
     changes: list[TargetedRevisionChange] = Field(min_length=1, max_length=40)
+
+
+class CreativeRevisionReplacement(StrictModel):
+    path: str = Field(min_length=1, max_length=500)
+    after: Annotated[str, Field(min_length=1, max_length=12000)] | Annotated[list[Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]{0,63}$")]], Field(max_length=60)] | None
+
+
+class CreativeRevisionOutput(StrictModel):
+    replacements: list[CreativeRevisionReplacement] = Field(min_length=1, max_length=40)
 
 
 class WorldRulePlan(StrictModel):
@@ -107,9 +116,14 @@ class EntityPlan(StrictModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(min_length=1, max_length=2000)
     initial_state: EntityInitialState | None = None
+    initial_knowledge: list[Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]{0,63}$")]] | None = Field(default=None, max_length=60)
 
     @model_validator(mode="after")
     def allowed_initial_slots(self):
+        if self.initial_knowledge is not None and self.kind != "Character":
+            raise ValueError("Initial knowledge is only valid for Characters.")
+        if self.initial_knowledge is not None and len(set(self.initial_knowledge)) != len(self.initial_knowledge):
+            raise ValueError("Initial knowledge Secret references must be unique.")
         if self.initial_state is None:
             return self
         allowed = {"Character": {"life_status", "physical_state", "location_id"},
@@ -125,6 +139,8 @@ class EntityPlan(StrictModel):
         # contain this optional extension, and its accepted body hash must stay.
         if self.initial_state is None:
             data.pop("initial_state", None)
+        if self.initial_knowledge is None:
+            data.pop("initial_knowledge", None)
         return data
 
 
@@ -166,10 +182,10 @@ class VolumePlan(StrictModel):
 
 class CausalLink(StrictModel):
     id: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
-    from_volume: int = Field(ge=1, le=12)
-    to_volume: int = Field(ge=1, le=12)
-    cause: str = Field(min_length=1, max_length=1000)
-    effect: str = Field(min_length=1, max_length=1000)
+    from_volume: int = Field(ge=1, le=12, description="Volume in which the stated cause actually occurs.")
+    to_volume: int = Field(ge=1, le=12, description="Later volume containing the summarized consequences.")
+    cause: str = Field(min_length=1, max_length=1000, description="An event or acquired basis that occurs within from_volume; do not include later-volume delivery as already completed.")
+    effect: str = Field(min_length=1, max_length=1000, description="Consequences occurring within to_volume, possibly through explicit intermediate steps or at its climax; not necessarily immediate after the cause.")
 
 
 class ForeshadowingPlan(StrictModel):

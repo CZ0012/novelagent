@@ -123,8 +123,24 @@ def expansion(setup, parent, **kwargs):
                               request=ExpansionRequest(parent_proposal_id=parent["id"], parent_version=parent["version"], **kwargs))["proposal"]
 
 
-def test_500k_plan_recovers_all_batches_without_manuscript_or_unreviewed_canon(setup):
+def creative_expansion(raw):
+    return {"chapters": [{key: ([{field: value for field, value in scene.items() if field not in {"id", "target_length"}}
+                                for scene in chapter["scenes"]] if key == "scenes" else value)
+                          for key, value in chapter.items() if key not in {"index", "target_length"}}
+                         for chapter in raw["chapters"]]}
+
+
+@pytest.mark.parametrize("response_format", ["legacy", "creative"])
+def test_500k_plan_recovers_all_batches_without_manuscript_or_unreviewed_canon(setup, response_format):
     graph, store, provider, path = setup
+    if response_format == "creative":
+        original = provider.generate
+        def generate(request):
+            response = original(request)
+            if json.loads(request.messages[-1].content)["phase"] == "expansion":
+                return LLMResponse(json.dumps(creative_expansion(json.loads(response.content)), ensure_ascii=False))
+            return response
+        provider.generate = generate
     before = len(graph.nodes), len(graph.event_log.list())
     parent = blueprint(setup)
     assert before == (len(graph.nodes), len(graph.event_log.list()))
@@ -154,6 +170,64 @@ def test_500k_plan_recovers_all_batches_without_manuscript_or_unreviewed_canon(s
     assert len(load_json_graph(path / "graph.json").nodes) == len(graph.nodes)
     assert len(store.list(project_id="project_test")) == 21
     assert not any("prose" in n.properties for n in graph.nodes.values())
+
+
+@pytest.mark.parametrize("damage", ["mixed_top", "mixed_scene", "wrong_legacy_id", "chapter_count", "scene_count", "missing", "foreign_character", "foreign_location"])
+def test_expansion_skeleton_does_not_renumber_or_guess_malformed_model_content(setup, damage):
+    parent = apply(setup, accept(setup, blueprint(setup)))["proposal"]
+    graph, store, provider, _ = setup
+    original = provider.generate
+    def generate(request):
+        response = original(request)
+        raw = json.loads(response.content)
+        if damage == "wrong_legacy_id":
+            raw["chapters"][1]["scenes"][0]["id"] = "v01_c001_s01"
+        else:
+            raw = creative_expansion(raw)
+            if damage == "mixed_top":
+                raw["volume_index"] = 1
+            elif damage == "mixed_scene":
+                raw["chapters"][0]["scenes"][0]["id"] = "v01_c001_s01"
+            elif damage == "chapter_count":
+                raw["chapters"].pop()
+            elif damage == "scene_count":
+                raw["chapters"][0]["scenes"].pop()
+            elif damage == "missing":
+                raw["chapters"][0]["scenes"][0].pop("goal")
+            elif damage == "foreign_character":
+                raw["chapters"][0]["scenes"][0]["pov_character_id"] = "foreign_project_character"
+            elif damage == "foreign_location":
+                raw["chapters"][0]["scenes"][0]["location_id"] = "courier"
+        return LLMResponse(json.dumps(raw, ensure_ascii=False))
+    provider.generate = generate
+    before = copy.deepcopy(graph.nodes), list(graph.event_log.list())
+    with pytest.raises(GraphStoreError):
+        expansion(setup, parent, volume_index=1)
+    assert (graph.nodes, graph.event_log.list()) == before and len(store.list()) == 1
+
+
+def test_advertised_creative_schema_has_exact_counts_enums_and_no_model_owned_ids_or_budgets(setup):
+    parent = apply(setup, accept(setup, blueprint(setup)))["proposal"]
+    expansion(setup, parent, volume_index=1, chapter_count=3)
+    sent = json.loads(setup[2].calls[-1].messages[-1].content)
+    schema = sent["output_schema"]
+    assert set(schema["properties"]) == {"chapters"}
+    assert schema["properties"]["chapters"]["minItems"] == schema["properties"]["chapters"]["maxItems"] == 3
+    chapter = schema["$defs"]["ExpansionChapterContent"]["properties"]
+    scene = schema["$defs"]["ExpansionSceneContent"]["properties"]
+    assert "index" not in chapter and "target_length" not in chapter
+    assert "id" not in scene and "target_length" not in scene
+    assert chapter["scenes"]["minItems"] == chapter["scenes"]["maxItems"] == 2
+    assert scene["pov_character_id"].get("const") == "courier"
+    assert scene["location_id"].get("const") == "harbor"
+    assert scene["foreshadowing_payoff_ids"]["maxItems"] == 0
+    assert "CREATIVE FORMAT ONLY" in " ".join(sent["validation_rules"])
+    assert sent["volume_progress"]["chapters_per_volume"] == 20
+    assert sent["volume_progress"]["batch_chapter_indices"] == [1, 2, 3]
+    assert sent["volume_progress"]["remaining_chapter_indices"] == list(range(4, 21))
+    assert sent["volume_progress"]["batch_role"] == "opening"
+    assert not sent["volume_progress"]["is_final_batch"]
+    assert sent["author_brief"] == parse_longform(parent["body"]).request.instruction
 
 
 @pytest.mark.parametrize("mutation", [
@@ -379,14 +453,29 @@ def test_provider_receives_cross_field_invariants_not_only_json_schema(setup):
     initial = json.loads(setup[2].calls[0].messages[-1].content)
     rules = " ".join(initial["validation_rules"])
     for expected in ("ONE namespace", "EXACTLY ONE arc for EVERY", "strictly ascending", "incoming link",
-                     "volume_budgets[i-1] exactly", "JSON array of 1..20 strings"):
+                     "volume_budgets[i-1] exactly", "JSON array of 1..20 strings",
+                     "CausalLink.cause must actually occur within its declared from_volume",
+                     "CausalLink.effect summarizes consequences WITHIN to_volume"):
         assert expected in rules
+    causal_schema = initial["output_schema"]["$defs"]["CausalLink"]["properties"]
+    assert "within from_volume" in causal_schema["cause"]["description"]
+    assert "not necessarily immediate" in causal_schema["effect"]["description"]
     first = expansion(setup, parent, volume_index=1, chapter_count=1)
     apply(setup, accept(setup, first))
     expansion(setup, parent, volume_index=1, chapter_start=2, chapter_count=1)
     last = json.loads(setup[2].calls[-1].messages[-1].content)
     assert last["prior_clue_placements"] == [{"scene_id": "v01_c001_s01", "seed_ids": ["brass_key"], "payoff_ids": []}]
     assert "EVERY clue allocated" in " ".join(last["validation_rules"])
+
+
+def test_generation_proof_controls_apply_to_blueprints_and_expansions_without_new_fields():
+    from storygraph.services.longform_planning import _generation_rules
+    for phase in ("blueprint", "expansion"):
+        rules = " ".join(_generation_rules(phase))
+        for expected in ("evidence-to-inference bridge", "EXISTING summary/climax/cause/effect/outcome fields",
+                         "custody/authenticity", "original-versus-derived data identity",
+                         "not independent corroboration", "not acquired character knowledge"):
+            assert expected in rules
 
 
 def test_known_validation_failure_exposes_only_static_diagnostic_code(setup):
@@ -478,6 +567,50 @@ def test_expansion_revision_preserves_accepted_parent_and_batch(setup):
     assert new.parent_proposal_id == parent["id"] and new.parent_version == parent["version"]
     assert new.expansion == old.expansion
     assert {r["ref"] for r in revised["source_refs"] if r["kind"] == "proposal_artifact"} == {source["id"], parent["id"]}
+
+
+def test_full_expansion_revision_accepts_creative_only_response_with_same_server_slots(setup):
+    parent = apply(setup, accept(setup, blueprint(setup)))["proposal"]
+    source = expansion(setup, parent, volume_index=1)
+    original = setup[2].generate
+    def creative(request):
+        response = original(request)
+        return LLMResponse(json.dumps(creative_expansion(json.loads(response.content)), ensure_ascii=False))
+    setup[2].generate = creative
+    before = copy.deepcopy(setup[0].nodes), list(setup[0].event_log.list())
+    alternative = revise(setup, source)
+    assert alternative["id"] != source["id"]
+    assert parse_longform(alternative["body"]).expansion == parse_longform(source["body"]).expansion
+    assert (setup[0].nodes, setup[0].event_log.list()) == before
+    assert "服务端骨架" in alternative["provenance"]["note"]
+    sent = json.loads(setup[2].calls[-1].messages[-1].content)
+    assert sent["volume_progress"]["chapters_per_volume"] == 20
+    assert sent["volume_progress"]["remaining_chapter_indices"] == list(range(6, 21))
+    assert sent["author_brief"] == parse_longform(parent["body"]).request.instruction
+
+
+def test_manual_expansion_and_revision_keep_exact_prior_timeline_anchors(setup):
+    parent = apply(setup, accept(setup, blueprint(setup)))["proposal"]
+    first = expansion(setup, parent, volume_index=1)
+    apply(setup, accept(setup, first))
+    graph = setup[0]
+    prior_id = graph_plan_id(parent["id"], "scene", "v01_c005_s02")
+    anchor = "事件第5日22:30；记录次日09:20上传；允许明确标注的回溯。"
+    graph.update_node(prior_id, {"timeline_position": anchor}, **SEED)
+    next_batch = expansion(setup, parent, volume_index=1, chapter_start=6)
+    generated = json.loads(setup[2].calls[-1].messages[-1].content)
+    assert generated["recent_scene_outcomes"][-1]["id"] == "v01_c005_s02"
+    assert generated["recent_scene_outcomes"][-1]["timeline_position"] == anchor
+    ledger = generated["prior_scene_outcome_ledger"]
+    assert len(ledger["scenes"]) == 10 and ledger["scenes"][-1]["timeline_position"] == anchor
+    assert ledger["scenes"][-1]["pov_character_id"] == "courier" and ledger["scenes"][-1]["location_id"] == "harbor"
+    revise(setup, next_batch)
+    revised = json.loads(setup[2].calls[-1].messages[-1].content)
+    assert revised["recent_scene_outcomes"][-1]["timeline_position"] == anchor
+    assert revised["prior_scene_outcome_ledger"] == ledger
+    rules = " ".join(revised["validation_rules"])
+    assert "a new batch does not restart the incident day count" in rules
+    assert "Explicit nonlinear narration/flashback is permitted" in rules
 
 
 def test_first_application_hook_is_atomic_and_completed_retry_skips_it(setup):
@@ -701,3 +834,191 @@ def test_targeted_repeated_and_overlapping_subspan_never_guesses_occurrence(setu
         with pytest.raises(GraphStoreError):
             revise(setup, source, mode="targeted")
         assert len(setup[1].list()) == count
+
+
+def explicit_knowledge(output):
+    output["entities"].append({"id": "secret_clock_origin", "kind": "Secret", "name": "时钟来历",
+        "description": "时钟靠交换记忆维持运转。"})
+    output["entities"][0]["initial_knowledge"] = ["secret_clock_origin"]
+
+
+def test_reviewed_explicit_initial_knowledge_becomes_same_project_secret_edge(setup):
+    setup[2].mutate = explicit_knowledge
+    source = blueprint(setup)
+    graph = setup[0]
+    assert not graph.relationships
+    result = apply(setup, accept(setup, source))
+    edges = [r for r in result["relationships"] if r["type"] == "KNOWS_SECRET"]
+    assert len(edges) == 1
+    character_id = graph_plan_id(source["id"], "character", "courier")
+    secret_id = graph_plan_id(source["id"], "secret", "secret_clock_origin")
+    assert edges[0]["source_id"] == character_id and edges[0]["target_id"] == secret_id
+    assert edges[0]["properties"] == {"project_id": "project_test", "known": True,
+        "initial_knowledge": True, "longform_blueprint_id": source["id"]}
+    assert secret_id in graph.get_character_knowledge(character_id).knows
+    assert edges[0]["reviewer"] == "author" and edges[0]["source_ref"].startswith(f"proposal:{source['id']}:longform:")
+    assert any(event.target == edges[0]["id"] and event.operation == "create_relation" for event in graph.event_log.list())
+    count = len(graph.event_log.list())
+    assert apply(setup, accept_existing := setup[1].get(source["id"]).model_dump())["already_applied"]
+    assert len(graph.event_log.list()) == count and accept_existing["status"] == "accepted"
+
+
+@pytest.mark.parametrize("kind,refs", [("Location", []), ("Secret", []), ("Character", ["missing_secret"]),
+    ("Character", ["harbor"]), ("Character", ["courier"]),
+    ("Character", ["secret_clock_origin", "secret_clock_origin"])])
+def test_initial_knowledge_rejects_wrong_kind_unknown_scope_and_duplicate_ids(setup, kind, refs):
+    def mutate(output):
+        explicit_knowledge(output)
+        target = output["entities"][0] if kind == "Character" else next(e for e in output["entities"] if e["kind"] == kind)
+        target["initial_knowledge"] = refs
+    setup[2].mutate = mutate
+    with pytest.raises(GraphStoreError):
+        blueprint(setup)
+    assert len(setup[0].nodes) == 1 and not setup[0].relationships and setup[1].list() == []
+
+
+def test_missing_or_empty_initial_knowledge_never_infers_from_author_dossier(setup):
+    def mutate(output):
+        explicit_knowledge(output)
+        output["entities"][0].pop("initial_knowledge")
+        output["entities"][0]["description"] = "角色描述中说他知道时钟来历，但没有结构化初始知识声明。"
+    setup[2].mutate = mutate
+    source = blueprint(setup)
+    assert "initial_knowledge" not in json.loads(source["body"])["blueprint"]["entities"][0]
+    result = apply(setup, accept(setup, source))
+    assert not any(r["type"] == "KNOWS_SECRET" for r in result["relationships"])
+    setup[2].mutate = lambda output: (explicit_knowledge(output), output["entities"][0].update(initial_knowledge=[]))
+    second = blueprint(setup)
+    assert json.loads(second["body"])["blueprint"]["entities"][0]["initial_knowledge"] == []
+
+
+def test_old_receipt_serialization_omits_added_initial_knowledge_and_reloads(setup):
+    source = blueprint(setup)
+    body = json.loads(source["body"])
+    assert all("initial_knowledge" not in e for e in body["blueprint"]["entities"])
+    assert parse_longform(source["body"]).model_dump(by_alias=True) == body
+    accepted = accept(setup, source)
+    apply(setup, accepted)
+    graph, store, provider, path = setup
+    reloaded = load_json_graph(path/"graph.json")
+    count = len(reloaded.event_log.list())
+    assert apply((reloaded, store, provider, path), accepted)["already_applied"]
+    assert len(reloaded.event_log.list()) == count
+
+
+def source_with_known_secrets(setup, known):
+    def mutate(output):
+        explicit_knowledge(output)
+        output["entities"].append({"id": "secret_second", "kind": "Secret", "name": "第二项秘密", "description": "时钟的编号来自旧港。"})
+        output["entities"][0]["initial_knowledge"] = known
+    setup[2].mutate = mutate
+    return blueprint(setup)
+
+
+@pytest.mark.parametrize("before,after", [
+    (["secret_clock_origin"], ["secret_clock_origin", "secret_second"]),
+    (["secret_clock_origin", "secret_second"], ["secret_clock_origin"]),
+    (None, []), (None, ["secret_clock_origin"]), ([], None),
+])
+def test_targeted_initial_knowledge_changes_only_exact_character_list(setup, before, after):
+    source = source_with_known_secrets(setup, before)
+    old = json.loads(source["body"])
+    targeted_output(setup[2], [{"path": "/blueprint/entities/0/initial_knowledge", "before": before, "after": after}])
+    revised = revise(setup, source, mode="targeted")
+    expected = copy.deepcopy(old)
+    if after is None:
+        expected["blueprint"]["entities"][0].pop("initial_knowledge", None)
+    else:
+        expected["blueprint"]["entities"][0]["initial_knowledge"] = after
+    assert json.loads(revised["body"]) == expected
+    assert setup[1].get(source["id"]).model_dump() == source and len(setup[0].nodes) == 1
+    sent = json.loads(setup[2].calls[-1].messages[-1].content)
+    assert sent["current_values"]["/blueprint/entities/0/initial_knowledge"] == before
+
+
+@pytest.mark.parametrize("path,before,after", [
+    ("/blueprint/entities/0/initial_knowledge", [], ["secret_second"]),
+    ("/blueprint/entities/0/initial_knowledge", ["secret_clock_origin"], ["missing_secret"]),
+    ("/blueprint/entities/0/initial_knowledge", ["secret_clock_origin"], ["courier"]),
+    ("/blueprint/entities/0/initial_knowledge", ["secret_clock_origin"], ["secret_second", "secret_second"]),
+    ("/blueprint/entities/0/initial_knowledge", "secret_clock_origin", ["secret_second"]),
+    ("/blueprint/entities/0/initial_knowledge", ["secret_clock_origin"], "secret_second"),
+    ("/blueprint/entities/1/initial_knowledge", None, ["secret_second"]),
+    ("/blueprint/foreshadowing/0/character_ids", ["courier"], []),
+    ("/blueprint/style_brief/rubric", ["检查动作是否具体，情绪是否通过行为呈现。"], []),
+    ("/blueprint/entities/0/description", ["secret_clock_origin"], None),
+])
+def test_targeted_knowledge_exception_rejects_wrong_kind_ref_duplicate_before_and_generic_arrays(setup, path, before, after):
+    source = source_with_known_secrets(setup, ["secret_clock_origin"])
+    targeted_output(setup[2], [{"path": path, "before": before, "after": after}])
+    count = len(setup[1].list())
+    with pytest.raises(GraphStoreError):
+        revise(setup, source, mode="targeted")
+    assert len(setup[1].list()) == count and setup[1].get(source["id"]).model_dump() == source
+
+
+def creative_replacement_output(provider, replacements, side_effect=None):
+    def mutate(output):
+        if side_effect:
+            side_effect()
+        output.clear()
+        output.update(replacements=replacements)
+    provider.mutate = mutate
+
+
+def test_creative_revision_materializes_before_from_frozen_source_and_changes_only_whole_leaf(setup):
+    source = blueprint(setup)
+    old = json.loads(source["body"])
+    after = old["blueprint"]["synopsis"]+"新证据必须经过独立核验。"
+    creative_replacement_output(setup[2], [{"path": "/blueprint/synopsis", "after": after}])
+    revised = revise(setup, source, mode="targeted")
+    expected = copy.deepcopy(old)
+    expected["blueprint"]["synopsis"] = after
+    assert json.loads(revised["body"]) == expected and setup[1].get(source["id"]).model_dump() == source
+    sent = json.loads(setup[2].calls[-1].messages[-1].content)
+    assert set(sent["output_schema"]["properties"]) == {"replacements"}
+    replacement = sent["output_schema"]["$defs"]["CreativeRevisionReplacement"]["properties"]
+    assert set(replacement) == {"path", "after"} and sent["current_values"]["/blueprint/synopsis"] == old["blueprint"]["synopsis"]
+
+
+def test_creative_revision_allows_only_declared_typed_knowledge_list(setup):
+    source = source_with_known_secrets(setup, None)
+    creative_replacement_output(setup[2], [{"path": "/blueprint/entities/0/initial_knowledge", "after": ["secret_second"]}])
+    revised = revise(setup, source, mode="targeted")
+    assert json.loads(revised["body"])["blueprint"]["entities"][0]["initial_knowledge"] == ["secret_second"]
+    assert "initial_knowledge" not in json.loads(source["body"])["blueprint"]["entities"][0]
+
+
+@pytest.mark.parametrize("case", ["unknown_path", "wrong_type", "unknown_secret", "duplicate_path", "extra_before", "mixed_format"])
+def test_creative_revision_rejects_unknown_mixed_or_out_of_scope_replacements(setup, case):
+    source = source_with_known_secrets(setup, [])
+    replacements = [{"path": "/blueprint/synopsis", "after": "新的调查顺序。"}]
+    if case == "unknown_path":
+        replacements[0]["path"] = "/blueprint/entities/0/id"
+    elif case == "wrong_type":
+        replacements[0]["after"] = ["secret_second"]
+    elif case == "unknown_secret":
+        replacements[0] = {"path": "/blueprint/entities/0/initial_knowledge", "after": ["missing_secret"]}
+    elif case == "duplicate_path":
+        replacements.append(copy.deepcopy(replacements[0]))
+    elif case == "extra_before":
+        replacements[0]["before"] = "额外字段不能被悄悄删除。"
+    creative_replacement_output(setup[2], replacements)
+    if case == "mixed_format":
+        setup[2].mutate = lambda output: (output.clear(), output.update(replacements=replacements, changes=[]))
+    count = len(setup[1].list())
+    with pytest.raises(GraphStoreError):
+        revise(setup, source, mode="targeted")
+    assert len(setup[1].list()) == count and setup[1].get(source["id"]).model_dump() == source
+
+
+def test_creative_revision_never_salvages_invented_before_from_complete_legacy_format(setup):
+    parent = apply(setup, accept(setup, blueprint(setup)))["proposal"]
+    source = expansion(setup, parent, volume_index=1)
+    scene_text = json.loads(source["body"])["expansion"]["chapters"][0]["scenes"][0]["summary"]
+    chapter_text = json.loads(source["body"])["expansion"]["chapters"][0]["summary"]
+    assert scene_text not in chapter_text
+    targeted_output(setup[2], [{"path": "/expansion/chapters/0/summary", "before": scene_text, "after": "改写后的整章摘要。"}])
+    with pytest.raises(GraphStoreError) as invalid:
+        revise(setup, source, mode="targeted")
+    assert invalid.value.reason_code == "targeted_before_mismatch"

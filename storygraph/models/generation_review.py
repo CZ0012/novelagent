@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from storygraph.core.agent_config import ModelExecution
 from storygraph.models.common import ReportStatus, Severity
@@ -64,9 +64,16 @@ class GenerationReviewIssue(FrozenReviewModel):
     id: str = Field(min_length=1, max_length=100)
     dimension: ReviewDimension
     severity: Severity
+    finding: Literal["contradiction", "required_gap", "advice"] = "contradiction"
     description: str = Field(min_length=1, max_length=1500)
     suggestion: str = Field(min_length=1, max_length=1500)
     evidence: tuple[GenerationReviewEvidence, ...] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def advice_is_not_a_severe_conflict(self):
+        if self.finding == "advice" and self.severity in {"high", "critical"}:
+            raise ValueError("Advice must have low or medium severity.")
+        return self
 
 
 class SemanticReviewOutput(FrozenReviewModel):

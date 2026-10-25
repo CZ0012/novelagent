@@ -1,5 +1,16 @@
 # Check Agent
 
+Test protected AUTO 8000 through at most 16000 against legacy AUTO 4000, plus
+strict explicit 4000/8000 overflow blocking before provider invocation. Verify one
+consistent read/provenance snapshot and unchanged P0 during 2000-step AUTO growth. API no-body/{}/null and CLI omitted
+budgets resolve automatically; bool/zero/negative reject. Capture scene-plan,
+knowledge/state and style losslessly, with no private-prose fixtures or paid calls.
+
+Verify the configured model HTTP socket timeout defaults to 300 seconds and that
+explicit STORYGRAPH_LLM_TIMEOUT_SECONDS values (especially 60) survive task
+resolution and reach provider construction. Test offline; timeout outcome/retry
+gates stay unchanged and a socket timeout is not an entire planning-job deadline.
+
 ## Mission
 
 Maintain code compliance, contract discipline, tests, lint/build health, and safety boundaries. The Check Agent is the repository's engineering quality gate.
@@ -114,3 +125,38 @@ Follow temporal_state_v1 for reviewed append_state operations and immutable Even
 ## SG-031 planning-run responsibilities
 
 Follow planning_run_v1: the autonomous book branch writes only Proposals and operational checkpoints until exact human bundle acceptance/application. Bound model calls and repairs; never replay uncertain paid work without explicit retry authorization. Preserve source versions/body hashes, frozen canonical/config fingerprints, worker ownership and audit receipts. Final book review covers the complete blueprint and scene summary/outcome/dependency/clue ledger, with separate per-batch checks; never claim it read unwritten prose. Stop/shutdown must not initiate another model call after the current checkpoint. Historical state corrections follow temporal_state_v1 and append evidence instead of deleting prior records.
+
+## SG-031 live critic precision
+
+Distinguish contradiction, required_gap and advice. Advice can only be low/medium; a fully covered report may pass with visible advice, while every actual contradiction/required gap remains blocking regardless of severity. High/critical advice is invalid and cannot clear a gate. Do not confuse suspicion/proof/quantification, working copies/formal evidence, oral instructions/authorization, or independent life/injury slots. Never propose unsupported state enums.
+
+Model evidence may select a bounded server-provided source_id; resolve it to exact existing kind/ref/quote before all usual grounding checks. Unknown IDs, mixed overrides, invented quotes, stale inputs or missing coverage still fail closed. Planning repairs use blocking findings only. Explicit recheck_current_step preserves exact output refs and repair counts; it never rewrites the plan or silently resets a budget.
+
+## SG-031 opening knowledge boundary
+
+Approved blueprints may explicitly declare Character.initial_knowledge as unique same-blueprint Secret references; only reviewed application creates scoped KNOWS_SECRET baseline edges. Never infer knowledge from character descriptions, the author's dossier knowledge or model assumptions. Preserve old plans that omit the optional field and their receipt hashes.
+
+Context Pack and scene semantic evidence use at_scene_start knowledge. Same-scene acquisitions are excluded at entry; knowledge expiring during the scene remains available at entry. Through-scene query defaults remain compatible. Inactive/future knowledge edges must not override entry projection. Life and physical-injury slots are independent and their permitted enums remain unchanged.
+
+## Explicit effort, uncertain outcomes and approved scene plans
+
+Use contracts/agent_runtime_v1.md, planning_run_v1.md, generation_review_v1.md and context_pack_v1.md as the source of truth. Explicit effort is official HTTPS DeepSeek Chat-only, incompatible with disabled thinking. Preserve omitted/default settings and omit unset effort from historical ModelExecution. Explicit low/high/enabled headroom is 32768 tokens with total cap65536, visible in LLMRequest before financial guards; default ceilings stay unchanged and adapters never expand the request behind a guard.
+
+Unknown critic transport preserves its diagnostic, original pending call and reserved count atomically, requiring retry_uncertain_call before another attempt. Complete invalid/truncated responses are known failed results eligible for explicit recheck, never automatic retry or a passing judgment. Do not persist raw errors, credentials or hidden reasoning text.
+
+Writing uses reviewed scene-entry knowledge/state. Optional scene_plan carries approved intentions (outcome, emotional turn, length, up to 30 direct scoped predecessor/clue actions), never realized facts. Use stable graph IDs, withhold seed payoffs, protect P0 context, preserve legacy null and block full drafting on missing/foreign/empty required plan data. Never infer real 100-chapter acceptance from allocated budgets, plan grids or synthetic tests; measured live coverage belongs in docs/acceptance-0.2.0.md.
+
+Verify captured request ceilings, omission compatibility, known/unknown retry behavior, entry-knowledge parity and bounded scene-plan delivery. Keep CLI/API-Web/source-built desktop/published release checks distinct.
+
+Semantic review explicitly opts into a validated 65536-token total ceiling only for explicit thinking/effort; default/non-thinking review ceilings stay unchanged. Structured plan transport sends the complete parsed plan once plus original hash/metadata and the exact citation registry, retaining original serialized text locally for strict validation; legacy/prose stays raw. This neither drops fields nor relaxes coverage, findings or exact quotes.
+
+
+Scene Writer examples now derive all natural-language example values from the authoritative project output_language, including self_check. JSON keys stay unchanged. Custom prompt files may use {{scene_writer_response_example}}; legacy custom files remain verbatim and receive a separate localized example. Preserve strict output-language validation; verify Chinese/English captures and rejection of copied English self-checks.
+
+New generation_review_v1 ephemeral citation aliases are ev_ plus 16 hex digits. Detect different full source identities or metadata colliding under one prefix and fail closed before provider calls. Never fuzzy-repair missing/unknown IDs or reclassify an earlier failed response as valid; persisted canonical refs/quotes and report freshness remain unchanged.
+
+## Explicit planning recovery
+
+Follow contracts/planning_run_v1.md for preserve_later_outputs and revision_mode. Retention is explicit restart-only, full revision additionally requires a nonblank instruction, and recheck is separate. Keep frozen request/canon/language/connections and cumulative reservations. Later unaccepted exact version/hash seeds copy authored fields into new current-prefix wrappers with workflow provenance and zero model calls; never transfer old reports or accept child Proposals. Require fresh review, pause stale/rejected/accepted/foreign or incompatible retained sources, and never silently regenerate/remap/rebase. Verify atomic artifact/checkpoint rollback, stop/owner CAS, source-dependent report freshness and accepted-bundle restart refusal. Distinguish zero-call copying from fresh paid review/repair and synthetic tests from real whole-book acceptance.
+
+Nonstyle low/medium semantic advice needs at least one exact target passage, without a comparative canon/internal pair. Contradictions and required gaps keep strict canon-or-two-distinct-internal-plan-quotes grounding; style advice still needs target plus applicable style evidence. All exact registry/scope/quote checks remain mandatory. Mixed blocking findings retain needs_revision, advice-only can pass under adequate coverage, and no failed historical report is replayed as valid. Full Expansion revisions use the ordinary creative-output adapter plus frozen server skeleton, not model-controlled IDs/budgets.

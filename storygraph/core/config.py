@@ -35,8 +35,9 @@ class StoryGraphSettings:
         )
         self.llm_protocol = os.environ.get("STORYGRAPH_LLM_PROTOCOL", "chat_completions")
         self.llm_thinking_mode = os.environ.get("STORYGRAPH_LLM_THINKING_MODE", "provider_default")
+        self.llm_reasoning_effort = os.environ.get("STORYGRAPH_LLM_REASONING_EFFORT") or None
         self.llm_model = os.environ.get("STORYGRAPH_LLM_MODEL", "deepseek-chat")
-        self.llm_timeout_seconds = float(os.environ.get("STORYGRAPH_LLM_TIMEOUT_SECONDS", "60"))
+        self.llm_timeout_seconds = float(os.environ.get("STORYGRAPH_LLM_TIMEOUT_SECONDS", "300"))
         self.llm_json_mode = os.environ.get("STORYGRAPH_LLM_JSON_MODE", "1").lower() not in {
             "0",
             "false",

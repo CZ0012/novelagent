@@ -20,6 +20,7 @@ describe("explicit temporal state projections", () => {
     expect(temporalValueLabel("location_id", "city", "resolved", { city: "雾城" })).toBe("雾城");
     expect(temporalValueLabel("location_id", "city", "resolved")).toBe("已记录对象（见引用）");
     expect(temporalValueLabel("physical_state", "healing", "resolved")).toBe("恢复中");
+    expect(temporalValueLabel("physical_state", "healthy", "resolved")).toBe("未受伤");
   });
   it("separates pending state assertions from observation-only patches", () => {
     const html = renderToStaticMarkup(<TemporalCandidateNotice operation="append_state" properties={properties} subjectId="hero" labels={{ hero: "林舟", "scene-b": "雨夜" }} />);
@@ -35,6 +36,7 @@ describe("explicit temporal state projections", () => {
   });
   it("uses English labels independently from author values and distinguishes through-scene", async () => {
     await activateLocale("en-US");
+    expect(temporalValueLabel("physical_state", "healthy", "resolved")).toBe("Uninjured");
     const html = renderToStaticMarkup(<TemporalContext projections={[{ ...projection, at_scene_start: false }]} projectId="book" sceneId="scene-b" labels={{ hero: "林舟" }} />);
     expect(html).toContain("林舟 · Through this scene"); expect(html).toContain("Alive"); expect(html).toContain("Unknown"); expect(html).toContain("Ambiguous");
   });

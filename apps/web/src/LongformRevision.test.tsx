@@ -8,7 +8,7 @@ describe("review-safe plan revisions and observational state", () => {
   it("offers a new alternative only for unapplied plans and guards unavailable or dirty actions", () => {
     const props = { applied: false, disabled: true, modelLabel: "planning-model", onRevise: () => undefined };
     const html = renderToStaticMarkup(<LongformRevision {...props} />);
-    expect(html).toContain("新的独立提案"); expect(html).toContain('value="targeted" selected=""'); expect(html).toContain("仅修订涉及段落"); expect(html).toContain("重新构思完整规划"); expect(html).toContain('maxLength="12000"'); expect(html).toContain('disabled=""');
+    expect(html).toContain("新的独立提案"); expect(html).toContain('value="targeted" selected=""'); expect(html).toContain("定点修订"); expect(html).toContain("文字与人物开篇已知秘密"); expect(html).toContain("状态槽保持固定"); expect(html).toContain("重新构思完整规划"); expect(html).toContain('maxLength="12000"'); expect(html).toContain('disabled=""');
     const applied = renderToStaticMarkup(<LongformRevision {...props} applied />); expect(applied).toContain("不能原地修订"); expect(applied).not.toContain("<textarea");
   });
   it("labels operation-none previews and facts as observations without implying state updates", () => {

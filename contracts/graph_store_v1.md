@@ -121,6 +121,16 @@ Returns canon state needed to build a Context Pack for one scene:
 
 Returns what a character knows, does not know, falsely believes, suspects, or hides at a specific scene or timeline position.
 
+Optional `at_scene_start` defaults to false, preserving the existing through-scene
+projection. Entry mode requires an exact same-project Scene and excludes knowledge
+edges beginning at that Scene (`valid_from_scene == scene_id`); earlier reachable
+knowledge and explicit timeless initial-knowledge edges remain visible. An edge
+ending at the queried Scene (`valid_until_scene == scene_id`) is still active at
+entry. This does not introduce lexical/date ordering or infer any new knowledge.
+Neo4j delegates the same flag to the shared read projection. Context Pack writers
+request entry mode; scene semantic evidence explicitly records entry boundaries
+and excludes inactive/current-revelation/future knowledge edges from current truth.
+
 ### `get_unresolved_foreshadowing`
 
 Returns foreshadowing items that are seeded but not paid off, optionally filtered by character, location, chapter, or importance.

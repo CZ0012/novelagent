@@ -374,7 +374,7 @@ def build_context_command(
     project_id: str = PROJECT_ID,
     scene_id: str = SCENE_ID,
     workspace: str | Path | None = None,
-    target_tokens: int = 4000,
+    target_tokens: int | None = None,
 ) -> dict:
     runtime = _runtime(workspace)
     try:
@@ -748,6 +748,8 @@ def _main_argparse() -> None:
         command_parser.add_argument("--project", default=PROJECT_ID)
         command_parser.add_argument("--scene", default=SCENE_ID)
         command_parser.add_argument("--workspace", default=None)
+        if name == "build-context":
+            command_parser.add_argument("--target-tokens", type=int, default=None)
         if name == "write-scene":
             command_parser.add_argument("--text", default=None)
             command_parser.add_argument("--text-file", default=None)
@@ -859,6 +861,7 @@ def _main_argparse() -> None:
             project_id=args.project,
             scene_id=args.scene,
             workspace=args.workspace,
+            target_tokens=args.target_tokens,
         )
     elif args.command == "write-scene":
         payload = write_scene_command(
@@ -1116,7 +1119,7 @@ def main() -> None:
         project: str = typer.Option(PROJECT_ID, help="Project ID."),
         scene: str = typer.Option(SCENE_ID, help="Scene ID."),
         workspace: str | None = typer.Option(None, help="Local StoryGraph workspace directory."),
-        target_tokens: int = typer.Option(4000, help="Context budget target."),
+        target_tokens: int | None = typer.Option(None, help="Explicit context budget; omitted uses the project default."),
     ) -> None:
         """Build a Context Pack for a scene."""
 

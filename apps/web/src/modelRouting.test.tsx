@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSettings, AgentSettingsUpdate, ConnectionProfile } from "./api";
 import { activateLocale } from "./localization";
 import { ModelRoutingSettings, modelExecutionLabel } from "./ModelRoutingSettings";
-import { discussionTask, MODEL_TASKS, removeConnection, resolvedTask, settingsRequestIsCurrent, settingsSavePayload, settingsToForm, taskConnectionReady, supportsExplicitThinking } from "./modelRouting";
+import { discussionTask, MODEL_TASKS, removeConnection, resolvedTask, settingsRequestIsCurrent, settingsSavePayload, settingsToForm, taskConnectionReady, supportsExplicitThinking, thinkingModePatch } from "./modelRouting";
 
 const legacy: AgentSettings = { selected_preset_id: "preset", agent_presets: [], scene_writer: "llm", provider_label: "My provider", llm_base_url: "https://example.test/v1", llm_model: "custom-model", api_key_configured: true, api_key_preview: "masked-only", llm_json_mode: true, permission_level: "read_generate" };
 const profile: ConnectionProfile = { id: "novelist", name: "Novel provider", protocol: "anthropic_messages", base_url: "https://other.test", model: "custom-novel", json_mode: false, api_key_configured: true, api_key_preview: "masked-profile" };
@@ -107,5 +107,40 @@ describe("official DeepSeek thinking preferences", () => {
     const settings: AgentSettings = { ...legacy, llm_thinking_mode: "disabled" }; const html = renderToStaticMarkup(<ModelRoutingSettings apiBase="http://localhost" settings={settings} form={settingsToForm(settings)} onFormChange={() => undefined} apiKeyInput="" onApiKeyChange={() => undefined} clearApiKey={false} onClearApiKeyChange={() => undefined} busy={false} />);
     expect(html).toContain("DeepSeek 思考模式"); expect(html).toContain("请恢复为服务商默认"); expect(html).toMatch(/value="disabled" disabled="" selected=""/);
     expect(settingsToForm(settings).llm_thinking_mode).toBe("disabled");
+  });
+});
+
+describe("explicit official DeepSeek reasoning effort", () => {
+  it("preserves default and named effort while omitting legacy unset settings and provenance", () => {
+    const settings: AgentSettings = { ...legacy, llm_base_url: "https://api.deepseek.com/v1", llm_thinking_mode: "provider_default", llm_reasoning_effort: "low", connection_profiles: [{ ...profile, protocol: "chat_completions", base_url: "https://api.deepseek.com", thinking_mode: "enabled", reasoning_effort: "max" }] };
+    const saved = settingsSavePayload(settingsToForm(settings), "", false);
+    expect(saved.llm_reasoning_effort).toBe("low"); expect(saved.connection_profiles?.[0].reasoning_effort).toBe("max");
+    expect(resolvedTask(settings, "planning")?.reasoning_effort).toBe("low");
+    expect(resolvedTask({ ...settings, task_assignments: { planning: profile.id } }, "planning")?.reasoning_effort).toBe("max");
+    const oldPayload = settingsSavePayload(settingsToForm({ ...legacy, connection_profiles: [profile] }), "", false);
+    expect(oldPayload).not.toHaveProperty("llm_reasoning_effort"); expect(oldPayload.connection_profiles?.[0]).not.toHaveProperty("reasoning_effort");
+    expect(resolvedTask(legacy, "planning")).not.toHaveProperty("reasoning_effort");
+    expect(resolvedTask({ ...legacy, llm_reasoning_effort: null }, "planning")).not.toHaveProperty("reasoning_effort");
+    expect(settingsSavePayload(settingsToForm({ ...legacy, llm_reasoning_effort: null }), "", false).llm_reasoning_effort).toBeNull();
+  });
+  it("explicitly clears effort when thinking is disabled without changing model or credentials", () => {
+    const patch = thinkingModePatch("disabled"); expect(patch).toEqual({ thinking_mode: "disabled", reasoning_effort: null });
+    const changed = { ...profile, reasoning_effort: "high" as const, ...patch };
+    const payload = settingsSavePayload({ ...settingsToForm(legacy), connection_profiles: [changed], llm_thinking_mode: patch.thinking_mode, llm_reasoning_effort: patch.reasoning_effort }, "", false);
+    expect(payload.connection_profiles?.[0].reasoning_effort).toBeNull(); expect(payload.llm_reasoning_effort).toBeNull();
+    expect(payload.connection_profiles?.[0].model).toBe(profile.model); expect(payload.connection_profiles?.[0]).not.toHaveProperty("api_key");
+    expect(thinkingModePatch("enabled")).not.toHaveProperty("reasoning_effort");
+  });
+  it("shows localized effort labels and requires saved effort before model discovery", async () => {
+    const settings: AgentSettings = { ...legacy, llm_base_url: "https://api.deepseek.com/v1", llm_thinking_mode: "provider_default", llm_reasoning_effort: "low" };
+    const props = { apiBase: "http://localhost", settings, form: settingsToForm(settings), onFormChange: () => undefined, apiKeyInput: "", onApiKeyChange: () => undefined, clearApiKey: false, onClearApiKeyChange: () => undefined, busy: false };
+    let html = renderToStaticMarkup(<ModelRoutingSettings {...props} />); expect(html).toContain("推理强度"); expect(html).toMatch(/value="low" selected=""/); expect(modelExecutionLabel(resolvedTask(settings, "planning"))).toContain("推理强度: 低");
+    html = renderToStaticMarkup(<ModelRoutingSettings {...props} form={{ ...props.form, llm_reasoning_effort: "high" }} />); expect(html).toContain("连接有未保存修改");
+    await activateLocale("en-US"); expect(modelExecutionLabel(resolvedTask(settings, "planning"))).toContain("Reasoning effort: Low");
+  });
+  it("keeps invalid explicit effort visible with a safe capability hint until cleared", () => {
+    const settings: AgentSettings = { ...legacy, llm_thinking_mode: "disabled", llm_reasoning_effort: "high" };
+    const html = renderToStaticMarkup(<ModelRoutingSettings apiBase="http://localhost" settings={settings} form={settingsToForm(settings)} onFormChange={() => undefined} apiKeyInput="" onApiKeyChange={() => undefined} clearApiKey={false} onClearApiKeyChange={() => undefined} busy={false} />);
+    expect(html).toContain("请清除强度或调整思考模式"); expect(html).toMatch(/value="high" disabled="" selected=""/);
   });
 });

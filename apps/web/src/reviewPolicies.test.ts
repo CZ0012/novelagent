@@ -156,7 +156,9 @@ describe("dirty and state action policies", () => {
     expect(payloadIncludedDraftId).toBe(manifestDraftId);
     expect(agentIncludedDraftPolicy(draft, true, true).draftId).toBeNull();
     expect(agentIncludedDraftPolicy(null, true, false).status).toBe("blocked_missing");
-    expect(agentIncludedDraftPolicy(draft, false, true).status).toBe("excluded");
+    expect(agentIncludedDraftPolicy(draft, false, true).status).toBe("blocked_dirty");
+    expect(agentIncludedDraftPolicy(null, false, true).status).toBe("blocked_dirty");
+    expect(agentIncludedDraftPolicy(draft, false, false).status).toBe("excluded");
     const scopedDraft = { ...draft, project_id: "project_a", scene_id: "scene_a" };
     expect(agentIncludedDraftPolicy(scopedDraft, true, false, "project_a", "scene_b").status).toBe("blocked_scope");
     expect(agentIncludedDraftPolicy(scopedDraft, true, false, "project_a", "scene_a").status).toBe("ready");

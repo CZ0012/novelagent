@@ -32,11 +32,21 @@ class PlanningRunResume(PlanningRunControl):
     max_calls: int | None = Field(default=None, ge=1, le=128)
     restart_from_step: int | None = Field(default=None, ge=0)
     revision_instruction: str | None = Field(default=None, min_length=1, max_length=12000)
+    recheck_current_step: bool = False
+    preserve_later_outputs: bool = False
+    revision_mode: Literal["targeted", "full"] = "targeted"
 
     @model_validator(mode="after")
     def explicit_restart_instruction(self):
+        if self.recheck_current_step and (self.restart_from_step is not None or self.revision_instruction is not None
+                                         or self.preserve_later_outputs or self.revision_mode != "targeted"):
+            raise ValueError("Recheck cannot be combined with a restart or revision instruction.")
         if self.revision_instruction is not None and (self.restart_from_step is None or not self.revision_instruction.strip()):
             raise ValueError("A nonblank revision instruction requires an explicit restart step.")
+        if self.preserve_later_outputs and self.restart_from_step is None:
+            raise ValueError("Retaining later outputs requires an explicit restart step.")
+        if self.revision_mode == "full" and (self.restart_from_step is None or not self.revision_instruction):
+            raise ValueError("Full revision requires an explicit restart step and instruction.")
         return self
 
 
@@ -57,6 +67,8 @@ class PlanningStep(StrictModel):
     review_id: str | None = None
     repairs: int = 0
     revision_instruction: str | None = None
+    retained_output_ref: PlanningRef | None = None
+    revision_mode: Literal["targeted", "full"] = "targeted"
 
 
 class PlanningCall(StrictModel):

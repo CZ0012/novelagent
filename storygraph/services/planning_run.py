@@ -6,12 +6,13 @@ import os
 from threading import Lock
 from types import SimpleNamespace
 
-from storygraph.core.errors import GraphStoreError
+from storygraph.core.errors import GraphStoreError, ModelOutputError
+from storygraph.services.llm_provider import ProviderError
 from storygraph.core.agent_config import ModelExecution
 from storygraph.core.ids import new_id
 from storygraph.core.time import utc_now
 from storygraph.models.generation_review import GenerationReviewTarget
-from storygraph.models.longform import Blueprint, BlueprintRequest, Expansion, ExpansionRequest, TargetedRevisionOutput
+from storygraph.models.longform import Blueprint, BlueprintRequest, Expansion, ExpansionRequest, TargetedRevisionOutput, LongformPlan
 from storygraph.models.planning_run import BranchPlan, BookBundle, PlanningCall, PlanningRef, PlanningRun, PlanningStep
 from storygraph.models.proposal import ProposalArtifact, ProposalProvenance, ProposalRef
 from storygraph.models.project import localized
@@ -21,7 +22,8 @@ from storygraph.services.longform_planning import (
     _validate_clue_completion, parse_longform, scene_plan_id, split_budget, validate_blueprint, validate_expansion,
 )
 from storygraph.services.project_language import resolve_project_output_language, validate_generated_output_language
-from storygraph.services.semantic_review import SemanticReviewService, review_is_current
+from storygraph.services.semantic_review import SemanticReviewService, review_is_current, blocking_issues
+from storygraph.services.expansion_output import expansion_volume_progress, recent_planned_scene_outcomes, prior_planned_scene_outcome_ledger
 
 
 @dataclass
@@ -35,6 +37,7 @@ class PlanningExecution:
 
 _ACTIVE_RUNS = set()
 _ACTIVE_LOCK = Lock()
+PLANNING_REVIEW_MAX_CHARS = 200000
 
 
 def _pid_alive(pid):
@@ -103,7 +106,7 @@ def book_projection(proposals, run, *, current=True):
         "blueprint": branches[0].blueprint.model_dump(),
         "volumes": [{"volume_index": b.expansion.volume_index, "chapters": [{
             "index": c.index, "title": c.title, "summary": c.summary,
-            "scenes": [{key: getattr(s, key) for key in ("id", "summary", "outcome", "pov_character_id", "location_id", "causal_dependencies", "foreshadowing_seed_ids", "foreshadowing_payoff_ids")}
+            "scenes": [{key: getattr(s, key) for key in ("id", "summary", "outcome", "timeline_position", "pov_character_id", "location_id", "required_characters", "causal_dependencies", "foreshadowing_seed_ids", "foreshadowing_payoff_ids")}
                        for s in c.scenes]} for c in b.expansion.chapters]} for b in branches[1:]]}
 
 
@@ -125,6 +128,72 @@ class PlanningRunService:
     def list(self, project_id):
         _project(self.graph, project_id)
         return self.runs.list(project_id)
+
+    def copy_blueprint(self, project_id, run_id, request):
+        """Copy an exact reviewed branch world for a separately configured run.
+
+        No provider is constructed, no frozen profile is rebound and no baseline
+        facts are inferred. The copied normal Proposal needs its own future
+        review/acceptance; original execution metadata describes its source.
+        """
+        graph = _local(self.graph)
+        with graph.persistence_guard(), self.runs._lock:
+            connection = self.runs._connection
+            try:
+                # Serialize the validation and insertion across separate SQLite
+                # connections too, without changing the old run or its version.
+                connection.execute("BEGIN IMMEDIATE")
+                run = self.get(project_id, run_id)
+                _project(graph, project_id)
+                if run.version != request.expected_version:
+                    raise _error("planning_run_stale")
+                if run.status not in {"paused", "awaiting_review"} or run.pending_call is not None or run.pause_reason == "uncertain_call":
+                    raise _error("planning_copy_invalid")
+                if (not run.steps or run.steps[0].index != 0 or run.steps[0].phase != "blueprint"
+                        or run.steps[0].status != "passed" or run.steps[0].proposal_ref is None or run.steps[0].review_id is None):
+                    raise _error("planning_copy_invalid")
+                step = run.steps[0]
+                source = load_ref(self.proposals, step.proposal_ref)
+                branch = branch_from_ref(self.proposals, step.proposal_ref)
+                if (source.status == "rejected" or source.derived_refs or branch.phase != "blueprint"
+                        or branch.blueprint is None or branch.expansion is not None or branch.run_id != run.id
+                        or branch.project_id != project_id or branch.output_language != run.output_language
+                        or branch.canon_fingerprint != run.canon_fingerprint or branch.step_index != 0
+                        or branch.blueprint_ref is not None or branch.previous_refs
+                        or {(ref.kind, ref.ref) for ref in source.target_refs} != {("project", project_id)}):
+                    raise _error("planning_copy_invalid")
+                if (resolve_project_output_language(graph, project_id) != run.output_language
+                        or self.snapshot_fn(graph, project_id).fingerprint != run.canon_fingerprint):
+                    raise _error("planning_copy_stale")
+                self._validate(run, step, branch.blueprint)
+                checked = self.review(project_id, run.id, step.review_id)
+                if checked["report"]["status"] != "pass" or not checked["current"]:
+                    raise _error("planning_copy_stale")
+                report = self.runs.report(run.id, step.review_id)
+                if blocking_issues(report.issues):
+                    raise _error("planning_copy_invalid")
+                plan = LongformPlan(schema="longform_plan_v1", phase="blueprint", project_id=project_id,
+                    output_language=run.output_language, graph_snapshot=run.canon_fingerprint,
+                    request=self._configuration(run), blueprint=branch.blueprint)
+                now = utc_now()
+                proposal = ProposalArtifact(id=new_id("proposal"), project_id=project_id,
+                    content_language=run.output_language, artifact_type="outline_draft", status="agent_revised",
+                    title=localized(run.output_language, zh="整书蓝图副本", en="Copied whole-book blueprint"),
+                    body=json.dumps(plan.model_dump(by_alias=True), ensure_ascii=False, indent=2),
+                    body_format="structured_json", target_refs=[ProposalRef(kind="project", ref=project_id)],
+                    source_refs=[ProposalRef(kind="planning_run", ref=run.id),
+                        ProposalRef(kind="proposal_artifact", ref=source.id, source_span={
+                            "version": source.version, "sha256": step.proposal_ref.body_sha256})],
+                    provenance=ProposalProvenance(created_by="agent", created_via="workflow",
+                        model_ref=source.provenance.model_ref, model_execution=source.provenance.model_execution,
+                        note=localized(run.output_language,
+                            zh="从精确且已通过审阅的规划分支复制；未调用模型，未改变原任务、正文或正典，模型来源保留原生成记录。",
+                            en="Copied an exact reviewed planning branch without a model call or changes to the source run, prose or canon; model metadata preserves the original generation.")),
+                    version=1, created_at=now, updated_at=now)
+                return self.proposals.create(proposal)
+            except Exception:
+                connection.rollback()
+                raise
 
     def create(self, project_id, request):
         graph = _local(self.graph)
@@ -188,8 +257,26 @@ class PlanningRunService:
             if request.max_calls is not None and request.max_calls < run.calls_reserved:
                 raise _error()
             steps = [step.model_copy(deep=True) for step in run.steps]
+            if request.recheck_current_step:
+                selected = next((step for step in steps if step.status != "passed"), None)
+                if selected is None or selected.proposal_ref is None:
+                    raise _error("planning_recheck_invalid")
+                try:
+                    branch = branch_from_ref(self.proposals, selected.proposal_ref)
+                    if (branch.run_id != run.id or branch.project_id != run.project_id or branch.output_language != run.output_language
+                            or branch.step_index != selected.index or branch.phase != selected.phase
+                            or branch.canon_fingerprint != run.canon_fingerprint
+                            or branch.previous_refs != [step.proposal_ref for step in run.steps[:selected.index]]
+                            or selected.index and branch.blueprint_ref != run.steps[0].proposal_ref
+                            or selected.phase == "blueprint" and (branch.blueprint is None or branch.expansion is not None)
+                            or selected.phase == "expansion" and (branch.expansion is None or branch.blueprint is not None)):
+                        raise _error("planning_recheck_invalid")
+                    self._validate(run, selected, branch.blueprint or branch.expansion)
+                except (ValueError, TypeError, AttributeError, KeyError) as exc:
+                    raise _error("planning_recheck_invalid") from exc
+                selected.status, selected.review_id = "generated", None
             restart_history = list(run.restart_history)
-            final_review_id = None if run.pause_reason == "review_failed" and run.stage == "book_review" else run.final_review_id
+            final_review_id = None if run.pause_reason in {"review_failed", "uncertain_call"} and run.stage == "book_review" else run.final_review_id
             bundle_id = run.bundle_proposal_id
             stage = run.stage
             if request.restart_from_step is not None:
@@ -201,24 +288,39 @@ class PlanningRunService:
                     if bundle.status == "accepted" or bundle.derived_refs:
                         raise _error("planning_bundle_already_reviewed")
                 selected = steps[index]
-                restart_history.append({"step_index": index, "source_ref": selected.proposal_ref.model_dump() if selected.proposal_ref else None,
-                    "prior_repairs": selected.repairs, "instruction_sha256": content_hash(request.revision_instruction or ""), "created_at": utc_now()})
-                if request.revision_instruction and selected.proposal_ref:
-                    load_ref(self.proposals, selected.proposal_ref)
+                source_ref = selected.proposal_ref or selected.retained_output_ref
+                retained = {}
+                if request.preserve_later_outputs:
+                    for later in steps[index+1:]:
+                        ref = later.proposal_ref or later.retained_output_ref
+                        if ref is not None:
+                            self._retained_source(run, later, ref)
+                            retained[later.index] = ref
+                restart_history.append({"step_index": index, "source_ref": source_ref.model_dump() if source_ref else None,
+                    "prior_repairs": selected.repairs, "instruction_sha256": content_hash(request.revision_instruction or ""),
+                    "preserve_later_outputs": request.preserve_later_outputs, "revision_mode": request.revision_mode,
+                    "retained_refs": {str(key): ref.model_dump() for key, ref in retained.items()}, "created_at": utc_now()})
+                if request.revision_instruction and source_ref:
+                    self._retained_source(run, selected, source_ref)
                     steps[index] = selected.model_copy(update={"status": "needs_revision", "repairs": 0,
-                        "revision_instruction": request.revision_instruction})
+                        "proposal_ref": source_ref, "review_id": None,
+                        "revision_instruction": request.revision_instruction, "revision_mode": request.revision_mode})
                 else:
+                    if request.revision_mode == "full":
+                        raise _error("planning_revision_source_missing")
                     steps[index] = selected.model_copy(update={"status": "pending", "proposal_ref": None, "review_id": None,
-                        "repairs": 0, "revision_instruction": request.revision_instruction})
+                        "retained_output_ref": None, "repairs": 0, "revision_instruction": request.revision_instruction,
+                        "revision_mode": request.revision_mode})
                 for later in range(index+1, len(steps)):
                     steps[later] = steps[later].model_copy(update={"status": "pending", "proposal_ref": None,
-                        "review_id": None, "repairs": 0, "revision_instruction": None})
+                        "retained_output_ref": retained.get(later), "review_id": None, "repairs": 0,
+                        "revision_instruction": None, "revision_mode": "targeted"})
                 final_review_id, bundle_id, stage = None, None, selected.phase
             if run.pause_reason == "review_failed" and request.restart_from_step is None:
                 for step in steps:
                     if step.status == "needs_revision" and step.review_id:
                         report = self.runs.report(run.id, step.review_id)
-                        if report.status == "inconclusive" or not report.issues:
+                        if report.status == "inconclusive" or not blocking_issues(report.issues):
                             step.status = "generated"
             return self.runs.update(run.model_copy(update={"status": "queued", "stop_requested": False,
                 "pause_reason": None, "pending_call": None,
@@ -251,6 +353,67 @@ class PlanningRunService:
                     return self.runs.get(run_id)
                 raise
 
+    def _retained_source(self, run, step, ref):
+        source = load_ref(self.proposals, ref)
+        branch = branch_from_ref(self.proposals, ref)
+        if (source.status not in {"drafting", "agent_revised", "author_revised", "ready_for_review"}
+                or source.derived_refs or branch.run_id != run.id or branch.project_id != run.project_id
+                or branch.output_language != run.output_language or branch.canon_fingerprint != run.canon_fingerprint
+                or branch.step_index != step.index or branch.phase != step.phase
+                or len(branch.previous_refs) != step.index
+                or {(r.kind, r.ref) for r in source.target_refs} != {("project", run.project_id)}
+                or (step.phase == "blueprint" and (branch.blueprint is None or branch.expansion is not None))
+                or (step.phase == "expansion" and (branch.expansion is None or branch.blueprint is not None
+                    or branch.blueprint_ref != branch.previous_refs[0]))):
+            raise _error("planning_retained_source_invalid")
+        for index, previous_ref in enumerate(branch.previous_refs):
+            previous = branch_from_ref(self.proposals, previous_ref, current=False)
+            if (previous.run_id != run.id or previous.project_id != run.project_id
+                    or previous.output_language != run.output_language or previous.canon_fingerprint != run.canon_fingerprint
+                    or previous.step_index != index or previous.phase != run.steps[index].phase):
+                raise _error("planning_retained_source_invalid")
+        return source, branch
+
+    def _copy_retained_output(self, run, step):
+        """Atomic, zero-call branch wrapper copy; never inherits a review."""
+        graph = _local(self.graph)
+        with graph.persistence_guard(), self.runs._lock:
+            connection = self.runs._connection
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                current = self.runs.get(run.id)
+                if (current.status != "running" or current.worker_token != self._worker_tokens.get(run.id)
+                        or current.pending_call is not None or current.version != run.version):
+                    raise _error("planning_run_not_owner")
+                if current.stop_requested:
+                    connection.rollback()
+                    return self._pause(run.id, "stopped")
+                if (self.snapshot_fn(graph, run.project_id).fingerprint != run.canon_fingerprint
+                        or resolve_project_output_language(graph, run.project_id) != run.output_language):
+                    raise _error("planning_source_changed")
+                saved_step = current.steps[step.index]
+                if saved_step.status != "pending" or saved_step.proposal_ref is not None or saved_step.retained_output_ref != step.retained_output_ref:
+                    raise _error("planning_source_changed")
+                source, branch = self._retained_source(current, saved_step, saved_step.retained_output_ref)
+                authored = (branch.blueprint or branch.expansion).model_copy(deep=True)
+                origin = PlanningExecution(None, source.provenance.model_ref, model_execution=source.provenance.model_execution)
+                try:
+                    proposal = self._new_proposal(current, saved_step, authored, origin)
+                except (ValueError, GraphStoreError, ModelOutputError) as exc:
+                    raise _error("planning_retained_incompatible") from exc
+                proposal.provenance = source.provenance.model_copy(update={"created_via": "workflow", "note": localized(
+                    run.output_language, zh="精确复制保留的创作字段，未进行新模型调用；原模型来源保留，必须重新审阅。",
+                    en="Exact retained authored fields copied without a new model call; original model provenance retained; fresh review required.")})
+                proposal.source_refs.append(ProposalRef(kind="proposal_artifact", ref=source.id,
+                    source_span={"version": source.version, "sha256": saved_step.retained_output_ref.body_sha256}))
+                self._retained_source(current, saved_step, saved_step.retained_output_ref)
+                steps = [s.model_copy(deep=True) for s in current.steps]
+                steps[step.index] = saved_step.model_copy(update={"status": "generated", "proposal_ref": proposal_ref(proposal), "review_id": None})
+                return self.runs.update(current.model_copy(update={"steps": steps}), current.version, proposal=proposal)
+            except Exception:
+                connection.rollback()
+                raise
+
     def _check(self, run):
         if run.status != "running" or run.worker_token != self._worker_tokens.get(run.id):
             return run
@@ -262,6 +425,8 @@ class PlanningRunService:
         for step in run.steps:
             if step.proposal_ref:
                 load_ref(self.proposals, step.proposal_ref)
+            if step.retained_output_ref:
+                self._retained_source(run, step, step.retained_output_ref)
         if run.seed_blueprint_ref:
             load_ref(self.proposals, run.seed_blueprint_ref)
         return None
@@ -325,9 +490,10 @@ class PlanningRunService:
         budgets = split_budget(blueprint.volumes[step.volume_index-1].target_length, config.chapters_per_volume)
         previous = branch_scenes(prior)
         payload.update(request=request.model_dump(), blueprint=blueprint.model_dump(),
+            volume_progress=expansion_volume_progress(config, request),
+            author_brief=config.instruction,
             proposed_planning_context={"exact_refs": [s.proposal_ref.model_dump() for s in run.steps[:step.index]],
-                "recent_scene_outcomes": [{"id": key, "summary": value.properties["summary"], "outcome": value.properties["outcome"]}
-                    for key, value in sorted(previous.items())[-12:]]},
+                "recent_scene_outcomes": recent_planned_scene_outcomes(previous)},
             prior_clue_placements=[{"scene_id": key, "seed_ids": value.properties["foreshadowing_seed_ids"],
                 "payoff_ids": value.properties["foreshadowing_payoff_ids"]} for key, value in sorted(previous.items())
                 if value.properties["foreshadowing_seed_ids"] or value.properties["foreshadowing_payoff_ids"]],
@@ -335,6 +501,8 @@ class PlanningRunService:
                 {"id": scene_plan_id(step.volume_index, c, s), "target_length": budget}
                 for s, budget in enumerate(split_budget(budgets[c-1], config.scenes_per_chapter), 1)]}
                 for c in range(step.chapter_start, step.chapter_start+step.chapter_count)])
+        if previous:
+            payload["proposed_planning_context"]["prior_scene_outcome_ledger"] = prior_planned_scene_outcome_ledger(previous)
         return payload, Expansion
 
     def _expansion_request(self, run, step):
@@ -374,12 +542,19 @@ class PlanningRunService:
             body=json.dumps(branch.model_dump(by_alias=True), ensure_ascii=False, indent=2), body_format="structured_json",
             target_refs=[ProposalRef(kind="project", ref=run.project_id)], source_refs=refs,
             provenance=ProposalProvenance(created_by="agent", created_via="llm", model_ref=execution.model,
-                model_execution=metadata), version=1, created_at=now, updated_at=now)
+                model_execution=metadata, note=(localized(run.output_language,
+                    zh="创作字段由模型生成；固定章节、场景标识和篇幅预算按服务端骨架构造或严格校验。",
+                    en="The model generated creative fields; fixed chapter/scene identifiers and character budgets were constructed or strictly checked against the server skeleton.") if step.phase == "expansion" else None)),
+            version=1, created_at=now, updated_at=now)
 
     def _store_output(self, run, step, proposal):
         with self.runs._lock:
             current = self.runs.get(run.id)
             self._require_call_owner(current, run.pending_call)
+            if step.proposal_ref is not None:
+                if current.steps[step.index].proposal_ref != step.proposal_ref:
+                    raise _error("planning_source_changed")
+                load_ref(self.proposals, step.proposal_ref)
             steps = [s.model_copy(deep=True) for s in current.steps]
             steps[step.index] = step.model_copy(update={"status": "generated", "proposal_ref": proposal_ref(proposal), "review_id": None})
             return self.runs.update(current.model_copy(update={"steps": steps, "pending_call": None}), current.version, proposal=proposal)
@@ -395,12 +570,15 @@ class PlanningRunService:
             target_id, version = "book_review_"+run.id, 1
         else:
             proposal = load_ref(self.proposals, step.proposal_ref)
+            payload = self._payload(run, step)[0]
             text = canonical_json({"current_plan": json.loads(proposal.body),
-                "proposed_planning_context": self._payload(run, step)[0].get("proposed_planning_context", {}),
+                "proposed_planning_context": payload.get("proposed_planning_context", {}),
+                **({"volume_progress": payload["volume_progress"]} if step.phase == "expansion" else {}),
+                **({"author_brief": payload["author_brief"]} if step.phase == "expansion" else {}),
                 "blueprint": self._branches(run, step.index)[0].blueprint.model_dump() if step.index else None,
                 "context_boundary": "Proposed branch plans are not canon; review internal consistency and compatibility with the separate canon evidence."})
             target_id, version = proposal.id, proposal.version
-        if len(text) > 100000:
+        if len(text) > PLANNING_REVIEW_MAX_CHARS:
             raise _error("planning_context_budget")
         return GenerationReviewTarget(project_id=run.project_id, target_type="proposal", target_id=target_id,
             target_version=version, text=text, output_language=run.output_language, purpose="plan")
@@ -420,6 +598,9 @@ class PlanningRunService:
         if step is None and run.final_review_id != review_id:
             raise _error("not_found")
         try:
+            for candidate in run.steps:
+                if candidate.retained_output_ref:
+                    self._retained_source(run, candidate, candidate.retained_output_ref)
             if run.seed_blueprint_ref is not None:
                 load_ref(self.proposals, run.seed_blueprint_ref)
             target = self._review_target(run, step)
@@ -453,6 +634,11 @@ class PlanningRunService:
                     return self._finish_book(run)
                 run = self.runs.update(run.model_copy(update={"stage": step.phase}), run.version)
                 if step.status == "pending":
+                    if step.retained_output_ref is not None:
+                        copied = self._copy_retained_output(run, step)
+                        if copied.status == "paused":
+                            return copied
+                        continue
                     payload, output_type = self._payload(run, step)
                     reserved, execution = self._reserve(run, "planning", "generate", step.index)
                     if execution is None:
@@ -466,14 +652,21 @@ class PlanningRunService:
                     if execution is None:
                         return reserved
                     report = SemanticReviewService(execution.provider, execution.model,
-                        model_execution=execution.model_execution).review(target=target, canon=canon, **style)
+                        model_execution=execution.model_execution, max_target_chars=PLANNING_REVIEW_MAX_CHARS).review(target=target, canon=canon, **style)
+                    uncertain = "semantic_review_provider_outcome_unknown" in report.coverage.limitations
                     with self.runs._lock:
                         current = self.runs.get(run_id)
                         self._require_call_owner(current, reserved.pending_call)
                         steps = [s.model_copy(deep=True) for s in current.steps]
-                        steps[step.index] = step.model_copy(update={"status": "passed" if report.status == "pass" else "needs_revision", "review_id": report.id})
-                        run = self.runs.update(current.model_copy(update={"steps": steps, "pending_call": None}), current.version, report=report)
-                    if report.status not in {"pass", "needs_revision", "blocked"} or not report.issues and report.status != "pass":
+                        steps[step.index] = step.model_copy(update={"status": "generated" if uncertain else (
+                            "passed" if report.status == "pass" else "needs_revision"), "review_id": report.id})
+                        updates = {"steps": steps, "pending_call": current.pending_call if uncertain else None}
+                        if uncertain:
+                            updates.update(status="paused", pause_reason="uncertain_call")
+                        run = self.runs.update(current.model_copy(update=updates), current.version, report=report)
+                    if uncertain:
+                        return run
+                    if report.status not in {"pass", "needs_revision", "blocked"} or not blocking_issues(report.issues) and report.status != "pass":
                         return self._pause(run_id, "review_failed")
                 else:
                     if step.repairs >= run.request.max_repairs_per_step:
@@ -483,16 +676,21 @@ class PlanningRunService:
                     authored = branch.blueprint or branch.expansion
                     report = self.runs.report(run.id, step.review_id) if step.review_id else None
                     payload, output_type = self._payload(run, step)
-                    values = _targeted_paths(authored.model_dump(), step.phase)
-                    payload.update(revision_mode="targeted", source_plan=authored.model_dump(), source_schema=output_type.model_json_schema(),
-                        current_values=values, allowed_paths=sorted(values), revision_instruction=canonical_json({
+                    payload.update(revision_mode=step.revision_mode, source_plan=authored.model_dump(), source_schema=output_type.model_json_schema(),
+                        revision_instruction=canonical_json({
                             "author_instruction": step.revision_instruction,
-                            "issues": [i.model_dump() for i in report.issues] if report else []}))
+                            "issues": [i.model_dump() for i in blocking_issues(report.issues)] if report else []}))
+                    if step.revision_mode == "targeted":
+                        values = _targeted_paths(authored.model_dump(), step.phase)
+                        payload.update(current_values=values, allowed_paths=sorted(values))
                     reserved, execution = self._reserve(run, "planning", "repair", step.index)
                     if execution is None:
                         return reserved
-                    changes = _call(execution.provider, execution.model, run.output_language, TargetedRevisionOutput, payload, execution.agent_preset)
-                    revised = _apply_targeted_changes(authored, step.phase, changes)
+                    if step.revision_mode == "full":
+                        revised = _call(execution.provider, execution.model, run.output_language, output_type, payload, execution.agent_preset)
+                    else:
+                        changes = _call(execution.provider, execution.model, run.output_language, TargetedRevisionOutput, payload, execution.agent_preset)
+                        revised = _apply_targeted_changes(authored, step.phase, changes)
                     updated_step = step.model_copy(update={"repairs": step.repairs+1})
                     self._store_output(reserved, updated_step, self._new_proposal(reserved, step, revised, execution, repair_source=source))
         except Exception as exc:
@@ -501,10 +699,14 @@ class PlanningRunService:
             if category in {"planning_run_stale", "planning_run_not_owner"}:
                 return run
             reason = {"planning_source_changed": "source_changed", "planning_connection_changed": "connection_changed",
+                      "planning_retained_source_invalid": "retained_source_invalid", "planning_retained_incompatible": "retained_incompatible",
                       "planning_context_budget": "context_budget"}.get(category)
             if reason:
                 return self._pause(run_id, reason)
-            if isinstance(exc, (GraphStoreError, ValueError)):
+            if isinstance(exc, ProviderError):
+                return self._pause(run_id, "execution_failed" if exc.outcome_known else "uncertain_call",
+                                   uncertain=not exc.outcome_known)
+            if isinstance(exc, (GraphStoreError, ValueError, ModelOutputError)):
                 return self._pause(run_id, "schema_invalid")
             return self._pause(run_id, "uncertain_call" if run.pending_call else "execution_failed", uncertain=bool(run.pending_call))
         finally:
@@ -521,11 +723,17 @@ class PlanningRunService:
             if execution is None:
                 return reserved
             report = SemanticReviewService(execution.provider, execution.model,
-                model_execution=execution.model_execution).review(target=target, canon=canon, **style)
+                model_execution=execution.model_execution, max_target_chars=PLANNING_REVIEW_MAX_CHARS).review(target=target, canon=canon, **style)
+            uncertain = "semantic_review_provider_outcome_unknown" in report.coverage.limitations
             with self.runs._lock:
                 current = self.runs.get(run.id)
                 self._require_call_owner(current, reserved.pending_call)
-                run = self.runs.update(current.model_copy(update={"final_review_id": report.id, "pending_call": None}), current.version, report=report)
+                updates = {"final_review_id": report.id, "pending_call": current.pending_call if uncertain else None}
+                if uncertain:
+                    updates.update(status="paused", pause_reason="uncertain_call")
+                run = self.runs.update(current.model_copy(update=updates), current.version, report=report)
+            if uncertain:
+                return run
             if report.status != "pass":
                 return self._pause(run.id, "review_failed")
         elif self.runs.report(run.id, run.final_review_id).status != "pass":

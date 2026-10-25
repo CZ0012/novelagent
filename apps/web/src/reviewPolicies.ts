@@ -155,9 +155,9 @@ export function agentIncludedDraftPolicy(
   expectedProjectId?: string,
   expectedSceneId?: string
 ): AgentIncludedDraftPolicy {
+  if (dirty) return { status: "blocked_dirty", draftId: null, version: null };
   if (!include) return { status: "excluded", draftId: null, version: null };
   if (!draft) return { status: "blocked_missing", draftId: null, version: null };
-  if (dirty) return { status: "blocked_dirty", draftId: null, version: null };
   if (
     (expectedProjectId && draft.project_id !== expectedProjectId) ||
     (expectedSceneId && draft.scene_id !== expectedSceneId)

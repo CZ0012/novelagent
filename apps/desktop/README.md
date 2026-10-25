@@ -1,5 +1,26 @@
 # StoryGraph Desktop Shell
 
+桌面复用后端跨批规划上下文：最近 12 场景之外保留全部先前规划的精确时间、
+结果与人物/地点引用，不自动重置故事日数或把报告时间当成案发时间；不生成
+状态摘要或把规划提升为事实。整书审阅也读取场景时间/必需人物。规划任务目标
+上限为 200000 字符，普通场景/通用审阅仍为 100000；前序账本另有固定大小与记录
+上限，超限暂停而非静默丢弃早期证据。旧后续报告需按新上下文复核；源码后端
+重建后才进入桌面包，GitHub 仍只承载软件发布与更新。
+
+桌面与 CLI/API 共用项目感知上下文预算：省略/null 的已批准长篇/受保护项目采用
+AUTO 8000–16000 tokens，正常从 8000 开始，仅在必要上下文超出时按 2000 步长加
+少量余量，最多 16000；基于同一次来源快照，不删除 P0。旧项目固定 4000。
+显式 8000/4000 不会被提高，AUTO 超出 16000 也继续阻断，模型调用前显示实际目标。
+预算变化不删去正典、场景规划、知识和文风；仍超限则在模型请求前阻止完整起草。
+CLI build-context --target-tokens 与上下文 API 可明确覆盖，预算估算不等于模型
+整个请求上限。源码改动需重新构建捆绑后端后才进入既有桌面安装包。
+
+源码构建桌面使用与 CLI/API 相同的后端模型超时配置：HTTP socket 默认等待
+300 秒，适配数分钟的思考与审查响应；启动桌面前设置的
+`STORYGRAPH_LLM_TIMEOUT_SECONDS` 环境变量仍明确覆盖它（包括 60 秒）。
+该设置不增加自动重试或更换模型，也不是整书任务的总时限。未知超时结果
+继续走明确的付费调用恢复流程；既有安装包需更新其捆绑后端后才采用新默认值。
+
 This directory contains the Tauri v2 desktop package for the StoryGraph Workbench.
 
 The desktop hosts the same bilingual author workflow and preset APIs as the browser. It does not add a separate canon-writing path. Web catalogs load as separate chunks; native labels and errors use separate JSON catalogs embedded for offline builds. The browser's saved local API address preference is distinct from the desktop host's native workspace/backend settings.
@@ -263,4 +284,18 @@ A source rebuild includes the project-level long-form planner, approved project 
 
 This development checkout is not an installed update or a published signed release. Rebuild locally using the existing PowerShell instructions; distribution still needs the separately verified NSIS setup executable, setup.exe.sig and latest.json channel. Tauri updater signing and Windows Authenticode remain distinct. No author workspace or API credentials belong in build/release assets.
 
+Existing local package files do not incorporate later source fixes automatically. Before distributing another candidate, rebuild and audit its backend code, prompt/localization resources and Web assets against the same frozen checkout.
+
 SG-030/031 adds reviewed scene-time state/corrections and bounded background whole-book planning to the same backend. Author acceptance and explicit bundle application remain required; closing the backend stops new planning calls after any in-flight call is checkpointed. Recovery never silently retries an uncertain paid request. No book data, validation corpus, model responses or credentials are bundled into the software.
+
+## Explicit reasoning and writing context (source development)
+
+The hosted Settings panel uses the same backend default/named connections and frozen execution records as API/Web. Official HTTPS DeepSeek Chat Completions connections may select low/high/max effort; unset effort preserves provider defaults, and disabled thinking cannot be combined with explicit effort. An unset effort is omitted from historical execution serialization. The source contracts are [agent runtime](../../contracts/agent_runtime_v1.md) and [planning runs](../../contracts/planning_run_v1.md).
+
+Explicit low/high or enabled thinking normally adds 32,768 tokens to the service's reasoning-plus-output ceiling, capped at 65,536 total. Planning currently requests at most 52,768; semantic review explicitly opts into a 65,536 total ceiling after observed length exhaustion. Default/disabled calls without explicit effort preserve previous ceilings. The final ceiling is visible before the transport call; it is not a hidden expansion, fee quote, output guarantee or retry authorization. Structured plan review sends the complete parsed plan once while retaining the original locally for its hash and exact citation checks.
+
+Unknown transport outcomes keep the saved diagnostic, original pending call and call reservation, requiring the existing explicit uncertain-call retry choice. A complete invalid/truncated response is a known failure and may be explicitly rechecked; it does not remain fictitiously in flight or pass validation. Neither path retries automatically, and both retain their reserved call counts.
+
+The same writing Context Pack uses scene-entry knowledge and state: current-scene revelations are not opening knowledge. Optional approved `scene_plan` carries the ending, emotional turn, length budget, direct causal preconditions and seed/payoff actions as planned intentions, never realized facts. Seed actions withhold the payoff. These semantic beats remain protected under context-budget pressure; missing or foreign references block full generation. See [context-pack contract](../../contracts/context_pack_v1.md).
+
+The npm backend/installer scripts invoke **Windows PowerShell** (`powershell.exe`); PowerShell 7 is `pwsh`. Source-built candidates, published updater channels and Windows Authenticode signing remain distinct. Actual live-model coverage is recorded in [0.2.0 acceptance](../../docs/acceptance-0.2.0.md); a 100-chapter plan grid or synthetic corpus is not completed real-model whole-book acceptance. These source changes do not update an installed author application or synchronize its workspace.

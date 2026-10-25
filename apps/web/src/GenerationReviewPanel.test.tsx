@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ProposalArtifact } from "./api";
 import { activateLocale } from "./localization";
-import { GenerationReviewPanel, reviewAllowsAdoption, reviewAllowsPlanApplication, reviewMatchesTarget, proposalSemanticReviewBlocked, type GenerationReviewResult, type GenerationReviewTarget } from "./GenerationReviewPanel";
+import { GenerationReviewPanel, ReviewFindingBadge, reviewAllowsAdoption, reviewAllowsPlanApplication, reviewMatchesTarget, proposalSemanticReviewBlocked, type GenerationReviewResult, type GenerationReviewTarget } from "./GenerationReviewPanel";
 const target: GenerationReviewTarget = { target_type: "proposal", target_id: "proposal-a", expected_version: 4 };
 function result(): GenerationReviewResult {
   return { current: true, report: { contract_version: "generation_review_v1", id: "review-a", project_id: "book", target_type: "proposal", target_id: "proposal-a", target_version: 4, output_language: "zh-CN", target_text_sha256: "text", canon_fingerprint: "canon", canon_evidence_fingerprint: "evidence", style_fingerprint: "style", status: "pass", summary: "已检查所选范围", issues: [], dimensions_checked: ["world_rule"], coverage: { method: "semantic_model", canon_complete: true, target_complete: true, scope: "scene", omitted_unrelated_facts: 3, missing_context: [], limitations: ["仅检查当前场景"] }, created_at: "2026-10-25" } };
@@ -42,6 +42,15 @@ describe("exact semantic review adoption boundary", () => {
     expect(reviewAllowsPlanApplication(item, "book", { ...target, expected_version: 5 })).toBe(false);
     item.current = false; expect(reviewAllowsPlanApplication(item, "book", target)).toBe(false);
     item.current = true; item.report.status = "needs_revision"; expect(reviewAllowsPlanApplication(item, "book", target)).toBe(false);
+  });
+  it("allows a current complete passing report with nonblocking advisory issues", () => {
+    const item = result(); item.report.issues = [{ id: "advice", finding: "advice", dimension: "style_constraint", severity: "medium", description: "可进一步丰富意象", suggestion: "保留作者判断", evidence: [{ kind: "target", ref: target.target_id, quote: "原文证据" }] }];
+    expect(reviewAllowsAdoption(item, "book", target)).toBe(true);
+    item.report.status = "blocked"; item.report.issues[0].finding = "contradiction"; item.report.issues[0].severity = "low";
+    expect(reviewAllowsAdoption(item, "book", target)).toBe(false);
+    expect(renderToStaticMarkup(<ReviewFindingBadge finding="advice" />)).toContain("建议");
+    expect(renderToStaticMarkup(<ReviewFindingBadge finding="required_gap" />)).toContain("必要信息缺失");
+    expect(renderToStaticMarkup(<ReviewFindingBadge />)).toContain("矛盾");
   });
   it("renders explicit paid review and keeps missing or dirty target actions unavailable", () => {
     const props = { apiBase: "http://localhost:8000", projectId: "book", target, dirty: true, busy: false, canGenerate: true, modelReady: true, modelLabel: "continuity-model", execute: async () => undefined, onReport: () => undefined };

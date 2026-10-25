@@ -5,10 +5,13 @@ import { uiText, formatDimension } from "./localization";
 import { modelExecutionLabel } from "./ModelRoutingSettings";
 
 export type GenerationReviewTarget = { target_type: "draft" | "proposal"; target_id: string; expected_version: number; scene_id?: string };
+export type ReviewFinding = "contradiction" | "required_gap" | "advice";
+export function reviewFindingLabel(finding: ReviewFinding = "contradiction"): string { return uiText.semanticReview.findings[finding]; }
+export function ReviewFindingBadge({ finding = "contradiction" }: { finding?: ReviewFinding }) { return <small className="unsaved-badge" data-finding={finding}>{reviewFindingLabel(finding)}</small>; }
 export type GenerationReviewReport = {
   contract_version: "generation_review_v1"; id: string; project_id: string; target_type: "draft" | "proposal"; target_id: string; target_version: number; purpose?: "scene" | "plan"; scene_id?: string | null; canon_evidence_fingerprint: string; output_language: string; target_text_sha256: string; canon_fingerprint: string; style_fingerprint: string;
   status: "pass" | "needs_revision" | "blocked" | "inconclusive"; summary: string;
-  issues: Array<{ id: string; dimension: string; severity: "low" | "medium" | "high" | "critical"; description: string; suggestion: string; evidence: Array<{ kind: "target" | "canon" | "style"; ref: string; quote: string }> }>;
+  issues: Array<{ id: string; finding?: ReviewFinding; dimension: string; severity: "low" | "medium" | "high" | "critical"; description: string; suggestion: string; evidence: Array<{ kind: "target" | "canon" | "style"; ref: string; quote: string }> }>;
   dimensions_checked: string[]; coverage: { method: "semantic_model" | "deterministic_only"; canon_complete: boolean; target_complete: boolean; scope: "scene" | "project" | "plan"; omitted_unrelated_facts: number; missing_context: string[]; limitations: string[] }; model_execution?: ModelExecution | null; created_at: string;
 };
 export type GenerationReviewResult = { report: GenerationReviewReport; current: boolean };
@@ -88,7 +91,7 @@ export function GenerationReviewPanel({ apiBase, projectId, target, dirty, busy,
       <h4>{t[report.status]}</h4><strong>{current ? t.current : t.stale}</strong><p>{report.summary}</p><small>{t.version} {report.target_version} · {report.created_at}</small>
       <p>{t.dimensions}: {report.dimensions_checked.map((d) => formatDimension(d)).join(' · ')}</p>
       <details open><summary>{t.coverage}</summary><p>{report.coverage.method === "semantic_model" ? t.semantic : t.deterministic}</p><p>{report.coverage.scope === "plan" ? t.planScope : report.coverage.scope === "scene" ? t.sceneScope : t.projectScope} · {t.omitted}: {report.coverage.omitted_unrelated_facts}</p><p>{t.canonComplete}: {report.coverage.canon_complete ? t.yes : t.no} · {t.targetComplete}: {report.coverage.target_complete ? t.yes : t.no}</p>{[...report.coverage.missing_context, ...report.coverage.limitations].length > 0 && <><h5>{t.limitations}</h5><ul>{[...report.coverage.missing_context, ...report.coverage.limitations].map((line, i) => <li key={i}>{line}</li>)}</ul></>}</details>
-      {report.issues.map((issue) => <section className="semantic-issue" key={issue.id}><h5>{formatDimension(issue.dimension)} · {t[issue.severity]}</h5><p>{issue.description}</p><strong>{t.suggestion}</strong><p>{issue.suggestion}</p><details><summary>{t.evidence}</summary>{issue.evidence.map((evidence, i) => <blockquote key={i}><small>{t[evidence.kind]} · {evidence.ref}</small><p>{evidence.quote}</p></blockquote>)}</details></section>)}
+      {report.issues.map((issue) => <section className="semantic-issue" key={issue.id}><h5><ReviewFindingBadge finding={issue.finding} /> {formatDimension(issue.dimension)} · {t[issue.severity]}</h5><p>{issue.description}</p><strong>{t.suggestion}</strong><p>{issue.suggestion}</p><details><summary>{t.evidence}</summary>{issue.evidence.map((evidence, i) => <blockquote key={i}><small>{t[evidence.kind]} · {evidence.ref}</small><p>{evidence.quote}</p></blockquote>)}</details></section>)}
       {report.model_execution && <small>{modelExecutionLabel(report.model_execution)}</small>}
     </article>; })}
   </section>;

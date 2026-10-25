@@ -293,6 +293,11 @@ class DemoSeedRequest(BaseModel):
         return {"zh_CN": "zh-CN", "en_US": "en-US"}.get(value, value)
 
 
+class ContextRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target_tokens: int | None = Field(default=None, ge=1, strict=True)
+
+
 class DraftRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str | None = None
@@ -2374,9 +2379,10 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             raise _contract_http_exception(exc) from exc
 
     @app.post("/projects/{project_id}/scenes/{scene_id}/context-pack")
-    def build_context(project_id: str, scene_id: str) -> dict:
+    def build_context(project_id: str, scene_id: str, request: ContextRequest | None = None) -> dict:
         try:
-            return context_builder.build(project_id=project_id, scene_id=scene_id).model_dump()
+            return context_builder.build(project_id=project_id, scene_id=scene_id,
+                target_tokens=request.target_tokens if request else None).model_dump()
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 

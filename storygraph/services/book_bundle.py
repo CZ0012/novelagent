@@ -38,6 +38,8 @@ def bundle_specs(graph, proposals, run, *, current=True):
             raise _invalid()
     seed_plan = LongformPlan(schema="longform_plan_v1", phase="blueprint", project_id=run.project_id,
         output_language=run.output_language, graph_snapshot=run.canon_fingerprint, request=config, blueprint=blueprint)
+    # The same reviewed world delta includes explicit typed baselines and
+    # initial KNOWS_SECRET edges; never infer them anew from descriptive arcs.
     nodes, relations, project_updates = _specs(graph, None, SimpleNamespace(id=blueprint_id), seed_plan)
     def relation(kind, source, target, props=None):
         ref = "rel_lp_" + hashlib.sha256(f"{source}:{kind}:{target}".encode()).hexdigest()[:32]

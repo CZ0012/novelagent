@@ -11,6 +11,11 @@ export type TemporalStateValue = { field: TemporalStateField; status: "resolved"
 export type TemporalStateProjection = { contract_version: "temporal_state_v1"; project_id: string; subject_id: string; scene_id: string; at_scene_start: boolean; states: TemporalStateValue[]; complete: boolean };
 export type TemporalStatePatch = { contract_version: "temporal_state_v1"; field: TemporalStateField; value: string | null; valid_from_scene: string; expected_slot_fingerprint: string; source_text_sha256: string; action?: "assert" | "correct"; supersedes_assertion_id?: string | null };
 
+export type ApprovedScenePlan = {
+  semantics: "approved_plan_not_realized_facts"; planned_outcome: string | null; emotional_turn: string | null; target_length: number | null;
+  causal_preconditions: Array<{ scene_id: string; relation_id: string; planned_summary: string | null; planned_outcome: string | null }>;
+  foreshadowing_actions: Array<{ id: string; relation_id: string; action: "seed" | "payoff"; clue_text: string | null; planned_payoff: string | null; seed_scene_ids: string[]; do_not_reveal_payoff: boolean }>;
+};
 export type ContextPack = {
   contract_version: "context_pack_v1";
   project_id: string;
@@ -21,6 +26,8 @@ export type ContextPack = {
   location_id: string;
   timeline_position: string;
   scene_goal: string;
+  scene_plan?: ApprovedScenePlan | null;
+  canon_entities?: Array<{ id: string; type: string; properties: Record<string, unknown> }>;
   conflict: string;
   required_characters: string[];
   active_relationships: string[];
@@ -471,11 +478,12 @@ export type SceneRunResult = {
 export type AgentPermissionLevel = "read_only" | "read_generate" | "full";
 
 export type ModelProtocol = "chat_completions" | "responses" | "anthropic_messages";
+export type ReasoningEffort = "low" | "high" | "max";
 export type ThinkingMode = "provider_default" | "enabled" | "disabled";
 export type ModelTask = "planning" | "writing" | "revision" | "discussion" | "extraction" | "continuity";
-export type ModelExecution = { task: ModelTask; profile_id: string; profile_name: string; protocol: ModelProtocol; model: string; thinking_mode?: ThinkingMode | null };
-export type ConnectionProfile = { id: string; name: string; protocol: ModelProtocol; base_url: string; model: string; json_mode: boolean; thinking_mode?: ThinkingMode; api_key_configured: boolean; api_key_preview?: string | null };
-export type ConnectionProfileUpdate = Pick<ConnectionProfile, "id" | "name" | "protocol" | "base_url" | "model" | "json_mode" | "thinking_mode"> & { api_key?: string | null; clear_api_key?: boolean };
+export type ModelExecution = { task: ModelTask; profile_id: string; profile_name: string; protocol: ModelProtocol; model: string; thinking_mode?: ThinkingMode | null; reasoning_effort?: ReasoningEffort };
+export type ConnectionProfile = { id: string; name: string; protocol: ModelProtocol; base_url: string; model: string; json_mode: boolean; thinking_mode?: ThinkingMode; reasoning_effort?: ReasoningEffort | null; api_key_configured: boolean; api_key_preview?: string | null };
+export type ConnectionProfileUpdate = Pick<ConnectionProfile, "id" | "name" | "protocol" | "base_url" | "model" | "json_mode" | "thinking_mode" | "reasoning_effort"> & { api_key?: string | null; clear_api_key?: boolean };
 export type TaskAssignments = Partial<Record<ModelTask, string | null>>;
 
 export type AgentSettings = {
@@ -484,6 +492,7 @@ export type AgentSettings = {
   scene_writer: "rule_based" | "llm";
   llm_protocol?: ModelProtocol;
   llm_thinking_mode?: ThinkingMode;
+  llm_reasoning_effort?: ReasoningEffort | null;
   connection_profiles?: ConnectionProfile[];
   task_assignments?: TaskAssignments;
   resolved_tasks?: Partial<Record<ModelTask, ModelExecution>>;
@@ -502,6 +511,7 @@ export type AgentSettingsUpdate = {
   scene_writer: "rule_based" | "llm";
   llm_protocol?: ModelProtocol;
   llm_thinking_mode?: ThinkingMode;
+  llm_reasoning_effort?: ReasoningEffort | null;
   connection_profiles?: ConnectionProfileUpdate[];
   task_assignments?: TaskAssignments;
   provider_label: string;

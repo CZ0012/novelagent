@@ -448,11 +448,13 @@ class Neo4jGraphStore(GraphStore):
         *,
         scene_id: str | None = None,
         timeline_position: str | None = None,
+        at_scene_start: bool = False,
     ) -> KnowledgeBoundary:
         return self._snapshot().get_character_knowledge(
             character_id,
             scene_id=scene_id,
             timeline_position=timeline_position,
+            at_scene_start=at_scene_start,
         )
 
     def get_unresolved_foreshadowing(self, **filters: str) -> list[GraphNode]:

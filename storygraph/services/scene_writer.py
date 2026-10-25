@@ -17,6 +17,7 @@ from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
 from storygraph.services.project_language import authoritative_language_message
 from storygraph.services.project_language import validate_generated_output_language
 from storygraph.services.project_style import project_style_message
+from storygraph.services.generation_budget import completion_budget, planned_completion_budget
 from storygraph.stores.draft_store import SQLiteDraftStore
 
 
@@ -132,6 +133,7 @@ class LLMSceneWriter:
             LLMRequest(
                 model=self.model,
                 temperature=self.temperature,
+                max_tokens=completion_budget(self.provider, planned_completion_budget(context_pack, baseline=2048)),
                 messages=self._messages(context_pack),
             )
         )
@@ -154,6 +156,32 @@ class LLMSceneWriter:
 
     def _messages(self, context_pack: ContextPack) -> list[LLMMessage]:
         prompt_contract = self.prompt_path.read_text(encoding="utf-8")
+        response_example = {
+            "text": localized(
+                context_pack.output_language, zh="仅填写本场景正文。", en="Scene prose only."
+            ),
+            "summary": localized(
+                context_pack.output_language, zh="一句简短的场景摘要。", en="One short scene summary."
+            ),
+            "self_check": (
+                ["已检查视角与知识边界。", "已检查正典安全。"]
+                if context_pack.output_language == "zh-CN"
+                else ["Checked the POV and knowledge boundary.", "Checked canon safety."]
+            ),
+        }
+        example_json = json.dumps(response_example, ensure_ascii=False, indent=2)
+        example_marker = "{{scene_writer_response_example}}"
+        example_message = None
+        if example_marker in prompt_contract:
+            prompt_contract = prompt_contract.replace(example_marker, example_json)
+        else:
+            # Older/custom prompt files stay verbatim; supply the localized shape separately.
+            example_message = localized(
+                context_pack.output_language,
+                zh="响应形状示例：所有自然语言字段（包括自检说明）必须使用中文。",
+                en="Response shape example: all natural-language values, including self-checks, "
+                "must use English.",
+            ) + "\n```json\n" + example_json + "\n```"
         user_payload = {
             "instruction": (
                 "Draft the current scene from this context_pack_v1. Return only a JSON object "
@@ -166,6 +194,7 @@ class LLMSceneWriter:
         style_message = project_style_message(context_pack.style_constraints.model_dump())
         return [
             LLMMessage(role="system", content=prompt_contract),
+            *([LLMMessage(role="system", content=example_message)] if example_message else []),
             *([LLMMessage(role="system", content=preset_message)] if preset_message else []),
             *([LLMMessage(role="system", content=style_message)] if style_message else []),
             LLMMessage(

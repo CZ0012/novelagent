@@ -17,6 +17,7 @@ from storygraph.core.time import utc_now
 from storygraph.models.project import OutputLanguage, localized
 from storygraph.models.proposal import ProposalArtifact, ProposalProvenance, ProposalRef
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
+from storygraph.services.generation_budget import completion_budget
 from storygraph.services.project_language import (
     authoritative_language_message,
     resolve_project_output_language,
@@ -155,7 +156,7 @@ def generate_outline_language_proposal(
     if len(entries) > MAX_FIELDS or sum(len(item["text"]) for item in entries) > MAX_INPUT_CHARS:
         raise _invalid("The outline exceeds the translation size limit.")
     response = provider.generate(LLMRequest(
-        model=model, temperature=0, max_tokens=16000,
+        model=model, temperature=0, max_tokens=completion_budget(provider, 16000),
         messages=[
             LLMMessage(role="system", content=authoritative_language_message(language)),
             LLMMessage(role="system", content=(

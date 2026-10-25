@@ -29,6 +29,23 @@ describe("persistent staged book planning", () => {
     expect(html).toContain("遗失之城"); expect(html).toContain("克制叙述"); expect(html).toContain("用动作体现情感"); expect(html).toContain("仅规划");
     expect(renderToStaticMarkup(<LongformPreview plan={parseLongformPlan(expansion("batch", 1, [1, 2]))!} />)).toContain("推进主线");
   });
+  it("distinguishes undeclared opening knowledge from explicit none and resolves Secret names", async () => {
+    const p = proposal(); const plan = parseLongformPlan(p)!;
+    let html = renderToStaticMarkup(<LongformPreview plan={plan} />); expect(html).toContain("开篇已知秘密"); expect(html).toContain("未声明（不推断知情状态）");
+    plan.blueprint!.entities[0].initial_knowledge = [];
+    html = renderToStaticMarkup(<LongformPreview plan={plan} />); expect(html).toContain("明确无开篇已知秘密"); expect(html).not.toContain("未声明（不推断知情状态）");
+    plan.blueprint!.entities[0].initial_knowledge = ["secret_origin"];
+    plan.blueprint!.entities.push({ id: "secret_origin", kind: "Secret", name: "雾城的真实来历", description: "秘密内容" });
+    html = renderToStaticMarkup(<LongformPreview plan={plan} />); expect(html).toContain("<li>雾城的真实来历</li>"); expect(html).not.toContain("无效的秘密引用");
+    await activateLocale("en-US"); html = renderToStaticMarkup(<LongformPreview plan={plan} />); expect(html).toContain("Opening secrets known"); expect(html).toContain("<li>雾城的真实来历</li>");
+    plan.blueprint!.entities[0].initial_knowledge = ["city"];
+    html = renderToStaticMarkup(<LongformPreview plan={plan} />); expect(html).toContain("Invalid Secret reference: city");
+  });
+  it("keeps optional opening knowledge compatible while rejecting malformed arrays", () => {
+    const p = proposal(); const body = JSON.parse(p.body);
+    body.blueprint.entities[0].initial_knowledge = null; p.body = JSON.stringify(body); expect(parseLongformPlan(p)).not.toBeNull();
+    for (const invalid of ["secret", [null], ["duplicate", "duplicate"]]) { body.blueprint.entities[0].initial_knowledge = invalid; p.body = JSON.stringify(body); expect(parseLongformPlan(p)).toBeNull(); }
+  });
   it("does not confuse acceptance, other markers or foreign proposals with application", () => {
     const p = proposal(); expect(longformApplied(p)).toBe(true);
     p.derived_refs = [{ kind: "graph_node", ref: p.id }]; expect(longformApplied(p)).toBe(false);

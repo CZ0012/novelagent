@@ -15,6 +15,9 @@ from storygraph.models.context import (
     ContextProvenance,
     KnowledgeBoundary,
     StyleConstraints,
+    ApprovedScenePlan,
+    PlannedCausalPrecondition,
+    PlannedForeshadowingAction,
 )
 from storygraph.models.graph import GraphNode
 from storygraph.models.project import OutputLanguage, localized
@@ -43,13 +46,24 @@ class ContextPackBuilder:
         *,
         project_id: str,
         scene_id: str,
-        target_tokens: int = 4000,
+        target_tokens: int | None = None,
         author_instruction_refs: list[str] | None = None,
     ) -> ContextPack:
         guard = getattr(self.graph_store, "persistence_guard", None)
         with guard() if callable(guard) else nullcontext():
+            auto_expand_budget = False
+            if target_tokens is None:
+                project = self.graph_store.get_node(project_id)
+                if project.type != "Project":
+                    raise ContractError("Context budget requires a canon Project.")
+                auto_expand_budget = bool(project.properties.get("require_semantic_review")
+                    or project.properties.get("longform_blueprint_id"))
+                target_tokens = 8000 if auto_expand_budget else 4000
+            if type(target_tokens) is not int or target_tokens < 1:
+                raise ContractError("Context target_tokens must be a positive integer or omitted.")
             return self._build(project_id=project_id, scene_id=scene_id,
                                target_tokens=target_tokens,
+                               auto_expand_budget=auto_expand_budget,
                                author_instruction_refs=author_instruction_refs)
 
     def _build(
@@ -58,6 +72,7 @@ class ContextPackBuilder:
         project_id: str,
         scene_id: str,
         target_tokens: int = 4000,
+        auto_expand_budget: bool = False,
         author_instruction_refs: list[str] | None = None,
     ) -> ContextPack:
         missing_context: list[ContextGap] = []
@@ -74,6 +89,10 @@ class ContextPackBuilder:
         props = scene.properties
         self._ensure_scene_scope(project_id, scene)
         graph_query_ids = self._graph_query_plan(scene_id=scene_id, props=props)
+        scene_plan = self._approved_scene_plan(
+            project_id=project_id, scene=scene, output_language=output_language,
+            missing_context=missing_context,
+        )
 
         required_characters = list(
             dict.fromkeys(
@@ -112,15 +131,20 @@ class ContextPackBuilder:
         active_relationships = [
             self._relationship_text(relation)
             for relation in scene_context.get("active_relationships", [])
+            if relation.type not in {"KNOWS_SECRET", "BELIEVES_FALSELY", "SUSPECTS", "HIDES_FROM"}
+            or relation.id in {ref for boundary in knowledge for ref in boundary.source_refs}
         ]
         world_rules = [
             f"{node.id}: {node.properties.get('rule', node.properties.get('summary', ''))}"
             for node in scene_context.get("world_rules", [])
         ]
-        foreshadowing = [
-            f"{node.id}: {node.properties.get('clue_text', node.properties.get('hidden_meaning', ''))}"
-            for node in scene_context.get("unresolved_foreshadowing", [])
-        ]
+        seed_only = {action.id for action in scene_plan.foreshadowing_actions if action.action == "seed"} if scene_plan else set()
+        foreshadowing = []
+        for node in scene_context.get("unresolved_foreshadowing", []):
+            clue = node.properties.get("clue_text")
+            if not isinstance(clue, str) or not clue:
+                clue = "" if node.id in seed_only else node.properties.get("hidden_meaning", "")
+            foreshadowing.append(f"{node.id}: {clue if isinstance(clue, str) else ''}")
 
         previous_scene_summary = None
         draft_refs: list[str] = []
@@ -280,6 +304,7 @@ class ContextPackBuilder:
             timeline_position=props.get("timeline_position") or "",
             scene_goal=props.get("goal") or "",
             conflict=props.get("conflict") or "",
+            scene_plan=scene_plan,
             required_characters=required_characters,
             canon_entities=canon_entities,
             temporal_states=temporal_states,
@@ -302,7 +327,126 @@ class ContextPackBuilder:
             ),
             budget=ContextBudget(target_tokens=target_tokens),
         )
+        if auto_expand_budget:
+            # Use the same source snapshot. Only fields already eligible for
+            # optional trimming are excluded from the essential-size probe.
+            essential = pack.model_copy(update={"retrieved_style_samples": [], "previous_scene_summary": None})
+            essential_tokens = self._estimate_tokens(essential)
+            if essential_tokens > target_tokens:
+                target_tokens = min(16000, math.ceil((essential_tokens+256)/2000)*2000)
+                pack = pack.model_copy(update={"budget": pack.budget.model_copy(update={"target_tokens": target_tokens})})
         return self._apply_budget(pack, target_tokens)
+
+    def _approved_scene_plan(self, *, project_id, scene, output_language, missing_context):
+        """Approved planning metadata is an intention, never proof of a realized event."""
+        graph = GraphQueryService(self.graph_store)._snapshot()
+        def gap(kind):
+            missing_context.append(ContextGap(kind=kind, ref=scene.id, severity="critical",
+                message=localized(output_language,
+                    zh="已批准场景规划的关联或字段缺失、越界或超出范围，需作者确认。",
+                    en="Approved scene planning fields or links are missing, out of scope or over budget; author confirmation is required."),
+                source=scene.id))
+        def text(properties, key):
+            value = properties.get(key)
+            if value is None:
+                return None
+            if not isinstance(value, str) or len(value) > 4000:
+                gap("invalid_scene_plan_field")
+                return None
+            return value if value.strip() else None
+        def scoped(ref, expected):
+            node = graph.nodes.get(ref)
+            if node is None or node.status != "CANON" or node.type != expected or node.properties.get("project_id") != project_id:
+                gap("missing_scene_plan_reference")
+                return None
+            return node
+        outcome, emotional = text(scene.properties, "outcome"), text(scene.properties, "emotional_turn")
+        length = scene.properties.get("target_length")
+        if length is not None and (isinstance(length, bool) or not isinstance(length, int) or not 1 <= length <= 2000000):
+            gap("invalid_scene_plan_field")
+            length = None
+        incoming = sorted((relation for relation in graph.relationships.values()
+            if relation.status == "CANON" and relation.target_id == scene.id
+            and relation.type in {"CAUSES", "SEEDED_IN", "PAID_OFF_IN"}
+            and relation.properties.get("planning_only") is True), key=lambda relation: relation.id)
+        causes, actions = [], []
+        cause_count, action_count = 0, 0
+        for relation in incoming:
+            if relation.type == "CAUSES":
+                cause_count += 1
+                if cause_count > 30:
+                    if cause_count == 31:
+                        gap("scene_plan_dependency_limit")
+                    continue
+            else:
+                action_count += 1
+                if action_count > 30:
+                    if action_count == 31:
+                        gap("scene_plan_action_limit")
+                    continue
+            if relation.properties.get("project_id") != project_id:
+                gap("missing_scene_plan_reference")
+                continue
+            if relation.type == "CAUSES":
+                source = scoped(relation.source_id, "Scene")
+                if source is None or source.id == scene.id:
+                    if source is not None:
+                        gap("invalid_scene_plan_dependency")
+                    continue
+                planned_summary = text(source.properties, "summary")
+                planned_outcome = text(source.properties, "outcome")
+                if planned_summary is None and planned_outcome is None:
+                    gap("missing_scene_plan_field")
+                causes.append(PlannedCausalPrecondition(scene_id=source.id, relation_id=relation.id,
+                    planned_summary=planned_summary, planned_outcome=planned_outcome))
+            else:
+                clue = scoped(relation.source_id, "Foreshadowing")
+                if clue is None:
+                    continue
+                action = "seed" if relation.type == "SEEDED_IN" else "payoff"
+                clue_text = text(clue.properties, "clue_text")
+                payoff = text(clue.properties, "hidden_meaning") if action == "payoff" else None
+                if clue_text is None or (action == "payoff" and payoff is None):
+                    gap("missing_scene_plan_field")
+                seed_ids = []
+                if action == "payoff":
+                    seed_count = 0
+                    for seed in sorted(graph.relationships.values(), key=lambda r: r.id):
+                        if (seed.status != "CANON" or seed.type != "SEEDED_IN" or seed.source_id != clue.id
+                                or seed.properties.get("planning_only") is not True):
+                            continue
+                        seed_count += 1
+                        if seed_count > 30:
+                            gap("scene_plan_dependency_limit")
+                            break
+                        if seed.properties.get("project_id") != project_id:
+                            gap("missing_scene_plan_reference")
+                            continue
+                        seed_scene = scoped(seed.target_id, "Scene")
+                        if seed_scene is not None:
+                            seed_ids.append(seed_scene.id)
+                    if not seed_ids:
+                        gap("missing_scene_plan_seed")
+                    if len(seed_ids) > 30:
+                        gap("scene_plan_dependency_limit")
+                        seed_ids = seed_ids[:30]
+                actions.append(PlannedForeshadowingAction(id=clue.id, relation_id=relation.id,
+                    action=action, clue_text=clue_text, planned_payoff=payoff,
+                    seed_scene_ids=seed_ids, do_not_reveal_payoff=action == "seed"))
+        # Local plan IDs retained on Scene properties are not resolved as graph IDs.
+        # They can only expose missing declared links; actual inputs come from edges.
+        for field, actual in (("causal_dependencies", len(causes)),
+                ("foreshadowing_seed_ids", sum(action.action == "seed" for action in actions)),
+                ("foreshadowing_payoff_ids", sum(action.action == "payoff" for action in actions))):
+            declared = scene.properties.get(field)
+            if declared is not None and (not isinstance(declared, list)
+                    or any(not isinstance(ref, str) or not ref for ref in declared)
+                    or len(set(declared)) != len(declared) or len(declared) > actual):
+                gap("missing_scene_plan_relation")
+        if outcome is None and emotional is None and length is None and not causes and not actions:
+            return None
+        return ApprovedScenePlan(planned_outcome=outcome, emotional_turn=emotional,
+            target_length=length, causal_preconditions=causes, foreshadowing_actions=actions)
 
     @staticmethod
     def _relationship_text(relation) -> str:
@@ -487,6 +631,7 @@ class ContextPackBuilder:
                 character_id,
                 scene_id=scene_id,
                 timeline_position=timeline_position,
+                at_scene_start=True,
             )
         except GraphStoreError as exc:
             if exc.category != "not_found":

@@ -1,5 +1,39 @@
 # Context Pack Contract v1
 
+## Project-aware default budget
+
+`ContextPackBuilder.build(target_tokens=None)` resolves the context target without
+writing project/canon data: protected/approved-longform AUTO starts at 8,000
+tokens for a Project with `require_semantic_review` or an approved
+`longform_blueprint_id`, and uses the existing fixed 4,000 otherwise. The returned `budget.target_tokens` is the resolved positive
+integer, never null. Stored/historical explicit budgets are not rewritten.
+Any explicit positive integer, including 4,000, remains a hard target and is
+never silently raised. Invalid booleans, zero or negative values reject.
+
+Only omitted/null protected AUTO may grow. From the same graph-guarded source
+and provenance snapshot, estimate essential context after excluding only the
+existing optional examples/prior-Draft-summary fields. If it exceeds 8,000,
+select `ceil((essential_estimate+256)/2000)*2000`, capped at 16,000, and apply the
+normal budget policy to the original full context. There is no new source read,
+inferred fact, model call or P0 removal. Normal packs stay at 8,000; an essential
+pack still larger than 16,000 fails closed at that cap. Explicit 8,000 or 4,000
+NEVER expands. This bounded AUTO selection is not a higher provider/output limit;
+the actual selected target is visible in the pack before any drafting request.
+
+`POST /projects/{project_id}/scenes/{scene_id}/context-pack` accepts an optional
+`{target_tokens?:positive_integer|null}` body. No body, `{}` and null select the
+project default; explicit 4,000 stays explicit. CLI `build-context` also defaults
+to project resolution; `--target-tokens` explicitly overrides it. Writing,
+discussion, workflow and semantic-review paths that omit a target use this same
+builder policy. No provider/model selection or paid retry behavior changes.
+
+Protected canon, knowledge, typed state, approved scene plan and author style
+remain protected at every selected target. Bounded AUTO accommodates rich normal
+projects; it does not truncate P0 data or guarantee every scene fits. Any
+overflow still produces critical `context_budget_exceeded` and blocks complete
+scene drafting before provider invocation. Token counts remain conservative
+estimates rather than vendor-tokenizer or whole-request limits.
+
 ## Purpose
 
 `context_pack_v1` defines the compact scene-specific context handed to the Writing Agent. It is the main protection against dumping the whole novel into the prompt.
@@ -27,6 +61,7 @@ A Context Pack is built from canon graph state, draft metadata, style samples, a
 - `timeline_position`
 - `scene_goal`
 - `conflict`
+- optional additive `scene_plan` (absent/null for legacy scenes without planning data)
 - `required_characters`
 - `active_relationships`
 - `knowledge_boundaries`
@@ -52,6 +87,45 @@ Each `knowledge_boundaries` item must include:
 - `suspects`
 - `hides`
 - `source_refs`
+
+Writing Context Packs query these boundaries at scene entry. A revelation or
+suspicion first acquired during the current Scene is not opening knowledge;
+explicit reviewed initial-knowledge edges and prior reachable knowledge are
+preserved. Matching knowledge-family entries in active_relationships must obey
+the same entry boundary instead of leaking a through-scene SUSPECTS edge.
+
+## Approved Scene Plan
+
+`scene_plan` carries semantic author-approved planning metadata with
+`semantics = approved_plan_not_realized_facts`. It is not realized canon state,
+proof a predecessor was written, or a literal phrase list. Optional fields are
+`planned_outcome`, `emotional_turn`, and positive integer `target_length`.
+Missing fields are not guessed, copied from prose or written back to Graph Store.
+
+`causal_preconditions` contains at most 30 DIRECT incoming CANON CAUSES edges
+marked `planning_only = true`, each with exact stable source Scene ID, relation
+ID and optional approved source `planned_summary`/`planned_outcome`. No full-book
+recursion, imported prose or inferred predecessor is permitted. Existing local
+plan-ID lists are not resolved by title or treated as runtime graph IDs; declared
+missing relation counts become critical gaps. Every endpoint and relation must
+belong to the requested project before its text can enter the pack.
+
+`foreshadowing_actions` contains at most 30 direct planning-only SEEDED_IN or
+PAID_OFF_IN links to the exact current Scene. Each includes stable Foreshadowing
+ID, relation ID, action (`seed`/`payoff`), clue text and
+`do_not_reveal_payoff`. A seed never includes hidden payoff text. A payoff may
+include its approved `planned_payoff` plus up to 30 exact referenced seed Scene
+IDs, themselves planning metadata rather than proof of realized setup. Missing,
+foreign, malformed or oversized fields/links produce explicit critical gaps;
+full drafting must stop rather than invent a prerequisite or silently truncate.
+
+These plan fields are protected P0 context. Budget trimming may drop soft style
+examples and optional previous Draft summary, but must preserve the complete
+selected scene plan and report an over-budget critical gap when necessary.
+Nothing is copied into must_include: prose remains stylistically free while
+working toward the approved beats, target ending and length budget. Existing
+Draft summaries remain explicitly noncanon evidence with their Draft refs; this
+plan projection introduces no additional Draft/Source reads or canon writes.
 
 ## Style Constraints
 

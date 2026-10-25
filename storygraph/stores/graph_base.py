@@ -493,7 +493,8 @@ class GraphStore(ABC):
 
     @abstractmethod
     def get_character_knowledge(
-        self, character_id: str, *, scene_id: str | None = None, timeline_position: str | None = None
+        self, character_id: str, *, scene_id: str | None = None, timeline_position: str | None = None,
+        at_scene_start: bool = False,
     ) -> KnowledgeBoundary:
         raise NotImplementedError
 

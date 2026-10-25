@@ -22,6 +22,7 @@ def create_llm_provider(settings: StoryGraphSettings) -> OpenAICompatibleProvide
         timeout_seconds=settings.llm_timeout_seconds,
         json_mode=settings.llm_json_mode,
         thinking_mode=getattr(settings, "llm_thinking_mode", "provider_default"),
+        reasoning_effort=getattr(settings, "llm_reasoning_effort", None),
     )
     provider.model_execution = getattr(settings, "model_execution", None)
     return provider

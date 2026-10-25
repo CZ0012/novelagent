@@ -456,7 +456,7 @@ StoryGraph Agent is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## Model roles and imports (0.1.17)
 
-Keep one default connection for simple use, or expand **Model connections and task assignments** in Settings. Add named connections and assign planning, writing/continuation, revision, discussion, and fact extraction independently. Unassigned tasks inherit the default. Planning includes new chapter/volume structure and its initial prose in one request. Existing continuity/style checks remain rule-based. All generated proposals expose the requested model and protocol; switching a connection never rewrites historical provenance.
+Keep one default connection for simple use, or expand **Model connections and task assignments** in Settings. Add named connections and assign planning, writing/continuation, revision, discussion, and fact extraction independently. Unassigned tasks inherit the default. Planning includes new chapter/volume structure and its initial prose in one request. The existing continuity/style check endpoint remains rule-based; source development also supports a separate continuity assignment for explicit semantic review and whole-book planning. All generated proposals expose the requested model and protocol; switching a connection never rewrites historical provenance.
 
 Each connection explicitly selects Chat Completions, Responses, or Anthropic Messages. A model name does not choose the protocol or verify the actual upstream vendor. Existing settings migrate to Chat Completions without changing the model or key. Save a newly entered key only in the local backend workspace; a blank key keeps an existing key. Delete/clear actions are explicit, and no credentials are included in software releases. CLI scene generation loads the same saved task assignments.
 
@@ -470,12 +470,55 @@ The author workbench now includes a project-level planning workspace. Start with
 
 Saved prose and exact proposal versions can receive an explicit **semantic review**, using the separate continuity model assignment. Reports show grounded text/canon evidence, scope, coverage and stale-input status. A passing scene report covers its selected scene evidence; it is not a proof that the entire novel has no contradictions. Long-form projects require a fresh passing report before adopting Agent prose from a scene proposal. Manual author saves remain available. **Extract prose state** uses the exact saved Draft to propose evidence-backed state changes; those remain fact proposals and still require CandidateFact human review before canon changes.
 
-This source change is available through the local FastAPI + React workbench and the same backend in a source-built desktop package. It does not update an installed desktop app by itself or publish a signed release. The CLI retains its existing scene workflow; the new planning/review controls currently use the API/workbench. GitHub remains solely the software update channel. Semantic accuracy, literary quality and complete long-novel acceptance require the separate evidence recorded for this development task.
+This source change runs through the local FastAPI + React workbench. Rebuilding the desktop from the current checkout hosts that same backend workflow; existing local package files do not pick up later edits automatically. It does not update an installed desktop app by itself or publish a signed release. The CLI retains its existing scene workflow; the new planning/review controls currently use the API/workbench. GitHub remains solely the software update channel. Semantic accuracy, literary quality and complete long-novel acceptance require the separate evidence recorded for this development task.
 
 ### Independent whole-book planning
+
+Each planning batch now receives exact prior story-time anchors and an all-prior
+outcome ledger, alongside the richer recent twelve scenes. This retains earlier
+sealed-original/copy status and character/location identities without inventing
+state summaries or treating plans as completed events. Explicit flashbacks remain
+possible; batch boundaries do not restart the story clock. The final ledger also
+includes scene time and required characters. Changed context makes later reports
+stale and requires review; an unchanged opening batch retains its prior binding.
+
+Planning-run reviews have an explicit 200,000-character target limit, justified
+by complete-framework size measurements; ordinary scene/general review remains
+at 100,000. Earlier-outcome ledgers also have fixed record/size bounds. Exceeding
+a limit pauses rather than silently deleting old evidence or declaring success.
+These are capacity checks, not proof of a completed real 200-scene novel.
+
+Scene context uses bounded **AUTO 8,000–16,000 tokens** for approved long-form/
+protected projects and remains 4,000 for legacy projects. Omitting a target (or
+passing null) starts at 8,000 and grows in 2,000-token steps with small headroom
+only when required context needs it, up to 16,000. An explicit target, including
+8,000 or 4,000 through
+the context API or CLI `build-context --target-tokens`, remains strict. Required
+canon, scene plans, knowledge and style are preserved; if they exceed the target,
+full drafting stops before a model call. This is a context estimate, not a total
+request/token allowance. See [Context Pack rules](contracts/context_pack_v1.md).
 
 Choose **Whole-book planning → Plan the complete book** to run a bounded background task that produces the world/style blueprint and all chapter batches before any canon application. Select the maximum model calls and repair attempts; stop/resume is explicit and progress survives restart. Uncertain external calls require a separate retry choice. Existing unapplied blueprints can be reused by exact version. A completed bundle pins all plans and reports; inspect and accept it, then explicitly apply the entire structure once. This generates a framework, not a 500,000-character manuscript.
 
 Reviewed temporal state records preserve life, condition, location and ownership at each scene. Historical mistakes can be corrected from exact saved same-scene evidence through a pending correction and normal human review; the previous record remains auditable. Plain author saves remain available, while generated prose in protected projects must pass its current semantic review. The UI distinguishes observations that do not change state.
 
 DeepSeek official Chat Completions connections now expose an explicit thinking switch. Provider default is preserved unless the author changes it; an incompatible host/protocol is rejected before a call. Call budgets do not claim a universal currency estimate across third-party providers.
+
+### Explicit reasoning, uncertain calls and writing context
+
+Configured CLI, API and source-built desktop backends default to a **300-second
+provider HTTP socket timeout**, allowing multi-minute thinking and semantic
+review responses. Set `STORYGRAPH_LLM_TIMEOUT_SECONDS` before starting the
+backend to override it; an explicit `60` is preserved. This is not a whole-job
+deadline, an automatic retry or a model change. A timed-out paid call can still
+have an unknown outcome and follows the explicit recovery rules below.
+
+Official HTTPS `api.deepseek.com` Chat Completions connections support an optional **low / high / max** reasoning effort. Leaving effort unset preserves provider behavior; effort with thinking disabled is rejected. Provider default plus an explicit effort is allowed. Default and named connections retain omitted settings, while explicit clearing removes the effort override. Saved execution provenance records an explicit effort and omits an unset value, preserving historical records and frozen run fingerprints. See [agent runtime contract](contracts/agent_runtime_v1.md).
+
+The service exposes its complete reasoning-plus-output ceiling before a model call. Explicit low/high effort, or explicitly enabled thinking without an effort, normally adds 32,768 tokens to the service baseline, capped at 65,536 total. Planning uses a 52,768-token ceiling; semantic review explicitly opts into 65,536 after observed length exhaustion. Default/disabled requests without an explicit effort retain their previous ceilings. These are maxima, not expected usage or a currency quote; no provider silently enlarges a request behind the call/cost guard. Structured plan review sends the full parsed plan once with hash/metadata and exact citation sources; the untouched original remains local for strict evidence validation.
+
+A timeout or lost connection leaves the paid call's outcome unknown. The planner saves its diagnostic report, retains the original pending-call reservation and requires an explicit uncertain-call retry choice. A complete but invalid or truncated response is a known failure: it remains inconclusive and may receive an explicit recheck without being misrepresented as still in flight. Neither path retries automatically. Both consume their reserved call count. [Planning-run rules](contracts/planning_run_v1.md) define stop, recovery and retry behavior.
+
+Writing context distinguishes **scene entry**, **approved plan** and **realized state**. Knowledge first acquired during a scene is excluded at its opening; only explicitly reviewed starting knowledge and prior reachable acquisitions are available. Optional `scene_plan` supplies the intended ending, emotional turn, length budget, up to 30 direct causal predecessor plans and explicit seed/payoff actions using stable graph IDs. These are semantic writing beats, not facts already realized or phrases to copy literally. Seed actions withhold their hidden payoff. Missing, foreign or over-budget protected planning context blocks full drafting rather than inventing a prerequisite. See [context-pack contract](contracts/context_pack_v1.md).
+
+Current real-model coverage is recorded separately in [0.2.0 acceptance](docs/acceptance-0.2.0.md). Allocated 500,000-character budgets, a 100-chapter grid and offline synthetic tests do not by themselves establish completed real-model acceptance of a whole book. These controls use the same local backend from API/Web and source-built desktop; they do not publish a release or change the CLI's existing scene entrypoints.

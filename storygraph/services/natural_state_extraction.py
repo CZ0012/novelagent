@@ -17,6 +17,7 @@ from storygraph.models.graph import EDGE_LABELS
 from storygraph.models.project import OutputLanguage, localized
 from storygraph.services.canon_snapshot import build_canon_snapshot, canonical_json, content_hash
 from storygraph.services.llm_provider import LLMMessage, LLMRequest
+from storygraph.services.generation_budget import completion_budget
 from storygraph.services.project_language import (
     resolve_project_output_language,
     validate_generated_output_language,
@@ -126,7 +127,7 @@ def extract_natural_draft_state(
         raise ContractError("Natural extraction scene timeline is invalid.")
     try:
         response = provider.generate(LLMRequest(
-            model=model, temperature=0.0, max_tokens=8000,
+            model=model, temperature=0.0, max_tokens=completion_budget(provider, 8000),
             messages=[LLMMessage(role="system", content=_prompt(output_language)),
                       LLMMessage(role="user", content=canonical_json({
                           "project_id": project_id, "source_scene_id": draft.scene_id,

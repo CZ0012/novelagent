@@ -26,6 +26,7 @@ from storygraph.services.graph_query import GraphQueryService
 from storygraph.services.project_style import project_style_message, resolve_project_style
 from storygraph.services.canon_snapshot import build_canon_snapshot
 from storygraph.services.llm_provider import LLMMessage, LLMRequest
+from storygraph.services.generation_budget import completion_budget
 from storygraph.services.project_language import (
     authoritative_language_message,
     enforce_source_language_policy,
@@ -307,7 +308,7 @@ def generate_composition(
         LLMRequest(
             model=model,
             temperature=0.4,
-            max_tokens=16000,
+            max_tokens=completion_budget(provider, 16000),
             messages=[
                 LLMMessage(
                     role="system",

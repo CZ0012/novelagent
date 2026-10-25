@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 import json
+from contextlib import nullcontext
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,6 +21,8 @@ from storygraph.models.longform import (
     BlueprintRequest, ExpansionRequest, LongformApplyRequest, LongformRevisionRequest,
 )
 from storygraph.services.canon_snapshot import build_canon_snapshot, content_hash
+from storygraph.services.canon_snapshot import canonical_json
+from storygraph.services.expansion_output import expansion_volume_progress, recent_planned_scene_outcomes, prior_planned_scene_outcome_ledger
 from storygraph.services.graph_query import GraphQueryService
 from storygraph.services.project_style import resolve_project_style
 from storygraph.services.project_language import resolve_project_output_language
@@ -43,6 +46,39 @@ class NaturalStateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     draft_id: str = Field(min_length=1, max_length=200)
     expected_version: int = Field(ge=1)
+
+
+def manual_longform_review_text(*, graph, store, project_id, proposal, plan):
+    """Resolve manual expansion context without inventing parent approval/data."""
+    from storygraph.services.longform_planning import _parent, _applied, _known_scenes, _blueprint_identity_maps, parse_longform, scene_plan_id, validate_expansion
+    guard = getattr(graph, "persistence_guard", None)
+    with guard() if callable(guard) else nullcontext(), store._lock:
+        original = store.get(proposal.id, version=1)
+        original_plan = parse_longform(original.body)
+        if {(ref.kind, ref.ref) for ref in proposal.target_refs} != {("project", project_id)}:
+            raise ContractError("Planning review requires an exact project target.")
+        for key in ("phase", "project_id", "output_language", "graph_snapshot", "request", "parent_proposal_id", "parent_version"):
+            if getattr(plan, key) != getattr(original_plan, key):
+                raise ContractError("Planning review cannot replace frozen source scope.")
+        if plan.phase == "blueprint":
+            return proposal.body
+        parent, parent_plan = _parent(store, project_id, plan.request)
+        if not _applied(parent):
+            raise ContractError("Manual expansion review requires its exact accepted and applied blueprint.")
+        validate_expansion(plan.expansion, plan.request, parent_plan.blueprint, parent_plan.request)
+        first_slot = scene_plan_id(plan.request.volume_index, plan.request.chapter_start, 1)
+        prior = {key: node for key, node in _known_scenes(graph, project_id, parent.id).items() if key < first_slot}
+        context = {"current_plan": json.loads(proposal.body),
+            "parent_blueprint": parent_plan.blueprint.model_dump(),
+            "parent_ref": {"id": parent.id, "version": parent.version, "body_sha256": content_hash(parent.body)},
+            "volume_progress": expansion_volume_progress(parent_plan.request, plan.request),
+            "author_brief": parent_plan.request.instruction,
+            "recent_scene_outcomes": recent_planned_scene_outcomes(prior),
+            "context_boundary": "The exact accepted/applied parent blueprint constrains this proposed expansion. Parent plans are not completed prose or evidence of later character knowledge; current graph canon remains authoritative."}
+        if prior:
+            context["prior_scene_outcome_ledger"] = prior_planned_scene_outcome_ledger(prior,
+                identity_maps=_blueprint_identity_maps(parent.id, parent_plan.blueprint))
+        return canonical_json(context)
 
 
 def register_authoring_routes(
@@ -104,6 +140,8 @@ def register_authoring_routes(
                     plan = parse_longform(proposal.body)
                     if plan.project_id != project_id or plan.output_language != language:
                         raise ContractError("Planning review scope does not match.")
+                    text = manual_longform_review_text(graph=graph, store=proposal_store,
+                        project_id=project_id, proposal=proposal, plan=plan)
                     purpose = "plan"
         if language is None or not text.strip():
             raise ContractError("Review requires nonempty text with a confirmed language.")

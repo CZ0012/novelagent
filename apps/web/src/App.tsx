@@ -153,6 +153,8 @@ import {
 import { canHydrateDraftLoad, draftSaveCompletionPolicy, draftScopesMatch, type DraftScope } from "./draftProtection";
 import { GenerationReviewPanel, reviewAllowsAdoption, reviewAllowsPlanApplication, proposalSemanticReviewBlocked, type GenerationReviewResult } from "./GenerationReviewPanel";
 import { ProjectStyleSummary } from "./ProjectStyleSummary";
+import { InspectorGraphDisclosure } from "./InspectorGraphDisclosure";
+import { ContextBuildAction, ContextEvidence } from "./ContextEvidence";
 import { TemporalHistoryPanel } from "./TemporalHistoryPanel";
 import type { TemporalCorrectionOptions } from "./temporalCorrection";
 import { TemporalCandidateNotice, TemporalContext, TemporalProposalPreviews, type EntityLabels } from "./TemporalStateView";
@@ -452,6 +454,8 @@ export default function App() {
   const [chapterSelection, setChapterSelection] = useState<{ projectId: string; id: string } | null>(null);
   const [activeTab, setInspectorTab] = useState<InspectorTab>("agent");
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const inspectorContentRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { if (inspectorContentRef.current) inspectorContentRef.current.scrollTop = 0; }, [activeTab]);
   const setActiveTab = useCallback((tab: InspectorTab) => {
     setInspectorTab(tab);
     setInspectorOpen(true);
@@ -1948,6 +1952,7 @@ export default function App() {
   }, [draft]);
 
   const requestAgentDiscussion = useCallback(async () => {
+    if (draftDirtyRef.current) throw new Error(uiText.errors.agentIncludedDraftMustBeSaved);
     if (!endpoint || !projectId) throw new Error(uiText.errors.selectScene);
     const instruction = agentDiscussionForm.instruction.trim();
     if (!instruction) throw new Error(uiText.errors.agentInstructionRequired);
@@ -3454,7 +3459,7 @@ export default function App() {
           )}
 
           <div hidden={workspaceTab !== "planning"}>
-            <PlanningWorkspace key={`${apiBase}:${projectId}`} apiBase={apiBase} active={workspaceTab === "planning"} execute={runAction} runModelReady={planningConfigured && taskConnectionReady(agentSettings, "continuity")} reviewModelLabel={modelExecutionLabel(resolvedTask(agentSettings, "continuity"))} onOpenRunBundle={(id) => requestProposalNavigation(uiText.planningRun.review, () => { void runAction("planning-bundle-open", () => openPlanningRunBundle(id)); })} projectId={projectId} proposals={proposals} busy={busy !== null} canGenerate={canGenerate && projectLanguageReady} modelReady={planningConfigured} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "planning"))}
+            <PlanningWorkspace key={`${apiBase}:${projectId}`} onRunBlueprintCopied={async () => { if (activeApiBaseRef.current !== apiBase || activeProjectIdRef.current !== projectId) return; await refreshProposals(projectId); if (activeApiBaseRef.current === apiBase && activeProjectIdRef.current === projectId) setNotice(uiText.planningRun.blueprintCopied); }} apiBase={apiBase} active={workspaceTab === "planning"} execute={runAction} runModelReady={planningConfigured && taskConnectionReady(agentSettings, "continuity")} reviewModelLabel={modelExecutionLabel(resolvedTask(agentSettings, "continuity"))} onOpenRunBundle={(id) => requestProposalNavigation(uiText.planningRun.review, () => { void runAction("planning-bundle-open", () => openPlanningRunBundle(id)); })} projectId={projectId} proposals={proposals} busy={busy !== null} canGenerate={canGenerate && projectLanguageReady} modelReady={planningConfigured} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "planning"))}
               onGenerate={(input) => requestProposalNavigation(uiText.planning.generate, () => { void runAction("longform-blueprint", () => generateLongform("blueprints", input)); })}
               onExpand={(input) => requestProposalNavigation(uiText.planning.expand, () => { void runAction("longform-expand", () => generateLongform("expansions", input)); })}
               onReviewPlan={(id) => requestProposalNavigation(uiText.semanticReview.title, () => { setCreatingNewProposal(false); setSelectedProposalId(id); setWorkspaceTab("proposals"); setActiveTab("continuity"); })}
@@ -3813,6 +3818,7 @@ export default function App() {
             <TabButton active={activeTab === "facts"} onClick={() => setActiveTab("facts")} icon={<ShieldCheck size={15} />} label={uiText.tabs.facts} />
             <TabButton active={activeTab === "settings"} onClick={() => setActiveTab("settings")} icon={<Settings size={15} />} label={uiText.tabs.settings} />
           </div>
+          <div className="inspector-content" ref={inspectorContentRef}>
           {activeTab === "agent" && (
           <div className="agent-workspace agent-dock">
           <div className="active-style-summary"><strong>{uiText.collaboration.style}</strong><span>{agentSettings?.agent_presets?.find((p) => p.id === agentSettings.selected_preset_id) ? presetDisplay(agentSettings.agent_presets.find((p) => p.id === agentSettings.selected_preset_id)!).name : uiText.common.notSet}</span></div>
@@ -3866,7 +3872,7 @@ export default function App() {
           </div>
           )}
 
-          {activeTab === "context" && <ContextInspector key={`${apiBase}:${projectId}`} apiBase={apiBase} pack={contextPack} labels={graphPreview?.project_id === projectId ? Object.fromEntries(graphPreview.nodes.map((node) => [node.id, node.label])) : {}} temporalOptions={{
+          {activeTab === "context" && <ContextInspector key={`${apiBase}:${projectId}`} canBuildContext={hasScene && busy === null} onBuildContext={() => { void runAction("context", buildContext); }} apiBase={apiBase} pack={contextPack} labels={graphPreview?.project_id === projectId ? Object.fromEntries(graphPreview.nodes.map((node) => [node.id, node.label])) : {}} temporalOptions={{
             draft: !draftLoading && draftEditorScopeRef.current && draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId }) ? draft : null, draftDirty: draftDirty || draftLoading, sceneId, selection: draftSelectionRange, busy: busy !== null, canPropose: canGenerate,
             references: graphPreview?.project_id === projectId ? graphPreview.nodes.map((node) => ({ id: node.id, label: node.label, type: node.type })) : [], execute: runAction,
             canOpenSourceScene: (id) => Boolean(findScene(projects, projectId, id)),
@@ -3917,7 +3923,8 @@ export default function App() {
               updateStatus={updateStatus}
             />
           </div>
-          {activeTab !== "agent" && <GraphPreview preview={graphPreview} selectedSceneId={sceneId} />}
+          </div>
+          {activeTab !== "agent" && <InspectorGraphDisclosure><GraphPreview preview={graphPreview} selectedSceneId={sceneId} /></InspectorGraphDisclosure>}
         </aside>
       </div>
       {pendingProposalNavigation && (
@@ -4058,6 +4065,7 @@ function AgentDiscussionPanel({
   });
   const canSubmit =
     canDiscuss &&
+    !draftDirty &&
     busy === null &&
     blockedSourceIds.length === 0 &&
     form.instruction.trim().length > 0 &&
@@ -4100,7 +4108,7 @@ function AgentDiscussionPanel({
           <code>{savedDraftManifest}</code>
           <span className="model-execution-summary">{uiText.modelRouting.effective}: {modelExecutionLabel(modelExecution)}</span>
         </div>
-        {form.includeLatestDraft && includedDraft.status !== "ready" && (draftDirty || Boolean(draft) || draftRequired) && <div className="agent-context-note warning">
+        {(draftDirty || (form.includeLatestDraft && includedDraft.status !== "ready" && (Boolean(draft) || draftRequired))) && <div className="agent-context-note warning">
           <span>{draftDirty ? uiText.authorWorkspace.saveBeforeSend : includedDraft.status === "blocked_scope" ? uiText.errors.agentDraftScopeMismatch : uiText.errors.agentIncludedDraftMustBeSaved}</span>
           <button type="button" onClick={onSaveDraft} disabled={busy !== null || !hasScene}>{uiText.authorWorkspace.saveCurrentDraft}</button>
         </div>}
@@ -6565,19 +6573,21 @@ function AgentSettingsInspector({
   );
 }
 
-function ContextInspector({ pack, labels, apiBase, temporalOptions }: { pack: ContextPack | null; labels: EntityLabels; apiBase: string; temporalOptions: TemporalCorrectionOptions }) {
+function ContextInspector({ pack, labels, apiBase, temporalOptions, canBuildContext, onBuildContext }: { pack: ContextPack | null; labels: EntityLabels; apiBase: string; temporalOptions: TemporalCorrectionOptions; canBuildContext: boolean; onBuildContext: () => void }) {
   const [historySubject, setHistorySubject] = useState<string | null>(null);
   if (!pack) {
-    return <EmptyState icon={<SplitSquareVertical />} title={uiText.inspector.noContextTitle} text={uiText.inspector.noContextText} />;
+    return <div className="inspector-body"><ContextBuildAction hasPack={false} disabled={!canBuildContext} onBuild={onBuildContext} /><EmptyState icon={<SplitSquareVertical />} title={uiText.inspector.noContextTitle} text={uiText.inspector.noContextText} /></div>;
   }
   return (
     <div className="inspector-body">
+      <ContextBuildAction hasPack disabled={!canBuildContext} onBuild={onBuildContext} />
       <MetricRow label={uiText.inspector.budget} value={`${pack.budget.estimated_tokens}/${pack.budget.target_tokens}`} />
       <MetricRow
         label={uiText.language.artifactLanguageLabel}
         value={formatArtifactLanguage(pack.output_language, false)}
       />
       <MetricRow label={uiText.inspector.graphQueries} value={String(pack.provenance.graph_query_ids.length)} />
+      <ContextEvidence pack={pack} labels={labels} />
       <TemporalContext projections={pack.temporal_states ?? []} projectId={pack.project_id} sceneId={pack.scene_id} labels={labels} onOpenHistory={setHistorySubject} />
       {historySubject && <TemporalHistoryPanel key={`${pack.project_id}:${historySubject}`} apiBase={apiBase} projectId={pack.project_id} subjectId={historySubject} labels={labels} options={temporalOptions} />}
       <ListBlock title={uiText.inspector.mustInclude} items={pack.must_include} />

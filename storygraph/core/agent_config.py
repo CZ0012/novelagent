@@ -11,7 +11,9 @@ import json
 import os
 from tempfile import NamedTemporaryFile
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator, ValidationError
+from pydantic import (
+    BaseModel, ConfigDict, Field, model_validator, field_validator, model_serializer, ValidationError,
+)
 
 from storygraph.core.config import StoryGraphSettings
 
@@ -81,15 +83,20 @@ BUILTIN_AGENT_PRESETS = (
 
 ProviderProtocol = Literal["chat_completions", "responses", "anthropic_messages"]
 ThinkingMode = Literal["provider_default", "enabled", "disabled"]
+ReasoningEffort = Literal["low", "high", "max"]
 AgentTask = Literal["planning", "writing", "revision", "discussion", "extraction", "continuity"]
 AGENT_TASKS = ("planning", "writing", "revision", "discussion", "extraction", "continuity")
 
 
-def validate_thinking_mode(base_url: str, protocol: str, mode: str) -> None:
+def validate_thinking_mode(base_url: str, protocol: str, mode: str, reasoning_effort: str | None = None) -> None:
     """Explicit vendor options are opt-in and never sent to compatible gateways."""
     if mode not in {"provider_default", "enabled", "disabled"}:
         raise ValueError("Unsupported thinking mode")
-    if mode == "provider_default":
+    if reasoning_effort not in {None, "low", "high", "max"}:
+        raise ValueError("Unsupported reasoning effort")
+    if reasoning_effort is not None and mode == "disabled":
+        raise ValueError("Explicit reasoning effort cannot be combined with disabled thinking")
+    if mode == "provider_default" and reasoning_effort is None:
         return
     try:
         parsed = urlsplit(base_url)
@@ -126,13 +133,14 @@ class ConnectionProfile(BaseModel):
     model: str = Field(default="", max_length=200)
     json_mode: bool = True
     thinking_mode: ThinkingMode = "provider_default"
+    reasoning_effort: ReasoningEffort | None = None
     api_key: str = Field(default="", max_length=4096, repr=False)
 
     _valid_address = field_validator("base_url")(_validate_provider_address)
 
     @model_validator(mode="after")
     def validate_thinking(self):
-        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode)
+        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode, self.reasoning_effort)
         return self
 
     @field_validator("id")
@@ -165,6 +173,14 @@ class ModelExecution(BaseModel):
     model: str
     task: AgentTask
     thinking_mode: ThinkingMode | None = None
+    reasoning_effort: ReasoningEffort | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_execution(self, handler):
+        serialized = handler(self)
+        if self.reasoning_effort is None:
+            serialized.pop("reasoning_effort", None)
+        return serialized
 
 
 class AgentRuntimeConfig(BaseModel):
@@ -176,6 +192,7 @@ class AgentRuntimeConfig(BaseModel):
     llm_json_mode: bool = True
     llm_protocol: ProviderProtocol = "chat_completions"
     llm_thinking_mode: ThinkingMode = "provider_default"
+    llm_reasoning_effort: ReasoningEffort | None = None
     permission_level: AgentPermissionLevel = AgentPermissionLevel.FULL
     selected_preset_id: str = DEFAULT_AGENT_PRESET_ID
     custom_presets: list[AgentPreset] = Field(default_factory=list, max_length=100)
@@ -186,7 +203,7 @@ class AgentRuntimeConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_presets(self) -> "AgentRuntimeConfig":
-        validate_thinking_mode(self.llm_base_url, self.llm_protocol, self.llm_thinking_mode)
+        validate_thinking_mode(self.llm_base_url, self.llm_protocol, self.llm_thinking_mode, self.llm_reasoning_effort)
         ids = {preset.id for preset in BUILTIN_AGENT_PRESETS}
         for preset in self.custom_presets:
             if preset.builtin or not preset.id.startswith("custom_") or preset.id in ids:
@@ -215,6 +232,7 @@ class AgentRuntimeConfigUpdate(BaseModel):
     llm_json_mode: bool = True
     llm_protocol: ProviderProtocol = "chat_completions"
     llm_thinking_mode: ThinkingMode = "provider_default"
+    llm_reasoning_effort: ReasoningEffort | None = None
     permission_level: AgentPermissionLevel = AgentPermissionLevel.FULL
     selected_preset_id: str = Field(default=DEFAULT_AGENT_PRESET_ID, min_length=1, max_length=100)
 
@@ -229,6 +247,7 @@ class AgentRuntimeConfigResponse(BaseModel):
     llm_json_mode: bool
     llm_protocol: ProviderProtocol
     llm_thinking_mode: ThinkingMode = "provider_default"
+    llm_reasoning_effort: ReasoningEffort | None = None
     connection_profiles: list[dict]
     task_assignments: TaskAssignments
     resolved_tasks: dict[str, ModelExecution]
@@ -253,6 +272,7 @@ def load_agent_config(settings: StoryGraphSettings) -> AgentRuntimeConfig:
         llm_json_mode=settings.llm_json_mode,
         llm_protocol=getattr(settings, "llm_protocol", "chat_completions"),
         llm_thinking_mode=getattr(settings, "llm_thinking_mode", "provider_default"),
+        llm_reasoning_effort=getattr(settings, "llm_reasoning_effort", None),
     )
     if not settings.agent_config_path.exists():
         return config
@@ -306,8 +326,11 @@ def update_agent_config(
             thinking_mode = profile.thinking_mode
             if "thinking_mode" not in profile.model_fields_set and existing is not None:
                 thinking_mode = existing.thinking_mode
+            effort = profile.reasoning_effort
+            if "reasoning_effort" not in profile.model_fields_set and existing is not None:
+                effort = existing.reasoning_effort
             profiles.append({**profile.model_dump(exclude={"clear_api_key", "api_key"}),
-                             "api_key": secret, "thinking_mode": thinking_mode})
+                             "api_key": secret, "thinking_mode": thinking_mode, "reasoning_effort": effort})
         values["connection_profiles"] = profiles
     if "task_assignments" in update.model_fields_set:
         values["task_assignments"] = {
@@ -326,6 +349,7 @@ def apply_agent_config(settings: StoryGraphSettings, config: AgentRuntimeConfig)
     settings.llm_json_mode = config.llm_json_mode
     settings.llm_protocol = config.llm_protocol
     settings.llm_thinking_mode = config.llm_thinking_mode
+    settings.llm_reasoning_effort = config.llm_reasoning_effort
     settings.agent_preset = selected_agent_preset(config).model_copy(deep=True)
     # A single pointer publication is the request snapshot boundary.
     settings.agent_runtime_config = config.model_copy(deep=True)
@@ -342,6 +366,7 @@ def config_response(config: AgentRuntimeConfig) -> AgentRuntimeConfigResponse:
         llm_json_mode=config.llm_json_mode,
         llm_protocol=config.llm_protocol,
         llm_thinking_mode=config.llm_thinking_mode,
+        llm_reasoning_effort=config.llm_reasoning_effort,
         connection_profiles=[{
             **p.model_dump(exclude={"api_key"}),
             "api_key_configured": bool(p.api_key), "api_key_preview": _preview_secret(p.api_key),
@@ -411,13 +436,13 @@ def resolve_model_execution(config: AgentRuntimeConfig, task: AgentTask, *, prof
     if selected in (None, "default"):
         return ModelExecution(profile_id="default", profile_name=config.provider_label,
                               protocol=config.llm_protocol, model=config.llm_model, task=task,
-                              thinking_mode=config.llm_thinking_mode)
+                              thinking_mode=config.llm_thinking_mode, reasoning_effort=config.llm_reasoning_effort)
     profile = next((item for item in config.connection_profiles if item.id == selected), None)
     if profile is None:
         raise ValueError("Unknown connection profile")
     return ModelExecution(profile_id=profile.id, profile_name=profile.name,
                           protocol=profile.protocol, model=profile.model, task=task,
-                          thinking_mode=profile.thinking_mode)
+                          thinking_mode=profile.thinking_mode, reasoning_effort=profile.reasoning_effort)
 
 
 def settings_for_task(settings: StoryGraphSettings, task: AgentTask, *, profile_id=None) -> StoryGraphSettings:
@@ -432,6 +457,7 @@ def settings_for_task(settings: StoryGraphSettings, task: AgentTask, *, profile_
         snapshot.llm_model, snapshot.llm_json_mode = profile.model, profile.json_mode
         snapshot.llm_protocol = profile.protocol
         snapshot.llm_thinking_mode = profile.thinking_mode
+        snapshot.llm_reasoning_effort = profile.reasoning_effort
     snapshot.model_execution = execution.model_dump()
     snapshot.agent_runtime_config = None  # Already resolved; factories must not resolve it again.
     snapshot.resolved_task = task

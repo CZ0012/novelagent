@@ -3,10 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProposalArtifact } from "./api";
 import { activateLocale } from "./localization";
-import { PlanningRunProgress, planningRunOptionLabel } from "./PlanningRunPanel";
+import { PlanningRunProgress, PlanningRestartControls, planningRunOptionLabel } from "./PlanningRunPanel";
 import { PlanningRunReview } from "./PlanningRunReview";
 import { PlanningBundlePreview } from "./PlanningBundlePreview";
-import { mergePlanningRunRecords, parsePlanningBook, parsePlanningBranch, pinnedPlanningArtifactMatches, planningRunInputValid, planningRunCreateRequest, planningRunNeedsUncertainRetry, planningRunReady, planningRunResumeBody, type PlanningArtifactRef, type PlanningBookBundle, type PlanningRun } from "./planningRuns";
+import { planningRunCopyBlueprintBody, copyPlanningRunBlueprint, mergePlanningRunRecords, parsePlanningBook, parsePlanningBranch, pinnedPlanningArtifactMatches, planningRunInputValid, planningRunCreateRequest, planningRunNeedsUncertainRetry, planningRunReady, planningRunResumeBody, planningRunRecheckBody, type PlanningArtifactRef, type PlanningBookBundle, type PlanningRun } from "./planningRuns";
 const ref: PlanningArtifactRef = { id: "branch-a", version: 2, body_sha256: "a".repeat(64) };
 function run(): PlanningRun { return { id: "run-a", project_id: "book", version: 7, status: "awaiting_review", stage: "done", request: { instruction: "设计一个完整故事", target_length: 500000, volume_count: 1, chapters_per_volume: 2, scenes_per_chapter: 1, batch_size: 2, max_calls: 80, max_repairs_per_step: 2 }, output_language: "zh-CN", canon_fingerprint: "f".repeat(64), calls_reserved: 7, max_calls: 80, stop_requested: false, pause_reason: null, pending_call: null, steps: [ { index: 0, phase: "blueprint", volume_index: null, chapter_start: null, chapter_count: null, status: "passed", proposal_ref: ref, review_id: "review-blueprint", repairs: 1 }, { index: 1, phase: "expansion", volume_index: 1, chapter_start: 1, chapter_count: 2, status: "passed", proposal_ref: { ...ref, id: "branch-b" }, review_id: "review-expansion", repairs: 0 } ], final_review_id: "review-book", bundle_proposal_id: "bundle", created_at: "2026-10-25", updated_at: "2026-10-25" }; }
 function proposal(body: unknown): ProposalArtifact { return { id: "bundle", contract_version: "proposal_artifact_v1", project_id: "book", artifact_type: "outline_draft", status: "accepted", content_language: "zh-CN", title: "整本规划包", body_format: "structured_json", body: JSON.stringify(body), version: 4, source_refs: [], target_refs: [], derived_refs: [], provenance: { created_by: "author", created_via: "manual" }, review_decision: { status: "accepted" }, created_at: "2026-10-25", updated_at: "2026-10-25" }; }
@@ -38,6 +38,7 @@ describe("bounded whole-book planning run controls", () => {
     expect(planningRunResumeBody(value, true)).toEqual({ expected_version: 7, retry_uncertain_call: true });
     expect(planningRunResumeBody({ ...value, pause_reason: "canon_changed" }, true)).toBeNull();
     expect(planningRunResumeBody({ ...value, pause_reason: "connection_changed" }, true)).toBeNull();
+    expect(planningRunResumeBody({ ...value, pause_reason: "source_changed" }, true)).toBeNull();
     expect(planningRunResumeBody({ ...value, status: "running" }, true)).toBeNull();
   });
   it("raises an exhausted call budget only through explicit resume input", () => {
@@ -63,6 +64,67 @@ describe("bounded whole-book planning run controls", () => {
     expect(planningRunResumeBody(value, false, 80, null, "隐式改写")).toBeNull();
     expect(planningRunResumeBody(value, false, 80, 99, "错误阶段")).toBeNull();
     expect(planningRunResumeBody(value, false, 80, 0, "字".repeat(12001))).toBeNull();
+  });
+  it("rechecks only the current exact result without rewriting or resetting repair counts", () => {
+    const value = { ...run(), status: "paused" as const, pause_reason: "repair_limit", steps: [{ ...run().steps[0], status: "needs_revision" as const, repairs: 2 }, run().steps[1]] };
+    const before = JSON.stringify(value);
+    expect(planningRunRecheckBody(value)).toEqual({ expected_version: 7, recheck_current_step: true });
+    expect(JSON.stringify(value)).toBe(before);
+    expect(planningRunRecheckBody({ ...value, pending_call: { id: "uncertain", task: "continuity", operation: "review", step_index: 0 } })).toBeNull();
+    expect(planningRunRecheckBody({ ...value, pause_reason: "uncertain_call" })).toBeNull();
+    expect(planningRunRecheckBody({ ...value, status: "running" })).toBeNull();
+    expect(planningRunRecheckBody({ ...value, calls_reserved: 80 })).toBeNull();
+    expect(planningRunRecheckBody({ ...value, steps: [{ ...value.steps[0], proposal_ref: null }] })).toBeNull();
+    expect(planningRunRecheckBody({ ...value, steps: [{ ...value.steps[0], proposal_ref: { ...ref, body_sha256: "invalid" } }] })).toBeNull();
+    expect(planningRunRecheckBody({ ...value, steps: run().steps })).toBeNull();
+  });
+  it("copies only a passed exact blueprint from an idle unpublished run", () => {
+    const value = { ...run(), status: "paused" as const, pause_reason: "connection_changed" };
+    const before = JSON.stringify(value);
+    expect(planningRunCopyBlueprintBody(value)).toEqual({ expected_version: 7 });
+    expect(JSON.stringify(value)).toBe(before);
+    expect(planningRunCopyBlueprintBody(run())).toEqual({ expected_version: 7 });
+    for (const status of ["queued", "running", "completed"] as const) expect(planningRunCopyBlueprintBody({ ...value, status })).toBeNull();
+    expect(planningRunCopyBlueprintBody({ ...value, pause_reason: "uncertain_call" })).toBeNull();
+    expect(planningRunCopyBlueprintBody({ ...value, pending_call: { id: "pending", task: "continuity", operation: "review", step_index: 1 } })).toBeNull();
+    expect(planningRunCopyBlueprintBody({ ...value, steps: [{ ...value.steps[0], status: "needs_revision" }] })).toBeNull();
+    expect(planningRunCopyBlueprintBody({ ...value, steps: [{ ...value.steps[0], review_id: null }] })).toBeNull();
+  });
+  it("copy uses only the local copy endpoint and never starts or resumes a paid run", async () => {
+    const value = { ...run(), status: "paused" as const, pause_reason: "connection_changed" };
+    const copied = { ...proposal(bundleBody()), id: "copy-new", status: "agent_revised" as const, version: 1 };
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ proposal: copied }), { status: 200 })); vi.stubGlobal("fetch", fetchMock);
+    expect(await copyPlanningRunBlueprint("http://localhost", "book", value)).toEqual(copied);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost/projects/book/planning-runs/run-a/copy-blueprint");
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ expected_version: 7 });
+    await expect(copyPlanningRunBlueprint("http://localhost", "foreign", value)).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1); vi.unstubAllGlobals();
+  });
+  it("retains later outputs only on an explicit restart and requires instructions for full revision", () => {
+    const value = { ...run(), status: "paused" as const, pause_reason: "repair_limit" };
+    const retained = { preserve_later_outputs: true, revision_mode: "targeted" as const };
+    expect(planningRunResumeBody(value, false, 80, null, "", retained)).toBeNull();
+    expect(planningRunResumeBody(value, false, 80, 0, "", retained)).toEqual({ expected_version: 7, retry_uncertain_call: false, restart_from_step: 0, preserve_later_outputs: true, revision_mode: "targeted" });
+    const full = { preserve_later_outputs: true, revision_mode: "full" as const };
+    expect(planningRunResumeBody(value, false, 80, 0, " ", full)).toBeNull();
+    expect(planningRunResumeBody(value, false, 80, 0, "完整修订当前蓝图", full)).toEqual({ expected_version: 7, retry_uncertain_call: false, restart_from_step: 0, revision_instruction: "完整修订当前蓝图", preserve_later_outputs: true, revision_mode: "full" });
+    expect(planningRunResumeBody(value, false, 80)).toEqual({ expected_version: 7, retry_uncertain_call: false });
+    const uncertain = { ...value, pause_reason: "uncertain_call" };
+    expect(planningRunResumeBody(uncertain, false, 80, 0, "定点修订", retained)).toBeNull();
+    expect(planningRunResumeBody(uncertain, true, 80, 0, "定点修订", retained)?.retry_uncertain_call).toBe(true);
+  });
+  it("shows chosen-restart recovery controls without triggering actions or inheriting old passes", () => {
+    const onMode = vi.fn(); const onPreserve = vi.fn(); const onInstruction = vi.fn();
+    const html = renderToStaticMarkup(<PlanningRestartControls busy={false} mode="targeted" preserveLater={false} instruction="" onMode={onMode} onPreserve={onPreserve} onInstruction={onInstruction} />);
+    expect(html).toContain('value="targeted" selected=""'); expect(html).toContain('value="regenerate" selected=""'); expect(html).toContain("保留后续规划并重新检查");
+    expect(onMode).not.toHaveBeenCalled(); expect(onPreserve).not.toHaveBeenCalled(); expect(onInstruction).not.toHaveBeenCalled();
+    const full = renderToStaticMarkup(<PlanningRestartControls busy={false} mode="full" preserveLater instruction="" onMode={onMode} onPreserve={onPreserve} onInstruction={onInstruction} />);
+    expect(full).toContain("完整修订必须填写明确要求"); expect(full).toContain("必须重新付费审阅，不继承旧通过报告");
+    const value = run(); value.steps[1] = { ...value.steps[1], status: "pending", proposal_ref: null, review_id: null, retained_output_ref: { ...ref, id: "original-later-plan" } };
+    expect(planningRunReady(value)).toBe(false);
+    const progress = renderToStaticMarkup(<PlanningRunProgress run={value} finalReviewReady onOpenBundle={() => undefined} />);
+    expect(progress).toContain("已保留来源，待重新校验与审阅"); expect(progress).toContain("保留的原始来源（只读）: original-later-plan"); expect(progress).not.toContain('>审阅整本规划包</button>');
   });
   it("does not let an older poll or foreign project replace an exact-version mutation response", () => {
     const value = run(); const records = [value];

@@ -451,6 +451,7 @@ class InMemoryGraphStore(GraphStore):
         *,
         scene_id: str | None = None,
         timeline_position: str | None = None,
+        at_scene_start: bool = False,
     ) -> KnowledgeBoundary:
         character = self.get_node(character_id)
         project_id = character.properties.get("project_id")
@@ -460,6 +461,12 @@ class InMemoryGraphStore(GraphStore):
             or not project_id
         ):
             raise ContractError("Character knowledge requires a project-scoped Character node.")
+        if at_scene_start and scene_id is None:
+            raise ContractError("Scene-entry knowledge requires an exact Scene.")
+        if scene_id is not None:
+            scene = self.get_node(scene_id)
+            if scene.type != "Scene" or scene.properties.get("project_id") != project_id:
+                raise ContractError("Knowledge Scene does not belong to the Character project.")
         knows: list[str] = []
         falsely_believes: list[str] = []
         suspects: list[str] = []
@@ -479,6 +486,7 @@ class InMemoryGraphStore(GraphStore):
                 relation.properties,
                 scene_id=scene_id,
                 timeline_position=timeline_position,
+                at_scene_start=at_scene_start,
             ):
                 continue
             if relation.type == "KNOWS_SECRET":
@@ -504,6 +512,7 @@ class InMemoryGraphStore(GraphStore):
                 node.properties,
                 scene_id=scene_id,
                 timeline_position=timeline_position,
+                at_scene_start=at_scene_start,
             )
         ]
         return KnowledgeBoundary(
@@ -522,12 +531,15 @@ class InMemoryGraphStore(GraphStore):
         *,
         scene_id: str | None,
         timeline_position: str | None,
+        at_scene_start: bool = False,
     ) -> bool:
         if scene_id is not None:
             exact_scene = props.get("scene_id")
             if exact_scene is not None and exact_scene != scene_id:
                 return False
             valid_from = props.get("valid_from_scene")
+            if at_scene_start and valid_from is not None and str(valid_from) == scene_id:
+                return False
             if valid_from is not None and not self._scene_at_or_after(scene_id, str(valid_from)):
                 return False
             valid_until = props.get("valid_until_scene")

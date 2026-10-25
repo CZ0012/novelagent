@@ -17,6 +17,7 @@ from storygraph.models.proposal import ProposalArtifactType, ProposalBodyFormat,
 from storygraph.models.project import CrossLanguagePolicy, OutputLanguage, localized
 from storygraph.services.text_span import utf16_span
 from storygraph.services.project_style import project_style_message
+from storygraph.services.generation_budget import completion_budget, planned_completion_budget
 from storygraph.services.json_output import unwrap_json_fence
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
 from storygraph.services.project_language import (
@@ -228,7 +229,9 @@ class AgentDiscussionService:
             LLMRequest(
                 model=self.model,
                 temperature=self.temperature,
-                max_tokens=4096,
+                max_tokens=completion_budget(self.provider, (
+                    planned_completion_budget(context_pack, baseline=4096)
+                    if mode in {"create_scene", "revise_scene"} else 4096)),
                 messages=[
                     LLMMessage(role="system", content=self.prompt_path.read_text(encoding="utf-8")),
                     *([LLMMessage(role="system", content=preset_message)] if preset_message else []),

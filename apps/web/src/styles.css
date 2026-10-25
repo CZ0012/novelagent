@@ -3070,3 +3070,9 @@ body { min-width: 360px; }
 .temporal-history blockquote { margin: .6rem 0; padding: .6rem; background: var(--panel-2); white-space: pre-wrap; }
 .temporal-correction-form { margin-top: 1rem; padding-top: .8rem; border-top: 1px solid var(--line); }
 .temporal-evidence-source { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: .8rem; border: 1px solid var(--line); background: var(--panel-2); font: inherit; line-height: 1.7; user-select: text; }
+/* Keep inspection evidence in the flexible main row, independently from graph size. */
+.inspector-content { min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; }
+.inspector-graph-disclosure { min-height: 0; min-width: 0; max-height: min(36vh, 300px); overflow: hidden; border-top: 1px solid var(--line); }
+.inspector-graph-disclosure > summary { padding: 10px 14px; cursor: pointer; font-size: 13px; color: var(--muted); }
+.inspector-graph-scroll { min-height: 0; max-height: min(28vh, 250px); overflow: auto; overscroll-behavior: contain; }
+.inspector-graph-scroll .graph-preview { border: 0; }

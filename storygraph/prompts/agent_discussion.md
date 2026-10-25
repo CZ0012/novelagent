@@ -62,3 +62,20 @@ entry. Use its resolved values over baseline or descriptive arc text. Distinguis
 event happening during this scene from state already true when the scene begins.
 Never invent a missing or ambiguous state to make a continuation easier. A proposed
 change remains a proposal and must pass exact-version review before adoption.
+
+# Approved scene plan
+
+If the Context Pack supplies `scene_plan`, treat it as APPROVED PLAN intentions,
+not events already realized in prose or canon. Preserve the planned outcome,
+emotional turn and scene length budget when drafting, revising or continuing;
+discuss a requested deviation explicitly instead of silently replacing the plan.
+Use direct causal predecessor plans to maintain meaningful setup and consequence,
+but never turn their summaries into evidence that the scene was written. Any
+Draft summary is optional noncanon evidence and cannot override reviewed state.
+
+Seed actions introduce only their clues: do not reveal a hidden payoff or grant
+future POV knowledge. Payoff actions work toward the specified planned resolution
+using the exact referenced seed Scenes, allowing discovery during the current
+scene rather than assuming it at entry. Preserve semantic beats in the author's
+voice; these are not mandatory verbatim phrases. Missing, cross-project or
+over-budget plan context remains uncertain and cannot be invented or committed.

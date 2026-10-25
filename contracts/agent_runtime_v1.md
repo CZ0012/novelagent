@@ -227,6 +227,13 @@ only requested text and bounded reported model metadata, not hidden thinking or
 raw provider bodies. Services accept plain JSON or one complete JSON Markdown
 fence, rejecting surrounding prose, truncated fences and multiple fenced blocks.
 
+ProviderError remains compatible with RuntimeError while exposing only safe
+category/status and a conservative outcome_known flag. A fully received HTTP or
+invalid/truncated response is a known failure; URLError, timeout and partial-read
+failures leave completion unknown. Semantic reports retain this distinction so
+autonomous planning cannot clear an unknown paid-call reservation merely because
+the reviewer returned an inconclusive diagnostic. No transport retry is added.
+
 This release implements synchronous text protocol adapters, not server-side
 Agent tool loops, hosted memory, response-ID continuation, or automatic tool
 execution. Existing local orchestration and human review stay authoritative.
@@ -287,3 +294,65 @@ distinguishes reasoning content from final answer content. The author may
 explicitly disable thinking to allocate the requested completion budget to final
 structured output. This is an explicit configuration choice, never a silent
 reaction or paid retry after a failed generation.
+
+## Explicit DeepSeek reasoning effort and visible completion allowance
+
+Default connections add nullable `llm_reasoning_effort`; named profiles add
+nullable `reasoning_effort`. Explicit values are `low`, `high`, or `max`. Unset
+and null mean no effort override; `none` is intentionally not accepted because
+`thinking_mode = disabled` is the single unambiguous disable control. A non-null
+effort is valid only on official HTTPS api.deepseek.com Chat Completions and
+cannot coexist with disabled thinking. `provider_default` plus explicit effort
+is valid: the documented API reasoning_effort value enables thinking. The wire
+field is omitted unless the author explicitly selects an effort.
+
+Task snapshots freeze this nonsecret choice. Named-profile updates that omit it
+retain the existing choice; explicit null clears it. Newly generated execution
+provenance includes explicit effort. ModelExecution serialization omits the key
+when unset/null, including nested Proposal/report serialization, so historical
+records and prior run fingerprints do not acquire an invented default field.
+`STORYGRAPH_LLM_REASONING_EFFORT` can configure the same optional default value.
+
+`completion_budget(provider, base)` leaves the service baseline unchanged when
+no thinking/effort override is explicit, including provider_default/no-effort
+and disabled/no-effort. Explicit low, high, or enabled thinking without an effort
+adds 32,768 completion tokens; max and every expanded result
+are capped at a total 65,536. This is an explicit bounded ceiling for reasoning
+plus final structured output, not a guaranteed output length or a paid retry.
+
+Every affected service places that actual ceiling in `LLMRequest.max_tokens`
+BEFORE provider invocation, so a financial guard observes the exact requested
+wire limit. The transport never inflates a caller's request behind the guard.
+For low effort, long-form planning's 20,000 baseline becomes 52,768;
+state extraction's 8,000 becomes 40,768; a typical 2,500-character scene's
+planned 6,024 becomes 38,792. Existing service baselines remain unchanged for
+default/disabled calls. Provider wrappers must delegate the frozen thinking_mode
+and reasoning_effort attributes when services compute the visible allowance.
+
+No option relaxes structured schemas, cuts extra chapters, repairs malformed
+JSON, changes the exact model/protocol, or silently retries a paid request.
+Changing a run's frozen effort requires a new explicit run or an authorized
+compatible seed path, never an invisible mutation of the active run.
+
+Verified official source on 2026-10-25:
+[DeepSeek Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)
+defines reasoning_effort low/high/max as enabling thinking and none as disabling,
+with high as its provider default. Budget allowances above are bounded local
+application policy; they are not a claim that DeepSeek guarantees those token
+amounts are sufficient for every request.
+
+The low allowance was increased after a completed paid-response observation
+reported a length stop at the earlier 16,192-token review ceiling with no complete
+JSON. The provider effort remains low; this does not select high effort or change
+the connection/model fingerprint. The larger ceiling is visible before the next
+explicitly authorized call, and financial guards still enforce their call/cost
+caps. No rejected response becomes valid and no automatic retry is introduced.
+
+Semantic review now explicitly selects a larger service-specific thinking
+allowance through the same helper, after a known complete response exhausted
+40,768 tokens without final JSON. `thinking_allowance`, when supplied internally,
+must be an integer from 1 to 65,536; every expanded result still has the total
+65,536 cap. Only semantic review opts into a 65,536 total ceiling for explicitly
+enabled thinking/effort. Default and disabled non-thinking review ceilings remain
+8,000, planning remains 52,768 under low effort, and the transport never rewrites
+the caller's visible request. Effort/model/configuration fingerprints are unchanged.

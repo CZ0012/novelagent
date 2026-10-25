@@ -13,6 +13,7 @@ from storygraph.core.errors import ContractError, ModelOutputError
 from storygraph.models.project import CrossLanguagePolicy, OutputLanguage, localized
 from storygraph.services.json_output import unwrap_json_fence
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
+from storygraph.services.generation_budget import completion_budget
 from storygraph.services.project_language import (
     authoritative_language_message,
     enforce_source_language_policy,
@@ -386,7 +387,7 @@ class LLMProjectStructureAnalyzer(RuleBasedProjectStructureAnalyzer):
             LLMRequest(
                 model=self.model,
                 temperature=self.temperature,
-                max_tokens=4096,
+                max_tokens=completion_budget(self.provider, 4096),
                 messages=self._messages(
                     project_id=project_id,
                     title=title,

@@ -62,6 +62,32 @@ class ContextGap(ContractModel):
     source: str | None = None
 
 
+class PlannedCausalPrecondition(ContractModel):
+    scene_id: str = Field(min_length=1, max_length=200)
+    relation_id: str = Field(min_length=1, max_length=200)
+    planned_summary: str | None = Field(default=None, max_length=4000)
+    planned_outcome: str | None = Field(default=None, max_length=4000)
+
+
+class PlannedForeshadowingAction(ContractModel):
+    id: str = Field(min_length=1, max_length=200)
+    relation_id: str = Field(min_length=1, max_length=200)
+    action: Literal["seed", "payoff"]
+    clue_text: str | None = Field(default=None, max_length=4000)
+    planned_payoff: str | None = Field(default=None, max_length=4000)
+    seed_scene_ids: list[str] = Field(default_factory=list, max_length=30)
+    do_not_reveal_payoff: bool
+
+
+class ApprovedScenePlan(ContractModel):
+    semantics: Literal["approved_plan_not_realized_facts"] = "approved_plan_not_realized_facts"
+    planned_outcome: str | None = Field(default=None, max_length=4000)
+    emotional_turn: str | None = Field(default=None, max_length=4000)
+    target_length: int | None = Field(default=None, ge=1, le=2000000)
+    causal_preconditions: list[PlannedCausalPrecondition] = Field(default_factory=list, max_length=30)
+    foreshadowing_actions: list[PlannedForeshadowingAction] = Field(default_factory=list, max_length=30)
+
+
 class ContextPack(ContractModel):
     contract_version: Literal["context_pack_v1"] = "context_pack_v1"
     project_id: str
@@ -73,6 +99,7 @@ class ContextPack(ContractModel):
     timeline_position: str
     scene_goal: str
     conflict: str
+    scene_plan: ApprovedScenePlan | None = None
     required_characters: list[str] = Field(default_factory=list)
     canon_entities: list[dict] = Field(default_factory=list)
     temporal_states: list[TemporalStateProjection] = Field(default_factory=list)

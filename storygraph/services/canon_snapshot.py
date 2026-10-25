@@ -228,6 +228,11 @@ def build_canon_snapshot(
         frozen.nodes = nodes
         frozen.relationships = {relation.id: relation for relation in relations}
         projections, used_assertions = {}, set()
+        entry_knowledge = {
+            subject_id: frozen.get_character_knowledge(subject_id, scene_id=scene_id,
+                timeline_position=nodes[scene_id].properties.get("timeline_position"), at_scene_start=True)
+            for subject_id in sorted(relevant) if nodes[subject_id].type == "Character"
+        }
         for subject_id in sorted(relevant):
             subject = nodes[subject_id]
             if subject.type not in {"Character", "Item"}:
@@ -255,12 +260,25 @@ def build_canon_snapshot(
             if fact.id not in selected_ids:
                 continue
             node = nodes.get(fact.id) if fact.kind == "node" else None
+            if fact.kind == "relation":
+                relation = frozen.relationships[fact.id]
+                if relation.type in {"KNOWS_SECRET", "BELIEVES_FALSELY", "SUSPECTS", "HIDES_FROM"}:
+                    boundary = entry_knowledge.get(relation.source_id)
+                    if boundary is not None and relation.id not in boundary.source_refs:
+                        continue
             if (node and node.properties.get("event_kind") == "temporal_state_assertion_v1"
                     and fact.id not in used_assertions):
                 continue
             if fact.id in projections:
                 payload = json.loads(fact.text)
                 payload["state_at_scene_entry"] = projections[fact.id].model_dump(mode="json")
+                fact = fact.model_copy(update={"text": canonical_json(payload)})
+            if fact.id in entry_knowledge:
+                payload = json.loads(fact.text)
+                payload["knowledge_at_scene_entry"] = {
+                    "scene_id": scene_id, "at_scene_start": True,
+                    **entry_knowledge[fact.id].model_dump(mode="json"),
+                }
                 fact = fact.model_copy(update={"text": canonical_json(payload)})
             records_for_prompt.append(fact)
     def priority(fact):

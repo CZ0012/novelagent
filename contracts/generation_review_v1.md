@@ -23,6 +23,15 @@ findings when no semantic provider is configured.
 `output_language`, optional exact `scene_id`, and `purpose` (`scene` by default,
 or explicit `plan`). A versioned Proposal must be
 resolved to that version's body; a Draft must never be replaced by latest.
+For normal long-form expansion review, the server additionally resolves its
+exact accepted/applied scoped parent under the existing parent contract and
+builds a deterministic review projection: current saved plan, parent blueprint,
+parent ID/version/content hash and frozen whole-volume batch progress. The
+original immutable author brief is also included, rather than inferred from
+indirect style rubrics or replaced by the current batch request. The
+target hash covers this complete projection, so parent changes invalidate the
+report. This is explicit server-resolved context, not client-supplied text or
+canon promotion. Normal blueprint review and scene/Draft text stay unchanged.
 
 `build_canon_snapshot` reads CANON nodes and relationships only. Ownership is
 verified for the project, scene, every node and both relation endpoints. It never
@@ -79,14 +88,110 @@ Dimensions are `knowledge_boundary`, `timeline`, `location_state`,
 `style_constraint`. Machine identifiers remain stable; human-readable findings
 follow the saved target language and exact quotes retain their source language.
 
+Language validation of review human fields alone uses a bounded exact-identifier
+filter before the shared heuristic: source IDs, actual structured JSON keys and
+fixed schema keys may be removed from a temporary validation copy with identifier
+boundaries. Tokens come only from current target/canon/style/registry data and
+known schema names (at most 4,000 tokens/80,000 identifier characters and 300,000
+source characters). Arbitrary English sentences are never allowlisted as tokens.
+For Chinese reports, every cleaned human field must still contain Han text;
+known-ID-only fields are not meaningful Chinese. Unknown tokens remain subject
+to the normal guard. Original summaries, descriptions, suggestions, citations
+and hashes are never rewritten. This exception does not change Draft/writer or
+general project-language validation.
+
 Each issue contains `id`, `dimension`, stable severity (`low`, `medium`, `high`,
-`critical`), `description`, `suggestion`, and bounded `evidence`. Each evidence
+`critical`), `finding`, `description`, `suggestion`, and bounded `evidence`.
+`finding` is `contradiction`, `required_gap`, or `advice`. Missing legacy values
+default to `contradiction`, preserving their blocking meaning. A contradiction
+requires genuinely incompatible established facts under the same time/scope;
+a required gap is a missing prerequisite that prevents checking/executing the
+requested scope. Both are blocking regardless of severity. Advice is optional
+expansion detail or literary improvement, only `low` or `medium`; severe advice
+is invalid provider output, never an automatic pass or a forced repair.
+
+Each evidence
 item has `kind` (`target`, `canon`, `style`), exact supplied `ref`, and a nonempty
-verbatim `quote` of at most 500 characters. Scene-purpose issues must cite the exact target
-and either a supplied scoped canon record or, for style, a supplied rubric/preset
-reference. Every quote is checked as an exact substring of that source. Unknown
+verbatim `quote` of at most 500 characters. Nonstyle `advice` may cite one exact
+target passage: an optional improvement does not assert a conflict between two
+established claims. Contradictions and required gaps retain the stricter scoped
+canon-or-internal-plan-pair requirement below. Style advice still requires both
+the target and an applicable supplied style source. Every quote is checked as an
+exact substring of that source. Unknown
 IDs, another target ID, invented quotes, missing grounding, duplicate dimensions
 or issue IDs, and unsupported fields invalidate the entire model judgment.
+
+### Exact citation registry
+
+Provider inputs additionally expose `evidence_sources`, a bounded map of stable
+content/path-derived IDs to exact `{kind,ref,quote,path}` source segments. The
+provider may cite an alternative evidence object containing exactly
+`{source_id:"a supplied key"}`. The server resolves this declared form to the
+existing canonical `{kind,ref,quote}` before strict model and original-source
+validation. Unknown IDs, non-string IDs, or mixed `source_id` plus overrides or
+extra metadata invalidate the judgment. Canonical persisted evidence does not
+gain a provider-authored quote, alternate source kind or unverified ref.
+
+New ephemeral aliases use `ev_` plus 16 hexadecimal characters to reduce model
+copy burden. Before registering an alias, compare its complete source identity
+and metadata against any existing record under the same prefix. A different
+record colliding with that prefix fails closed with a safe
+`semantic_review_evidence_collision` diagnostic before provider invocation; it
+must not silently overwrite, merge, drop or select a source. Identical repeated
+source records may reuse their exact alias.
+
+Lookup is still exact and case-sensitive. Missing characters, unknown IDs,
+unregistered legacy IDs and mixed overrides remain invalid; no prefix, edit
+distance or other fuzzy repair is permitted. Shortening future aliases cannot
+make an earlier failed response valid, and failed reports/responses remain
+unchanged. Persisted evidence contains only canonical kind/ref/quote, not these
+aliases; target/canon/style hashes and existing report freshness do not change.
+
+Every registered quote is a nonempty substring of the ORIGINAL validation text,
+at most 500 characters. For structured JSON string leaves, use the inner
+`json.dumps(value,ensure_ascii=False)` representation and verify that encoded
+text actually occurs in the original serialized source. Exact raw segments are
+available when decoding/encoding cannot yield a source match. No fuzzy quote
+repair, paraphrase matching, normalization or invented quotation is performed.
+The registry is capped at 2,000 entries and 180,000 serialized characters;
+`evidence_registry_coverage` explicitly records omissions. These convenience
+aliases do not truncate or replace the full target/canon/style input. Legacy
+exact quotes remain supported when a segment is outside the registry. Source
+coverage and normal grounding requirements remain unchanged.
+
+For an unambiguous structured plan-purpose input, the wire carries the COMPLETE
+decoded `plan_content` ONCE, plus bounded target ID/version/language/purpose
+metadata and `target_text_sha256`. It omits the redundant escaped raw text copy.
+The original immutable `target.text` stays local and remains the sole hash and
+exact-quote validation source; no plan field, source segment, criterion or
+finding is removed. The full quote-bearing citation registry is unchanged.
+This is not a rewrite, a new source, a canon assertion or a replacement hash.
+
+The optimization requires a JSON object/list with unique keys, finite numbers
+and exactly representable string-source segments. Prose, scalar/unparseable
+legacy text, duplicate-key/nonfinite data or alternate escaping that cannot be
+exactly represented retains raw `target.text` and a null parsed-plan view. No
+normalization/fuzzy matching is introduced to make a citation pass. Persisted
+evidence always refers to the untouched original target, including its original
+escaped quotes and newlines. Both transport shapes preserve coverage and gates.
+Registry entries additionally carry bounded deterministic `context` labels when
+their saved structure declares them: `volume_index` from volume records,
+expansions or arc turns; `chapter_index` from chapter records; and
+`character_id` from character arcs. Labels propagate only within their actual
+ancestor record. An array position is never converted into a chapter/volume
+number: `/volumes/0` may describe declared volume 2, for example.
+
+The prompt requires attribution to those declared indices, not zero-based path
+positions; volume-2 evidence cannot substantiate a volume-1 claim. Context stays
+server-derived navigation metadata. A provider cannot supply or override it in
+the `{source_id}` form. Resolution still emits ONLY canonical kind/ref/quote,
+with every original quote, source hash, registry bound and blocking rule intact.
+For causal-link records, context also includes declared `from_volume` and
+`to_volume`: the `cause` string is labelled with source `volume_index`, while
+the `effect` string is labelled with destination `volume_index`. No timing is
+inferred from link ID names. The critic must distinguish a cause wrongly placed
+in its source volume from a legitimate consequence or climax in the destination
+volume; search basis can precede later action and acquisition.
 
 Provider output is strict bounded JSON. Invalid JSON, Markdown wrappers,
 incomplete/unknown dimensions, failures and missing context cannot produce pass.
@@ -95,13 +200,27 @@ with stable safe limitation codes; endpoints, credentials and parser bodies must
 not enter reports. Valid grounded issues may still be preserved when coverage
 is incomplete, but the report status remains `inconclusive`.
 
+Provider failures additionally distinguish a known response outcome from unknown
+transport completion through safe limitations
+`semantic_review_provider_outcome_known` or
+`semantic_review_provider_outcome_unknown`, alongside the existing
+`semantic_review_provider_failed`. HTTP error responses and completed invalid or
+length-limited responses are known failures; they are never passing judgments.
+Timeouts, connection/partial-read failures and unclassified provider exceptions
+are conservatively unknown. No raw exception, response body or reasoning text is
+persisted. Completed text rejected by local review JSON/schema validation remains
+ordinary `semantic_review_invalid_output`, not an in-flight provider request.
+
 `coverage` records `method` (`semantic_model` or `deterministic_only`),
 `canon_complete`, `target_complete`, `scope`, `omitted_unrelated_facts`,
 `missing_context`, and `limitations`. An exact target over 100,000 characters is
 `blocked` before provider invocation; no silent target truncation is allowed.
 Missing provider or invalid/partial coverage is `inconclusive`. Full coverage
-with grounded findings is `needs_revision`; only full declared coverage with no
-issues may pass. A model may explicitly return blocked or inconclusive when the
+with any contradiction/required gap is `needs_revision`, even if a model says
+pass or rates the problem low. Under complete adequate coverage, a model's
+pass/needs_revision with advice only becomes pass while retaining every
+advisory item and an explicit advisory-count/no-blocking-conflict summary.
+Explicit blocked/inconclusive is preserved. A model may explicitly return blocked or inconclusive when the
 available canon cannot substantiate a decision.
 
 ## Freshness and persistence
@@ -150,9 +269,10 @@ that absence alone does not create `insufficient_story_canon`: the model reviews
 the proposed world's own consistency. Proposed rules/entities/style remain draft
 data, never canonical authority. Existing canon, when supplied, stays authoritative.
 
-A nonstyle internal-plan contradiction may be grounded by at least two DISTINCT
+A nonstyle internal-plan contradiction or required gap may be grounded by at least two DISTINCT
 exact target quotes from the same exact Proposal ID, instead of target-plus-canon
-citations. Both quotes must occur verbatim in the saved body; a single quote,
+citations. Both quotes must occur verbatim in the exact resolved review text
+(saved blueprint body or the explicitly pinned expansion projection); for these blocking claims a single quote,
 duplicate quote, fabricated quotation, or different target ID invalidates the
 judgment. Target-plus-canon remains supported. Style issues continue to require
 the supplied rubric/preset evidence. This evidence exception never applies to a
@@ -163,6 +283,11 @@ may legitimately contain prohibited phrases in `banned_patterns`, style
 definitions, rubrics or negative examples; those mentions are not prose violations.
 Plan review keeps style sources for consistency diagnostics but never creates
 literal banned-phrase findings merely from those definition strings.
+The server supplies an explicit `output_language_policy` style source derived
+from the frozen target language. A model flagging stray natural-language prose
+must cite its target span plus that policy (or another applicable supplied style
+source). Missing style citations still invalidate output; the server never
+retroactively attaches a policy quote or drops an invalid advisory finding.
 
 The review prompt explicitly crosschecks world rules against causal summaries,
 operating limits, energy creation/storage/transfer, prerequisites, exceptions and
@@ -171,6 +296,47 @@ character-arc turns, causal links, clue setup/payoff, and every mystery's cause,
 resolution, actor and cost. Checking JSON structure alone does not establish
 these semantic properties. Model mistakes remain possible.
 
+For a central claimed resolution, the plan critic must assess the claim, available
+story evidence and essential inferential bridge under the declared world rules.
+Custody, authenticity/integrity, formal acceptance and correlation establish those
+properties; they do not alone prove event truth, identity, timing or causation.
+Author-dossier truth is not evidence already acquired by the POV/investigators.
+An omitted bridge needed to support a central resolution is `required_gap`, not
+optional outline brevity or low-severity advice; the alternative is to narrow the
+claimed conclusion to its support. Minor procedural details and unstated
+real-world legal requirements are not mandatory.
+
+Source identity must remain distinguishable across immutable originals, working
+copies, caches and later exports. A derived copy is not independent corroboration;
+a sealed original cannot silently be overwritten, disappear or become a different
+source. Distinguish genuinely new information from re-exported content, and event
+time from observation/report/upload/export timestamps. Explicit nonlinear
+narration is allowed; no guessed chronology or invented proof bridge may repair
+an inconsistency. These are model-review requirements, not a deterministic proof
+checker or evidence that the retained independent acceptance failure is solved.
+
+The prompt distinguishes a planning dossier from scene prose: revealing the
+killer to the author does not give a POV character that knowledge. Suspicion,
+later proof and later quantification are normal stages; possession, working
+copies, formal submission and sealed evidence are different acts. Oral
+instructions do not establish signed authorization. Missing incidental dates
+or routes are advice unless a real prerequisite is missing. Typed life and
+physical-state slots are independent (`dead` plus `injured` is valid); reviewers
+must not invent `deceased` or other unsupported enum values. The entry baseline
+is distinguished from backstory, later revelations and explicit flashbacks.
+When a dossier explicitly says a Character already knows a declared Secret at
+entry but the typed initial_knowledge baseline omits it or is absent/unknown,
+the mismatch is a blocking required_gap. Descriptive arcs cannot override Graph
+knowledge authority. This does not infer knowledge from vague association, an
+author's revealed synopsis or a future discovery; the source claim and typed
+baseline must be grounded explicitly.
+
+Bounded planning repair uses only blocking findings, never advisory suggestions.
+An advice-only passing review therefore cannot spend a repair call. Unknown
+state, missing required context, source staleness, actual truncation and
+ungrounded/invalid output keep their existing conservative behavior; this
+classification does not authorize automatic canon changes or force a model pass.
+
 Coverage records `scope = plan`, `purpose = plan`, selected evidence counts and
 omissions. A passing plan report means planned-draft consistency within those
 inputs; it does not certify scene facts, a completed manuscript, exhaustive
@@ -178,3 +344,7 @@ historical recall or human canon approval. Human accept and explicit apply remai
 separate. Plan adoption may require a fresh passing report on the accepted exact
 Proposal version; any content/version, purpose, canon, evidence or style change
 invalidates it under the standard freshness rules.
+For autonomous expansion batches, the review projection includes the shared
+whole-volume progress (for example current chapters 1–5, total 20, remaining
+6–20). The critic checks pacing against that scope without treating a partial
+batch as the entire volume or confusing partial proof with final resolution.
