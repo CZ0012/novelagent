@@ -23,6 +23,8 @@ from storygraph.models.project import CrossLanguagePolicy, OutputLanguage, local
 from storygraph.models.proposal import ProposalArtifact, ProposalProvenance, ProposalRef
 from storygraph.services.canon_seed import AuthorCanonSeedService
 from storygraph.services.graph_query import GraphQueryService
+from storygraph.services.project_style import project_style_message, resolve_project_style
+from storygraph.services.canon_snapshot import build_canon_snapshot
 from storygraph.services.llm_provider import LLMMessage, LLMRequest
 from storygraph.services.project_language import (
     authoritative_language_message,
@@ -30,6 +32,7 @@ from storygraph.services.project_language import (
     resolve_project_output_language,
     validate_generated_output_language,
 )
+from storygraph.services.quality_policy import require_composition_application_allowed
 from storygraph.services.project_structure_analyzer import (
     validate_project_structure_output_language,
 )
@@ -290,6 +293,7 @@ def generate_composition(
         "sources": sources,
         "included_draft": included,
         "cross_language_policy": request.cross_language_policy,
+        "canon_snapshot": build_canon_snapshot(graph, project_id=project_id).model_dump(mode="json"),
     }
     serialized = json.dumps(payload, ensure_ascii=False)
     if len(serialized) > 100000:
@@ -298,6 +302,7 @@ def generate_composition(
             "composition_input_too_large",
         )
     preset_message = agent_preset_system_message(preset)
+    style_message = project_style_message(resolve_project_style(graph, project_id))
     response = provider.generate(
         LLMRequest(
             model=model,
@@ -316,6 +321,7 @@ def generate_composition(
                     ),
                 ),
                 *([LLMMessage(role="system", content=preset_message)] if preset_message else []),
+                *([LLMMessage(role="system", content=style_message)] if style_message else []),
                 LLMMessage(role="system", content=authoritative_language_message(language)),
                 LLMMessage(role="user", content=serialized),
             ],
@@ -646,6 +652,7 @@ def apply_composition(
         if {(ref.kind, ref.ref) for ref in proposal.derived_refs} - allowed_refs:
             raise _error("Unexpected composition derived references.")
         # Preflight every Draft identity before any durable graph write.
+        all_drafts_present = True
         for draft in draft_models:
             versions = draft_store.list_versions(project_id, draft.scene_id)
             if versions and not completed_graph:
@@ -658,6 +665,8 @@ def apply_composition(
                 existing_draft = draft_store.get_draft(draft.id)
             except KeyError:
                 existing_draft = None
+            if existing_draft is None:
+                all_drafts_present = False
             if existing_draft and (
                 existing_draft.project_id != project_id
                 or existing_draft.scene_id != draft.scene_id
@@ -665,6 +674,8 @@ def apply_composition(
                 or existing_draft.content_language != draft.content_language
             ):
                 raise _error("Composition Draft identity conflict.")
+        if not (completed_graph and all_drafts_present):
+            require_composition_application_allowed(local, project_id)
         if not completed_graph:
             staged_log = InMemoryEventLog()
             for event in events:

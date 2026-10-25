@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
+from contextlib import asynccontextmanager, nullcontext
 from threading import RLock
 
 from fastapi import FastAPI, HTTPException, Request
@@ -108,6 +110,7 @@ from storygraph.services.manuscript_composition import (
     CompositionRequest, CompositionApplyRequest, generate_composition, apply_composition,
 )
 from storygraph.services.source_draft import SourceDraftRequest, adopt_source_draft
+from storygraph.services.project_style import resolve_project_style
 from storygraph.stores.json_graph import save_json_graph
 from storygraph.workflows import SceneGenerationWorkflow
 
@@ -513,6 +516,7 @@ class ProposalDecisionRequest(ReviewRequest):
 
 
 class ProposalPromoteDraftRequest(BaseModel):
+    review_id: str | None = Field(default=None, min_length=1, max_length=200)
     expected_current_draft_id: str | None = Field(default=None, min_length=1, max_length=200)
     scene_id: str = Field(..., min_length=1)
     summary: str | None = None
@@ -538,7 +542,16 @@ class EditAcceptRequest(ReviewRequest):
 
 
 def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
-    app = FastAPI(title="StoryGraph Agent", version="0.1.17")
+    @asynccontextmanager
+    async def lifespan(application):
+        try:
+            yield
+        finally:
+            cleanup = getattr(application.state, "close_planning_executor", None)
+            if cleanup is not None:
+                cleanup()
+
+    app = FastAPI(title="StoryGraph Agent", version="0.2.0", lifespan=lifespan)
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -602,7 +615,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     context_builder = ContextPackBuilder(graph, draft_store, style_sample_store)
     checker = RuleBasedContinuityChecker()
     extractor = RuleBasedStateExtractor()
-    review = ReviewService(candidate_store, graph)
+    review = ReviewService(candidate_store, graph, draft_store=draft_store)
     canon_seed = AuthorCanonSeedService(graph)
     graph_query = GraphQueryService(graph)
     scene_workflow = SceneGenerationWorkflow(
@@ -1764,7 +1777,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     ) -> dict:
         require_permission(AgentPermissionLevel.FULL)
         try:
-            with scene_draft_promotion_lock, draft_store._lock:
+            graph_guard = graph.persistence_guard() if isinstance(graph, InMemoryGraphStore) else nullcontext()
+            with graph_guard, scene_draft_promotion_lock, draft_store._lock:
                 proposal = proposal_store.get(proposal_id)
                 _ensure_proposal_project(proposal, project_id)
                 _ensure_proposal_artifact_type(proposal, "scene_draft")
@@ -1784,6 +1798,9 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                         "draft": existing_draft.model_dump(),
                     }
                 _ensure_proposal_expected_version(proposal, request.expected_version)
+                quality_required = bool(graph.get_node(project_id).properties.get("require_semantic_review"))
+                if request.review_id or quality_required:
+                    app.state.require_generation_review(project_id, proposal_id, request.review_id)
                 current = draft_store.latest_for_scene(project_id, request.scene_id)
                 current_id = current.id if current else None
                 if ("expected_current_draft_id" in request.model_fields_set
@@ -2403,6 +2420,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     summary=request.summary,
                 ).model_dump()
             context_pack = context_builder.build(project_id=project_id, scene_id=scene_id)
+            if graph.get_node(project_id).properties.get("require_semantic_review"):
+                raise ContractError("This project requires reviewed scene proposals for generated prose; use the Agent workspace.")
             return create_scene_writer(settings, draft_store).write_and_save(
                 context_pack
             ).model_dump()
@@ -2447,6 +2466,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 provider=create_llm_provider(runtime),
                 model=runtime.llm_model,
                 agent_preset=runtime.agent_preset,
+                project_style=resolve_project_style(graph, project_id),
             )
             selected_source_documents = resolve_discussion_source_documents(
                 project_id,
@@ -2888,6 +2908,26 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return fact.model_dump()
 
+    from apps.api.authoring_routes import register_authoring_routes
+
+    register_authoring_routes(
+        app, graph=graph, settings=settings, proposal_store=proposal_store,
+        draft_store=draft_store, context_builder=context_builder,
+        require_permission=require_permission, require_llm=_require_llm_configured,
+        provider_factory=lambda runtime: create_llm_provider(runtime),
+        persist_snapshot=lambda snapshot: save_json_graph(snapshot, settings.graph_path)
+        if use_persistent_stores else None,
+        persistent=use_persistent_stores, review_service=review,
+    )
+    from apps.api.planning_run_routes import register_planning_run_routes
+
+    register_planning_run_routes(
+        app, graph=graph, settings=settings, proposals=proposal_store,
+        require_permission=require_permission, require_llm=_require_llm_configured,
+        provider_factory=lambda runtime: create_llm_provider(runtime),
+        persist_snapshot=lambda snapshot: save_json_graph(snapshot, settings.graph_path)
+        if use_persistent_stores else None,
+    )
     return app
 
 
@@ -3203,6 +3243,16 @@ def _validate_fact_draft_candidate(
         raise ContractError(
             f"CandidateFact {candidate.id} has invalid pre-review status {candidate.status}."
         )
+
+    for evidence in candidate.evidence:
+        try:
+            metadata = json.loads(evidence.note or "null")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(metadata, dict) and metadata.get("method") == "natural_state_extraction_v1":
+            if (metadata.get("draft_version") != source_draft.version
+                    or metadata.get("text_sha256") != hashlib.sha256(source_draft.text.encode()).hexdigest()):
+                raise ContractError("Natural state extraction source changed; extract the saved scene again.")
 
     span = candidate.source_span
     if not span.quote:

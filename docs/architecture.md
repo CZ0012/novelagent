@@ -1089,7 +1089,7 @@ Neo4j / SQLite / Vector Store 本地连接
 - 当前可运行入口是 CLI、FastAPI + React/Vite Web 工作台、面向桌面宿主的持久化后端入口 `python -m apps.api.desktop_server`，以及源码构建的 Tauri 桌面应用。
 - `apps.api.desktop_server` 启动 `apps.api.desktop:app`，使用 `STORYGRAPH_HOME` 或 Windows `%LOCALAPPDATA%\StoryGraph Agent\workspace` 下的持久化 workspace，并强制选择 JSON graph backend；它只创建 workspace，不会自动 seed demo canon。持久化或桌面空 workspace 应先显示项目创建；创建项目后，作者可以导入已有小说/资料，由 Agent 生成非正典 `project_structure_draft`，经作者接受并显式应用后才创建正式 Chapter/Scene 节点。需要默认 demo project 时，仍可调用 `POST /demo/seed`，该路径要求 full 权限并记录 reviewer、rationale 和 source_ref。已初始化的内置 demo 可以通过工作台或 `POST /demo/archive` 归档为非当前 canon 项目，以便回到空项目树。
 - 默认 `apps.api.main:app` 开发入口可用于本地 demo；不传入 settings 时它使用 seeded in-memory stores，不应被描述为完整桌面产品或持久化作者项目入口。
-- 当前 Tauri 构建脚本已验证：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、使用固定的 PyInstaller 6.21.0 生成 backend sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.13_x64-setup.exe`、Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.13_x64-setup.exe.sig`、用于 GitHub Release 的无空格副本及 `latest.json`。这些产物是本地源码构建输出；只有上传并发布后才构成签名 release channel。当前验证产物不包含 `nsis.zip`。
+- 历史 v0.1.13 的 Tauri 构建验证记录：`npm --prefix apps/desktop run build:installer` 会重新构建 Web 资源、使用固定的 PyInstaller 6.21.0 生成 backend sidecar，并产出本地 NSIS 安装器 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.13_x64-setup.exe`、Tauri updater 签名 `apps/desktop/src-tauri/target/release/bundle/nsis/StoryGraph Agent_0.1.13_x64-setup.exe.sig`、用于 GitHub Release 的无空格副本及 `latest.json`。具体产物版本由根 VERSION 决定。这些产物是本地源码构建输出；只有上传并发布后才构成签名 release channel。已验证产物不包含 `nsis.zip`。
 - 桌面壳只应复用健康且 `/health.workspace` 与配置工作区一致的本机后端；如果端口被其他工作区的旧后端占用，应在设置页报告冲突，而不是继续加载旧 workspace 的项目树。
 - FastAPI 当前提供本地 agent permission level：`read_only`、`read_generate`、`full`。这是防误操作的本地操作者授权分级，不是身份认证；保存设置页或调用 `/settings/agent` 代表本地操作者显式授权，因此可升降权限并立即生效；CLI 当前不执行同一权限闸门。
 - SG-018 持久资料库路径由 `source_document_v1` 约束：React/Vite 与 Tauri 工作台在本地抽取 `.txt`、`.md`、`.markdown`、`.docx` 文本并把 text + metadata JSON 逐个提交到项目 Source Store；初版后端不保存原文件字节。重启后仍可按稳定 ID 与相对路径读取。导入响应和列表只返回 summary；作者打开同项目详情时才取得 `extracted_text`。v0.1.7 的浏览器内存 `local_sources` / `imported_document` 流程可在迁移期兼容，但不得冒充持久资料，新的 Source Store proposal ref 统一使用 `source_document`。作者可显式让 Agent 从单个来源详情生成 `project_structure_draft`；该草稿只包含章节/场景结构 JSON，且只有作者接受并应用后才创建 Chapter/Scene 节点。Agent 对话只解析本次请求中的 `source_document_ids`、由 `included_draft_id` 精确固定且作用域匹配的已保存 Draft、显式选择的 Context Pack 和作者开启的联网搜索，并只生成 `scene_rebuild` 或 `scene_draft` proposal，不覆盖当前草稿、不创建候选事实、不写 canon。旧客户端省略 additive Draft ID 时可兼容读取 latest，但工作台不得使用该回退。CLI 文件输入仍只包括单个 UTF-8 文本作为风格样本或场景草稿。
@@ -1906,10 +1906,34 @@ v0.1.15 的原生更新准备在受管后端退出后，对 Windows sharing/lock
 
 ## 29. 模型任务分工与协议适配
 
-默认连接保留原有平面配置，命名连接作为高级选项。planning、writing、revision、discussion、extraction 五类任务可引用连接，未指定时继承默认；模型 ID 不决定协议，也不证明第三方服务实际使用的厂商模型。旧配置缺少 llm_protocol 时沿用 chat_completions。场景工作流和 CLI 使用相同解析规则。规划任务包括新章/卷结构及其首稿的一次请求；当前质检与状态标记抽取仍为规则流程。
+默认连接保留原有平面配置，命名连接作为高级选项。planning、writing、revision、discussion、extraction、continuity 六类任务可引用连接，未指定时继承默认；模型 ID 不决定协议，也不证明第三方服务实际使用的厂商模型。旧配置缺少 llm_protocol 时沿用 chat_completions。场景工作流和 CLI 使用相同解析规则。规划任务包括新章/卷及分阶段整书框架；规则质检与标记抽取保留为兼容入口，语义审查和自然正文状态抽取使用明确的独立模型请求。
 
 每次请求冻结配置、任务、协议、确切模型 ID 和预设。进行中的调用不受后续设置变更影响。结果和 Proposal/Draft/工作流来源记录非敏感 model_execution，旧历史不得补造模型来源。局部修改和人工审阅保留原来源，新的模型生成记录新的执行快照。密钥只保存在本地配置；前端收到掩码与是否已配置，不保存明文到浏览器存储。
 
 适配 Chat Completions、Responses 和 Anthropic Messages 的同步文本请求；Responses 显式 store:false，Anthropic 使用原生鉴权和 system 字段。不启用远端工具循环、响应 ID 续接或托管记忆。返回值必须是已完成的正文文本，推理块不能成为正文，截断、工具调用或无效 JSON 明确失败。允许一个完整 JSON 围栏，不猜测修复无效 JSON，也不隐式更换协议或付费重试。模型清单查询只验证读取清单能力。
 
 RTF 导入遵循 Source 合同：本地有界纯文本解析支持 Unicode、中文 GBK 和段落，跳过内嵌对象与格式。零字节、读取字节不一致、容器无效、编码不支持与无正文分别报告；Office 临时文件先跳过。诊断不得回显原文、密钥或绝对路径。导入、模型生成和草稿继续不直接写正典。
+
+## 30. SG-029 长篇规划、Agent 风格与证据审查
+
+长篇规划由 longform_plan_v1 定义，使用 Proposal Store 分阶段保存全书蓝图与最多五章的展开批次。生成只产生非正典提案；确切版本被作者接受后，通过显式应用和完整图谱快照校验建立世界、人物、风格、章场节点及来源事件。目标五十万字按卷/章/场景分配并验证总预算，不能把预算或合成测试当成实际完成正文。已写项目不能被新蓝图覆盖；重复应用依据完整事件证据恢复。
+
+项目 StyleProfile 是作者确认的 Agent 设计文风，优先于通用模型预设，场景可有显式覆盖。Context Pack 保存 profile ID/hash、rubric 和有名称的结构化实体事实，中文 token 预算采用保守估算。必要正典超出预算时报 critical 缺口，不删除硬规则换取表面成功。
+
+generation_review_v1 定义独立付费语义检查：固定 Draft 或 Proposal 版本、正文 hash、全项目正典 fingerprint、选中证据 fingerprint 与风格 fingerprint；报告持久保存在 generation_reviews.sqlite。场景检索包含相关人物/地点/秘密/规则及远距离伏笔，遗漏不相关事实可明确排除，必要证据被截断则不允许宣称通过。模型引用必须是原文子串和合法同项目正典 ID。检查失败/证据不合法/覆盖不足为 inconclusive；不自动重试或修改正文。接受/采用、场景起草、事实审阅仍分别执行。
+
+continuity 为显式第六任务连接，原规则检查入口保持无付费行为。新长篇项目设置 require_semantic_review，在 Agent scene_draft 采用前校验最新通过报告。draft_state_extraction_v1 从确切保存正文提取有原文跨度的状态变化，先写 fact_draft；不能把模型解释或提案自动当作 canon。当前这些增强通过 API/工作台使用，桌面复用相同后端，CLI 原有工作流单独保留。模型相关检查不能从逻辑上保证任意小说永无矛盾；验收必须包含自然中文对抗样例与真实调用证据。
+
+## 31. 历史状态与明确修正
+
+`temporal_state_v1` 在现有正典 Event 节点保存审阅通过的状态断言，不覆盖人物或物品的过去。首批类型为生死、伤势、位置、归属；明确初始值来自作者确认的 initial_state。写作读取场景入口状态，场景中途发生的死亡或转移不能提前变成开场事实。NEXT_SCENE 可达关系决定先后；未知、断链、循环或不可比较的顺序必须报告缺口。
+
+自然抽取的兼容状态变化经 append_state 候选审阅后提交，记录完整来源正文 hash、原文跨度和字段历史指纹，防止陈旧来源或并发审阅覆盖新历史。本地 JSON 先原子持久化断言及审计事件，再发布内存状态；Neo4j 未有等价支持时明确拒绝。作者可以针对错误历史状态提交明确修正候选：同一项目、实体、字段及生效场景，固定修订后保存的真实原文范围，接受后新增纠正记录并保留旧证据；模型不能自行纠正或删除历史。
+
+## 32. 独立整书规划任务
+
+`planning_run_v1` 将整书设计保存在非正典规划分支。一次明确创建授权限定调用次数、每步修订次数和批量大小；依次生成蓝图、章场批次、语义检查与有限定点修订，再检查完整蓝图及全书场景结果/因果/伏笔清单。最终汇总检查不声称检查了尚不存在的五十万字正文。来源和结果使用精确提案版本与 hash，子提案不能被程序伪造成人工接受。
+
+任务进度和调用预约与提案共用 SQLite 事务；已保存结果重启后可继续。未确认外部调用结果不会自动重发；需要用户明确选择可能再次付费的恢复。停止只允许当前调用结束并保存结果，不再发起下一次调用。配置、正典或来源变化必须暂停；预算不能悄悄增加。用户可以明确重新检查或选择阶段和修订要求恢复，旧产物保留。
+
+整书完成后生成固定全部子提案和报告的 bundle。作者接受该清单并显式应用后，本地后端在图谱锁内校验全部来源、审查时效、全书结构和当前正典，一次发布世界、风格、章场及审计事件。派生收据失败可以根据完整事件恢复；不宣称跨数据库硬崩溃事务或外部模型调用恰好一次。桌面复用同一本地后端，CLI 的原场景流程继续与新增工作台规划任务区分。

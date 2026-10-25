@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import math
+import re
+from contextlib import nullcontext
+
 from storygraph.core.errors import ContractError, GraphStoreError
 from storygraph.core.time import utc_now
 from storygraph.models.context import (
@@ -15,6 +19,9 @@ from storygraph.models.context import (
 from storygraph.models.graph import GraphNode
 from storygraph.models.project import OutputLanguage, localized
 from storygraph.services.project_language import resolve_project_output_language
+from storygraph.services.project_style import resolve_project_style
+from storygraph.services.graph_query import GraphQueryService
+from storygraph.services.temporal_state import get_state_assertions, resolve_temporal_state
 from storygraph.stores.draft_store import SQLiteDraftStore
 from storygraph.stores.graph_base import GraphStore
 from storygraph.stores.style_sample_store import StyleSampleStore
@@ -32,6 +39,20 @@ class ContextPackBuilder:
         self.style_sample_store = style_sample_store
 
     def build(
+        self,
+        *,
+        project_id: str,
+        scene_id: str,
+        target_tokens: int = 4000,
+        author_instruction_refs: list[str] | None = None,
+    ) -> ContextPack:
+        guard = getattr(self.graph_store, "persistence_guard", None)
+        with guard() if callable(guard) else nullcontext():
+            return self._build(project_id=project_id, scene_id=scene_id,
+                               target_tokens=target_tokens,
+                               author_instruction_refs=author_instruction_refs)
+
+    def _build(
         self,
         *,
         project_id: str,
@@ -144,7 +165,8 @@ class ContextPackBuilder:
                     )
                 )
 
-        style_props = props.get("style_constraints", {})
+        project_style = resolve_project_style(self.graph_store, project_id)
+        style_props = {**project_style, **(props.get("style_constraints") or {})}
         style = StyleConstraints(
             pov=style_props.get(
                 "pov",
@@ -162,6 +184,9 @@ class ContextPackBuilder:
             diction=style_props.get("diction"),
             dialogue_style=style_props.get("dialogue_style"),
             banned_patterns=style_props.get("banned_patterns", []),
+            profile_id=project_style.get("id"),
+            profile_sha256=project_style.get("sha256"),
+            rubric=style_props.get("rubric", []),
         )
         retrieved_style_samples = list(props.get("retrieved_style_samples", []))
         style_sample_refs = list(props.get("style_sample_refs", []))
@@ -181,6 +206,70 @@ class ContextPackBuilder:
             )
             style_sample_refs.extend(match.sample.id for match in matches)
 
+        entity_ids = set(required_characters)
+        if props.get("location_id"):
+            entity_ids.add(props["location_id"])
+        for boundary in knowledge:
+            for field in ("knows", "does_not_know", "falsely_believes", "suspects", "hides"):
+                entity_ids.update(getattr(boundary, field))
+        planning_text = " ".join(str(props.get(key) or "") for key in
+                                 ("title", "summary", "goal", "conflict", "outcome"))
+        snapshot = GraphQueryService(self.graph_store)._snapshot()
+        for node in snapshot.nodes.values():
+            if (node.type != "Item" or node.status != "CANON"
+                    or node.properties.get("project_id") != project_id):
+                continue
+            names = [node.properties.get("name"), *(node.properties.get("aliases") or [])]
+            initial = node.properties.get("initial_state") or {}
+            named = any(isinstance(name, str) and len(name) >= 2 and name in planning_text
+                        for name in names)
+            owner_history = get_state_assertions(self.graph_store, project_id=project_id,
+                                                 subject_id=node.id, field="owner_id")
+            owned = False
+            if owner_history or (isinstance(initial, dict) and "owner_id" in initial):
+                owner = resolve_temporal_state(
+                    self.graph_store, project_id=project_id, subject_id=node.id,
+                    scene_id=scene_id, fields=["owner_id"], at_scene_start=True,
+                ).states[0]
+                owned = owner.status == "resolved" and owner.value in required_characters
+            if named or owned:
+                entity_ids.add(node.id)
+        canon_entities = []
+        temporal_states = []
+        for entity_id in sorted(entity_ids):
+            try:
+                entity = self.graph_store.get_node(entity_id)
+            except GraphStoreError as exc:
+                if exc.category != "not_found":
+                    raise
+                continue
+            if entity.status != "CANON" or entity.properties.get("project_id") != project_id:
+                raise ContractError("Context entity does not belong to the requested project.")
+            # Structured facts only: no stored prose, source text or arbitrary prompt fields.
+            fields = ("name", "aliases", "content", "description", "current_status", "role",
+                      "desire", "fear", "arc_stage", "ability", "limitation", "truth_status",
+                      "reveal_plan", "revealed_at_scene_id", "rules")
+            canon_entities.append({"id": entity.id, "type": entity.type, "properties": {
+                key: entity.properties[key] for key in fields if key in entity.properties
+            }})
+            initial_state = entity.properties.get("initial_state") or {}
+            tracked = set(initial_state) if isinstance(initial_state, dict) else set()
+            tracked.update(node.properties["field"] for node in get_state_assertions(
+                self.graph_store, project_id=project_id, subject_id=entity_id,
+            ))
+            if tracked:
+                projection = resolve_temporal_state(
+                    self.graph_store, project_id=project_id, subject_id=entity_id,
+                    scene_id=scene_id, fields=sorted(tracked), at_scene_start=True,
+                )
+                temporal_states.append(projection)
+                if not projection.complete:
+                    missing_context.append(ContextGap(
+                        kind="temporal_state_unresolved", ref=entity_id, severity="critical",
+                        message=localized(output_language,
+                            zh="场景开始时的已跟踪人物或物品状态不完整，需确认初始状态或时间顺序。",
+                            en="Tracked state at scene entry is unresolved; confirm its baseline and chronology."),
+                    ))
         pack = ContextPack(
             project_id=project_id,
             output_language=output_language,
@@ -192,6 +281,8 @@ class ContextPackBuilder:
             scene_goal=props.get("goal") or "",
             conflict=props.get("conflict") or "",
             required_characters=required_characters,
+            canon_entities=canon_entities,
+            temporal_states=temporal_states,
             active_relationships=active_relationships,
             knowledge_boundaries=knowledge,
             must_include=props.get("must_include", []),
@@ -450,7 +541,10 @@ class ContextPackBuilder:
     @staticmethod
     def _estimate_tokens(pack: ContextPack) -> int:
         serialized = pack.model_dump_json()
-        return max(1, len(serialized) // 4)
+        # Conservative script-aware estimate, not a provider tokenizer. Chinese prose
+        # cannot use the English four-characters-per-token heuristic.
+        han = len(re.findall(r"[\u3400-\u9fff]", serialized))
+        return max(1, han + math.ceil((len(serialized) - han) / 4))
 
     def _apply_budget(self, pack: ContextPack, target_tokens: int) -> ContextPack:
         working = pack
@@ -461,22 +555,6 @@ class ContextPackBuilder:
                 "retrieved_style_samples",
                 localized(pack.output_language, zh="风格样本", en="style samples"),
                 lambda current: current.model_copy(update={"retrieved_style_samples": []}),
-            ),
-            (
-                "P4",
-                "unresolved_foreshadowing",
-                localized(
-                    pack.output_language,
-                    zh="未解决的伏笔",
-                    en="unresolved foreshadowing",
-                ),
-                lambda current: current.model_copy(update={"unresolved_foreshadowing": []}),
-            ),
-            (
-                "P3",
-                "relevant_world_rules",
-                localized(pack.output_language, zh="世界规则", en="world rules"),
-                lambda current: current.model_copy(update={"relevant_world_rules": []}),
             ),
             (
                 "P5",
@@ -516,19 +594,27 @@ class ContextPackBuilder:
 
         final_estimate = self._estimate_tokens(working)
         if final_estimate > target_tokens:
+            working = working.model_copy(update={"missing_context": [
+                *working.missing_context,
+                ContextGap(kind="context_budget_exceeded", ref=pack.scene_id,
+                           severity="critical", message=localized(pack.output_language,
+                               zh="必要的正典与风格上下文超出预算，需缩小场景范围或提高预算。",
+                               en="Required canon and style exceed the context budget; narrow the scene or raise the budget.")),
+            ]})
             dropped_items.append(
                 localized(
                     pack.output_language,
                     zh=(
-                        "受保护的 P0-P2 上下文仍超出目标 "
+                        "受保护的正典与风格上下文仍超出目标 "
                         f"{final_estimate - target_tokens} tokens"
                     ),
                     en=(
-                        "Protected P0-P2 context still exceeds target by "
+                        "Protected canon and style context still exceeds target by "
                         f"{final_estimate - target_tokens} tokens"
                     ),
                 )
             )
+        final_estimate = self._estimate_tokens(working)
         return working.model_copy(
             update={
                 "budget": working.budget.model_copy(

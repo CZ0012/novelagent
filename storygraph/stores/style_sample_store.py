@@ -14,7 +14,7 @@ from storygraph.models.source import canonicalize_source_language
 from storygraph.models.style import StyleSample, StyleSampleMatch
 
 
-TOKEN_RE = re.compile(r"[A-Za-z0-9_\u4e00-\u9fff]+")
+TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u3400-\u9fff]+")
 
 
 class StyleSampleStore(Protocol):
@@ -227,4 +227,11 @@ def _score_sample(
 
 
 def _tokens(text: str) -> set[str]:
-    return {match.group(0).lower() for match in TOKEN_RE.finditer(text)}
+    terms: set[str] = set()
+    for match in TOKEN_RE.finditer(text):
+        value = match.group(0).lower()
+        if "\u3400" <= value[0] <= "\u9fff" and len(value) > 1:
+            terms.update(value[index:index + 2] for index in range(len(value) - 1))
+        else:
+            terms.add(value)
+    return terms

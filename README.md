@@ -54,7 +54,7 @@ A scene with incomplete planning metadata can still discuss and continue its sav
 - Canon-safe graph stores with explicit provenance and event log entries, including the local JSON graph backend and optional Neo4j backend.
 - SQLite stores for drafts, proposal artifacts, candidate facts, workflow runs, and deterministic local style samples.
 - Context Pack builder with P0-P7 budgeting metadata, graph and draft provenance, retrieved style samples, and `missing_context` gap reports.
-- Rule-based scene writer, optional protocol-configured LLM scene writer, rule-based continuity checker, and rule-based candidate fact extractor.
+- Rule-based compatibility tools plus configured model writing, evidence-grounded semantic continuity/style review, and natural prose state extraction into human-reviewed candidates.
 - Review service that keeps generated `CandidateFact` records pending until a human accept, edit-accept, reject, or defer decision.
 - Human seed paths plus read-only project option lists for story-bible Characters, Locations, and graph relationships. Seed paths write canon only when the user supplies reviewer, rationale, source reference, and provenance.
 - Read-only graph query API and CLI commands for inspecting canon neighbors and relationships.
@@ -398,7 +398,7 @@ $env:STORYGRAPH_WORKFLOW_RUNTIME="local"
 
 The workbench `Run` Agent workflow button follows the `scene_generation` steps from `workflow_run_v1`: `build_context`, `write_draft`, `check_continuity`, `extract_state`, and `human_review`. The review step is a pause around pending candidates, not a canon write by itself.
 
-The API can also run `scene_generation` with `output_target=proposal_workspace`. That mode calls the configured writer, stores the result as a `scene_draft` proposal artifact, and skips continuity checking, state extraction, and human review because no Draft Store draft exists yet. The default `draft_store` mode remains compatible with existing CLI/API behavior.
+The API can also run `scene_generation` with `output_target=proposal_workspace`. That mode calls the configured writer, stores the result as a `scene_draft` proposal artifact, and skips continuity checking, state extraction, and human review because no Draft Store draft exists yet. The default `draft_store` mode remains compatible for legacy projects. Projects opting into semantic review require `proposal_workspace` and a current passing review before adoption.
 
 To run the same `scene_generation` flow through a real LangGraph `StateGraph` with SQLite checkpoints, install the optional extra and set:
 
@@ -463,3 +463,19 @@ Each connection explicitly selects Chat Completions, Responses, or Anthropic Mes
 Responses uses completed text output and `store: false`; Anthropic uses its native headers, top-level system prompt and Messages body. These are synchronous text adapters for the existing local Agent workflow. Hosted tool execution, server-side memory and response-ID continuation are not enabled. Model listing is read-only and is not proof of generation or tool support. Unsupported protocols, truncated output and malformed JSON fail without switching models, paid retries or canon changes.
 
 RTF (Rich Text Format) is a rich-text document format. Imports retain readable text and paragraph breaks, including Unicode and supported Chinese code pages, with bounded local parsing. A 0-byte DOCX has no content to extract; retrying cannot restore bytes missing from the original file.
+
+## Long-form planning and semantic review (source development)
+
+The author workbench now includes a project-level planning workspace. Start with a new project, describe the novel, and choose a target such as 500,000 Chinese characters. The Agent proposes a world/character/style blueprint and volume budgets. Review and accept that proposal, then explicitly apply it. Expand chapters in batches of at most five, review/apply each batch, and resume from the saved proposals after a restart. Planned character budgets are not generated manuscript word counts. Blueprint application selects a reviewed project StyleProfile; scene generation, revision and composition use that voice across configured models.
+
+Saved prose and exact proposal versions can receive an explicit **semantic review**, using the separate continuity model assignment. Reports show grounded text/canon evidence, scope, coverage and stale-input status. A passing scene report covers its selected scene evidence; it is not a proof that the entire novel has no contradictions. Long-form projects require a fresh passing report before adopting Agent prose from a scene proposal. Manual author saves remain available. **Extract prose state** uses the exact saved Draft to propose evidence-backed state changes; those remain fact proposals and still require CandidateFact human review before canon changes.
+
+This source change is available through the local FastAPI + React workbench and the same backend in a source-built desktop package. It does not update an installed desktop app by itself or publish a signed release. The CLI retains its existing scene workflow; the new planning/review controls currently use the API/workbench. GitHub remains solely the software update channel. Semantic accuracy, literary quality and complete long-novel acceptance require the separate evidence recorded for this development task.
+
+### Independent whole-book planning
+
+Choose **Whole-book planning → Plan the complete book** to run a bounded background task that produces the world/style blueprint and all chapter batches before any canon application. Select the maximum model calls and repair attempts; stop/resume is explicit and progress survives restart. Uncertain external calls require a separate retry choice. Existing unapplied blueprints can be reused by exact version. A completed bundle pins all plans and reports; inspect and accept it, then explicitly apply the entire structure once. This generates a framework, not a 500,000-character manuscript.
+
+Reviewed temporal state records preserve life, condition, location and ownership at each scene. Historical mistakes can be corrected from exact saved same-scene evidence through a pending correction and normal human review; the previous record remains auditable. Plain author saves remain available, while generated prose in protected projects must pass its current semantic review. The UI distinguishes observations that do not change state.
+
+DeepSeek official Chat Completions connections now expose an explicit thinking switch. Provider default is preserved unless the author changes it; an incompatible host/protocol is rejected before a call. Call budgets do not claim a universal currency estimate across third-party providers.

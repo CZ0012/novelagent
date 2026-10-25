@@ -154,8 +154,8 @@ def routed_config():
         llm_api_key="default-secret", llm_model="default-model", connection_profiles=[
             {"id": role, "name": role, "protocol": "responses" if role != "extraction" else "anthropic_messages",
              "base_url": f"https://{role}.example/v1", "model": f"{role}-model", "api_key": f"{role}-secret"}
-            for role in ("planning", "writing", "revision", "discussion", "extraction")],
-        task_assignments={role: role for role in ("planning", "writing", "revision", "discussion", "extraction")})
+            for role in ("planning", "writing", "revision", "discussion", "extraction", "continuity")],
+        task_assignments={role: role for role in ("planning", "writing", "revision", "discussion", "extraction", "continuity")})
 
 
 def test_legacy_load_and_profile_secret_preservation_are_atomic(tmp_path):

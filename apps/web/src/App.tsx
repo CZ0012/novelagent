@@ -151,7 +151,19 @@ import {
   sourceAgentEligibility
 } from "./reviewPolicies";
 import { canHydrateDraftLoad, draftSaveCompletionPolicy, draftScopesMatch, type DraftScope } from "./draftProtection";
-import { AgentPresets } from "./AgentPresets";
+import { GenerationReviewPanel, reviewAllowsAdoption, reviewAllowsPlanApplication, proposalSemanticReviewBlocked, type GenerationReviewResult } from "./GenerationReviewPanel";
+import { ProjectStyleSummary } from "./ProjectStyleSummary";
+import { TemporalHistoryPanel } from "./TemporalHistoryPanel";
+import type { TemporalCorrectionOptions } from "./temporalCorrection";
+import { TemporalCandidateNotice, TemporalContext, TemporalProposalPreviews, type EntityLabels } from "./TemporalStateView";
+import { ObservationNotice, FactProposalObservations } from "./FactObservation";
+import { indeterminateApplyFailure, longformRetryMatches, type LongformApplyAttempt } from "./longformApplicationRecovery";
+import { PlanningBundlePreview } from "./PlanningBundlePreview";
+import { parsePlanningBook, parsePlanningBranch, planningBookApplied } from "./planningRuns";
+import { LongformRevision, type LongformRevisionMode } from "./LongformRevision";
+import { PlanningWorkspace, LongformPreview } from "./PlanningWorkspace";
+import { parseLongformPlan, longformApplied, type BlueprintRequest, type ExpansionRequest, type LongformGenerationResult, type LongformApplyResult } from "./longformPlanning";
+import { AgentPresets, presetDisplay } from "./AgentPresets";
 import { classifyDocumentFile, extractDocumentFile } from "./documentImport";
 import { importErrorCode, importFailureMessage, sourceImportFailureMessage, sourceImportWarningMessage } from "./documentImportMessages";
 import { ModelRoutingSettings, modelExecutionLabel } from "./ModelRoutingSettings";
@@ -171,7 +183,7 @@ import { changedMetadataFields, chapterEditorMatches, chapterTitleIsDirty, chapt
 import "./styles.css";
 
 type InspectorTab = "agent" | "context" | "continuity" | "facts" | "settings";
-type WorkspaceTab = "write" | "sources" | "proposals" | "workflow";
+type WorkspaceTab = "write" | "sources" | "proposals" | "workflow" | "planning";
 
 type LibraryTreeNode = {
   id: string;
@@ -445,6 +457,9 @@ export default function App() {
     setInspectorOpen(true);
   }, []);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("write");
+  useEffect(() => { if (workspaceTab === "planning") setInspectorOpen(false); }, [workspaceTab]);
+  const [generationReview, setGenerationReview] = useState<GenerationReviewResult | null>(null);
+  const [longformApplyRetry, setLongformApplyRetry] = useState<LongformApplyAttempt | null>(null);
   const [contextPack, setContextPack] = useState<ContextPack | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const currentDraftRef = useRef(draft);
@@ -1927,6 +1942,11 @@ export default function App() {
     setActiveTab("agent");
   }, []);
 
+  const openReviewedSceneWriting = useCallback(() => {
+    setAgentTarget("scene"); setReadingChapterId(null); setWorkspaceTab("write"); setActiveTab("agent");
+    setAgentDiscussionForm((current) => ({ ...current, mode: draft?.text.trim() ? "revise_scene" : "create_scene", includeLatestDraft: Boolean(draft?.text.trim()), includeContextPack: true, selectedText: "", selectedStart: undefined, selectedEnd: undefined, selectedDraftId: undefined }));
+  }, [draft]);
+
   const requestAgentDiscussion = useCallback(async () => {
     if (!endpoint || !projectId) throw new Error(uiText.errors.selectScene);
     const instruction = agentDiscussionForm.instruction.trim();
@@ -2362,6 +2382,87 @@ export default function App() {
     setNotice(uiText.manuscript.compositionApplied);
   }, [apiBase, projectId, sceneId, selectedProposal, proposalDirty, refreshWorkspace, refreshGraphPreview, refreshProposals, hydrateProposalEditor]);
 
+  const extractNaturalState = useCallback(async () => {
+    const target = { apiBase, projectId, sceneId };
+    if (!draft || draftLoading || draftDirtyRef.current || draft.project_id !== projectId || draft.scene_id !== sceneId || !draftEditorScopeRef.current || !draftScopesMatch(draftEditorScopeRef.current, target)) throw new Error(uiText.errors.agentIncludedDraftMustBeSaved);
+    const currentScope = () => activeApiBaseRef.current === target.apiBase && activeProjectIdRef.current === target.projectId && activeSceneIdRef.current === target.sceneId;
+    const result = await apiPost<{ proposal: ProposalArtifact }>(apiBase, `/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/extract-natural-state`, { draft_id: draft.id, expected_version: draft.version });
+    if (!currentScope()) return;
+    await refreshProposals(projectId);
+    if (!currentScope()) return;
+    setProposalStatusFilter("all"); setCreatingNewProposal(false); setSelectedProposalId(result.proposal.id); hydrateProposalEditor(result.proposal);
+    setWorkspaceTab("proposals"); setNotice(uiText.semanticReview.extracted);
+  }, [apiBase, projectId, sceneId, draft, draftLoading, refreshProposals, hydrateProposalEditor]);
+
+  const generateLongform = useCallback(async (phase: "blueprints" | "expansions", input: BlueprintRequest | ExpansionRequest) => {
+    if (!projectId) throw new Error(uiText.errors.selectProject);
+    const target = { apiBase, projectId };
+    const currentScope = () => activeApiBaseRef.current === target.apiBase && activeProjectIdRef.current === target.projectId;
+    const result = await apiPost<LongformGenerationResult>(apiBase, `/projects/${encodeURIComponent(projectId)}/longform/${phase}`, input);
+    if (!currentScope()) return;
+    await refreshProposals(projectId);
+    if (!currentScope()) return;
+    setProposalStatusFilter("all"); setCreatingNewProposal(false); setSelectedProposalId(result.proposal.id);
+    hydrateProposalEditor(result.proposal); setWorkspaceTab("proposals"); setNotice(uiText.planning.generated);
+  }, [apiBase, projectId, refreshProposals, hydrateProposalEditor]);
+
+  const reviseLongform = useCallback(async (instruction: string, mode: LongformRevisionMode) => {
+    if (!selectedProposal || proposalDirty || !parseLongformPlan(selectedProposal) || selectedProposal.project_id !== projectId || longformApplied(selectedProposal)) throw new Error(uiText.errors.proposalActionUnavailable);
+    const target = { apiBase, projectId };
+    const currentScope = () => activeApiBaseRef.current === target.apiBase && activeProjectIdRef.current === target.projectId;
+    const result = await apiPost<LongformGenerationResult>(apiBase, `/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(selectedProposal.id)}/revise-longform`, { expected_version: selectedProposal.version, instruction, mode });
+    if (!currentScope()) return;
+    await refreshProposals(projectId);
+    if (!currentScope()) return;
+    setProposalStatusFilter("all"); setCreatingNewProposal(false); setSelectedProposalId(result.proposal.id); hydrateProposalEditor(result.proposal);
+    setWorkspaceTab("proposals"); setNotice(uiText.planning.revisionCreated);
+  }, [apiBase, projectId, selectedProposal, proposalDirty, refreshProposals, hydrateProposalEditor]);
+
+  const openPlanningRunBundle = useCallback(async (id: string) => {
+    const target = { apiBase, projectId };
+    const items = await refreshProposals(projectId);
+    if (activeApiBaseRef.current !== target.apiBase || activeProjectIdRef.current !== target.projectId) return;
+    const proposal = items.find((item) => item.id === id);
+    if (!proposal || !parsePlanningBook(proposal)) throw new Error(uiText.planningRun.bundleInvalid);
+    setCreatingNewProposal(false); setProposalStatusFilter("all"); setSelectedProposalId(id); hydrateProposalEditor(proposal); setWorkspaceTab("proposals");
+  }, [apiBase, projectId, refreshProposals, hydrateProposalEditor]);
+
+  const applyPlanningRunBundle = useCallback(async () => {
+    if (!selectedProposal || selectedProposal.project_id !== projectId || selectedProposal.status !== "accepted" || proposalDirty || !parsePlanningBook(selectedProposal)) throw new Error(uiText.errors.proposalActionUnavailable);
+    const target = { apiBase, projectId };
+    const currentScope = () => activeApiBaseRef.current === target.apiBase && activeProjectIdRef.current === target.projectId;
+    const result = await apiPost<LongformApplyResult>(apiBase, `/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(selectedProposal.id)}/apply/longform-book`, { expected_version: selectedProposal.version, reviewer: "author", rationale: "workbench.longform_book.apply" });
+    if (!currentScope()) return;
+    await refreshWorkspace(projectId, sceneId); await refreshGraphPreview(projectId); await refreshProposals(projectId);
+    if (!currentScope()) return;
+    setCreatingNewProposal(false); setSelectedProposalId(result.proposal.id); hydrateProposalEditor(result.proposal); setWorkspaceTab("planning"); setNotice(uiText.planningRun.bundleApplied);
+  }, [apiBase, projectId, sceneId, selectedProposal, proposalDirty, refreshWorkspace, refreshGraphPreview, refreshProposals, hydrateProposalEditor]);
+
+  const applyLongform = useCallback(async (retry = false) => {
+    if (!selectedProposal || proposalDirty || selectedProposal.project_id !== projectId || selectedProposal.status !== "accepted" || !parseLongformPlan(selectedProposal)) throw new Error(uiText.errors.proposalActionUnavailable);
+    const target = { apiBase, projectId };
+    const currentScope = () => activeApiBaseRef.current === target.apiBase && activeProjectIdRef.current === target.projectId;
+    const reviewTarget = { target_type: "proposal" as const, target_id: selectedProposal.id, expected_version: selectedProposal.version };
+    const previousAttempt = retry && longformRetryMatches(longformApplyRetry, apiBase, projectId, selectedProposal, proposalDirty) ? longformApplyRetry : null;
+    if (retry && !previousAttempt) throw new Error(uiText.planning.reviewBeforeApply);
+    if (!retry && !longformApplied(selectedProposal) && !reviewAllowsPlanApplication(generationReview, projectId, reviewTarget)) throw new Error(uiText.planning.reviewBeforeApply);
+    const reviewId = previousAttempt?.reviewId ?? generationReview?.report.id;
+    const attempt: LongformApplyAttempt = previousAttempt ?? { apiBase, projectId, proposalId: selectedProposal.id, expectedVersion: selectedProposal.version, reviewId: reviewId ?? "", body: selectedProposal.body, title: selectedProposal.title };
+    setLongformApplyRetry(null);
+    let result: LongformApplyResult;
+    try {
+      result = await apiPost<LongformApplyResult>(apiBase, `/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(selectedProposal.id)}/apply/longform`, { expected_version: attempt.expectedVersion, reviewer: "author", rationale: "workbench.longform.apply", ...(reviewId ? { review_id: reviewId } : {}) });
+    } catch (error) {
+      if (currentScope() && attempt.reviewId && indeterminateApplyFailure(error)) setLongformApplyRetry(attempt);
+      throw error;
+    }
+    if (!currentScope()) return;
+    await refreshWorkspace(projectId, sceneId); await refreshGraphPreview(projectId); await refreshProposals(projectId);
+    if (!currentScope()) return;
+    setCreatingNewProposal(false); setSelectedProposalId(result.proposal.id); hydrateProposalEditor(result.proposal);
+    setWorkspaceTab("planning"); setNotice(uiText.planning.appliedNotice);
+  }, [apiBase, projectId, sceneId, selectedProposal, proposalDirty, generationReview, longformApplyRetry, refreshWorkspace, refreshGraphPreview, refreshProposals, hydrateProposalEditor]);
+
   const generateOutlineLanguageProposal = useCallback(async () => {
     if (!projectId) throw new Error(uiText.errors.selectProject);
     const target = { apiBase, projectId };
@@ -2500,10 +2601,14 @@ export default function App() {
     if (baseline.status === "unique" && baseline.ref !== currentDraft?.id) throw new Error(uiText.manuscript.staleProposal);
     const editorRevision = draftEditRevisionRef.current;
     const currentScope = () => activeApiBaseRef.current === apiBase && activeProjectIdRef.current === projectId && activeSceneIdRef.current === sceneId;
+    const reviewRequired = selectedProject?.properties.require_semantic_review === true;
+    const reviewTarget = { target_type: "proposal" as const, target_id: selectedProposal.id, expected_version: selectedProposal.version };
+    const attachedReview = generationReview?.report.target_type === "proposal" && generationReview.report.target_id === selectedProposal.id && generationReview.report.project_id === projectId ? generationReview : null;
+    if ((reviewRequired || attachedReview) && !reviewAllowsAdoption(attachedReview, projectId, reviewTarget)) throw new Error(uiText.semanticReview.adoptionBlocked);
     const result = await apiPost<ProposalDraftPromotionResult>(
       apiBase,
       `/projects/${projectId}/proposals/${selectedProposal.id}/promote/draft`,
-      { scene_id: sceneId, expected_version: selectedProposal.version, expected_current_draft_id: currentDraft?.id ?? null }
+      { scene_id: sceneId, expected_version: selectedProposal.version, expected_current_draft_id: currentDraft?.id ?? null, ...(attachedReview ? { review_id: attachedReview.report.id } : {}) }
     );
     if (!currentScope() || draftEditRevisionRef.current !== editorRevision || draftDirtyRef.current) return;
     draftRequestSequenceRef.current += 1;
@@ -2524,6 +2629,8 @@ export default function App() {
     apiBase,
     projectId,
     proposalDerivedDraftRef,
+    selectedProject,
+    generationReview,
     draftLoading,
     proposalDirty,
     proposalTarget,
@@ -2616,7 +2723,7 @@ export default function App() {
 
   const reviewFact = useCallback(
     async (factId: string, action: "accept" | "reject" | "defer") => {
-      await apiPost<CandidateFact>(
+      const reviewed = await apiPost<CandidateFact>(
         apiBase,
         `/projects/${projectId}/facts/${factId}/${action}`,
         { reviewer: "author", note: `${auditText.reviewPrefix}.${action}` }
@@ -2630,11 +2737,11 @@ export default function App() {
           `/runs/${resumed.id}/events`
         );
         setRunEvents(events.events);
-        setNotice(uiText.runtime.factReviewed(reviewActionLabels[action], true));
+        setNotice(action === "accept" && reviewed.proposed_graph_patch.operation === "append_state" ? uiText.temporalState.accepted : action === "accept" && reviewed.proposed_graph_patch.operation === "none" ? uiText.semanticReview.observationAccepted : uiText.runtime.factReviewed(reviewActionLabels[action], true));
         return;
       }
       await refreshGraphPreview(projectId);
-      setNotice(uiText.runtime.factReviewed(reviewActionLabels[action], false));
+      setNotice(action === "accept" && reviewed.proposed_graph_patch.operation === "append_state" ? uiText.temporalState.accepted : action === "accept" && reviewed.proposed_graph_patch.operation === "none" ? uiText.semanticReview.observationAccepted : uiText.runtime.factReviewed(reviewActionLabels[action], false));
     },
     [apiBase, projectId, refreshFacts, refreshGraphPreview, run]
   );
@@ -2941,6 +3048,10 @@ export default function App() {
     if (desktopBackend?.reachable) void refreshBackendVersion();
   }, [desktopBackend?.reachable, desktopBackend?.pid, refreshBackendVersion]);
 
+  useEffect(() => { setGenerationReview(null); }, [apiBase, projectId]);
+  useEffect(() => {
+    if (!longformRetryMatches(longformApplyRetry, apiBase, projectId, selectedProposal, proposalDirty)) setLongformApplyRetry(null);
+  }, [apiBase, projectId, selectedProposal?.id, selectedProposal?.version, selectedProposal?.body, selectedProposal?.title, proposalDirty, longformApplyRetry]);
   const missingCritical = contextPack?.missing_context.some((gap) => gap.severity === "critical");
   const permission = agentSettings?.permission_level ?? "full";
   const canGenerate = permission === "read_generate" || permission === "full";
@@ -2952,8 +3063,22 @@ export default function App() {
   const discussionConfigured = taskConnectionReady(agentSettings, discussionTask(agentDiscussionForm.mode));
   const planningConfigured = taskConnectionReady(agentSettings, "planning");
   const projectLanguageReady = outputLanguageOrNull(selectedProject?.language) !== null;
-  const canRunScene = hasScene && canGenerate && !writerNeedsKey && projectLanguageReady;
+  const requiresSemanticReview = selectedProject?.properties.require_semantic_review === true;
+  const canRunScene = hasScene && canGenerate && !writerNeedsKey && projectLanguageReady && !requiresSemanticReview;
   const canDiscussWithAgent = hasScene && canGenerate && discussionConfigured && projectLanguageReady;
+  useEffect(() => {
+    const saveFromKeyboard = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.repeat || !(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== "s") return;
+      if (activeTab === "settings" || (workspaceTab !== "write" && workspaceTab !== "proposals")) return;
+      event.preventDefault();
+      if (busy !== null || actionInFlightRef.current || pendingProposalNavigation || !canGenerate) return;
+      if (workspaceTab === "write" && !readingChapter && hasScene && draftDirty && !draftLoading && draftEditorScopeRef.current && draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId })) void runAction("save", saveDraft);
+      if (workspaceTab === "proposals" && proposalDirty && (!selectedProposal || proposalActionPolicy(selectedProposal.status, proposalDirty, selectedProposal.artifact_type).canSave)) void runAction("proposal-save", saveProposal);
+    };
+    window.addEventListener("keydown", saveFromKeyboard);
+    return () => window.removeEventListener("keydown", saveFromKeyboard);
+  }, [activeTab, workspaceTab, busy, pendingProposalNavigation, canGenerate, readingChapter, hasScene, draftDirty, draftLoading, apiBase, projectId, sceneId, proposalDirty, selectedProposal, runAction, saveDraft, saveProposal]);
+
   const toggleAgentSource = useCallback((sourceId: string) => {
     if (selectedAgentSourceIds.has(sourceId)) {
       setSelectedAgentSourceIds((current) => {
@@ -3229,25 +3354,26 @@ export default function App() {
           <section className="scene-toolbar">
             <div>
               <h1>
-                {readingChapter?.title || selectedScene?.title ||
+                {workspaceTab === "planning" ? uiText.planning.title : workspaceTab === "sources" ? uiText.tabs.sources : workspaceTab === "proposals" ? uiText.tabs.proposals : workspaceTab === "workflow" ? uiText.tabs.workflow : readingChapter?.title || selectedScene?.title ||
                   (hasWorkspace ? uiText.workspace.importedStructureTitle : uiText.navigation.welcomeTitle)}
               </h1>
-              {!readingChapter && selectedScene && <button className="scene-rename-trigger" type="button" disabled={!canReview || busy !== null} onClick={() => {
+              {workspaceTab === "write" && !readingChapter && selectedScene && <button className="scene-rename-trigger" type="button" disabled={!canReview || busy !== null} onClick={() => {
                 if (sceneTitleEditor?.sceneId === sceneId) return;
                 if (sceneEditsDirty && !window.confirm(uiText.authorWorkspace.discardMetadataEdits)) return;
                 setSceneMetadataTarget(null);
                 setSceneForm(defaultSceneForm);
                 setSceneTitleEditor({ apiBase, projectId, sceneId, title: selectedScene.title, originalTitle: selectedScene.title });
               }}>{uiText.authorWorkspace.renameScene}</button>}
-              {sceneTitleEditor?.apiBase === apiBase && sceneTitleEditor.projectId === projectId && sceneTitleEditor.sceneId === sceneId && <div className="scene-title-editor"><input aria-label={uiText.authorWorkspace.sceneTitle} value={sceneTitleEditor.title} disabled={busy !== null} onChange={(event) => setSceneTitleEditor((current) => current ? { ...current, title: event.target.value } : current)} /><button type="button" disabled={busy !== null || !sceneTitleEditor.title.trim()} onClick={() => runAction("rename-scene", saveSceneTitle)}>{uiText.common.save}</button><button type="button" disabled={busy !== null} onClick={() => setSceneTitleEditor(null)}>{uiText.common.cancel}</button></div>}
+              {workspaceTab === "write" && sceneTitleEditor?.apiBase === apiBase && sceneTitleEditor.projectId === projectId && sceneTitleEditor.sceneId === sceneId && <div className="scene-title-editor"><input aria-label={uiText.authorWorkspace.sceneTitle} value={sceneTitleEditor.title} disabled={busy !== null} onChange={(event) => setSceneTitleEditor((current) => current ? { ...current, title: event.target.value } : current)} /><button type="button" disabled={busy !== null || !sceneTitleEditor.title.trim()} onClick={() => runAction("rename-scene", saveSceneTitle)}>{uiText.common.save}</button><button type="button" disabled={busy !== null} onClick={() => setSceneTitleEditor(null)}>{uiText.common.cancel}</button></div>}
               <p>
-                {readingChapter ? selectedProject?.title : hasScene
+                {workspaceTab !== "write" ? selectedProject?.title ?? uiText.common.notCreated : readingChapter ? selectedProject?.title : hasScene
                   ? `${selectedProject?.title ?? ""} / ${selectedProject?.chapters.find((chapter) => chapter.scenes.some((scene) => scene.id === sceneId))?.title ?? ""}`
                   : hasWorkspace
                     ? uiText.workspace.noSceneWithWorkspace
                     : uiText.workspace.noSceneEmptyWorkspace}
               </p>
             </div>
+            {workspaceTab === "planning" && !inspectorOpen && <div className="toolbar-actions"><button type="button" onClick={() => setActiveTab("settings")}><Settings size={16} /> {uiText.planning.openSettings}</button></div>}
             {workspaceTab === "write" && !readingChapter && <div className="toolbar-actions">
               <button className="primary" onClick={() => runAction("save", saveDraft)} type="button" disabled={!canGenerate || !hasScene || !draftDirty || draftLoading || busy !== null}>
                 <Save size={16} /> {uiText.editor.saveButton}
@@ -3279,6 +3405,7 @@ export default function App() {
 
           <section className="workspace-tabs" aria-label={uiText.workspace.mainWorkspaceAria}>
             <TabButton active={workspaceTab === "write"} onClick={() => setWorkspaceTab("write")} icon={<FileText size={15} />} label={uiText.tabs.write} />
+            <TabButton active={workspaceTab === "planning"} onClick={() => setWorkspaceTab("planning")} icon={<BookOpen size={15} />} label={uiText.planning.title} />
             <TabButton active={workspaceTab === "sources"} onClick={() => setWorkspaceTab("sources")} icon={<Library size={15} />} label={uiText.tabs.sources} />
             <TabButton active={workspaceTab === "proposals"} onClick={() => setWorkspaceTab("proposals")} icon={<SplitSquareVertical size={15} />} label={uiText.tabs.proposals} />
             <details className="tools-menu">
@@ -3293,8 +3420,8 @@ export default function App() {
             </details>
           </section>
 
-          <div className="workspace-guide">
-            <span>{workspaceTab === "write" ? uiText.authorWorkspace.writingGuide : workspaceTab === "workflow" ? uiText.navigation.workflowHelp : uiText.navigation[`${workspaceTab === "sources" ? "sources" : "proposals"}Help`]}</span>
+          <div className="workspace-guide" hidden={workspaceTab === "planning"}>
+            <span>{workspaceTab === "planning" ? uiText.planning.help : workspaceTab === "write" ? uiText.authorWorkspace.writingGuide : workspaceTab === "workflow" ? uiText.navigation.workflowHelp : uiText.navigation[`${workspaceTab === "sources" ? "sources" : "proposals"}Help`]}</span>
             {!llmConfigured && <button type="button" onClick={() => setActiveTab("settings")}><KeyRound size={14} /> {uiText.navigation.setupModel}</button>}
           </div>
 
@@ -3325,6 +3452,14 @@ export default function App() {
               />
             </section>
           )}
+
+          <div hidden={workspaceTab !== "planning"}>
+            <PlanningWorkspace key={`${apiBase}:${projectId}`} apiBase={apiBase} active={workspaceTab === "planning"} execute={runAction} runModelReady={planningConfigured && taskConnectionReady(agentSettings, "continuity")} reviewModelLabel={modelExecutionLabel(resolvedTask(agentSettings, "continuity"))} onOpenRunBundle={(id) => requestProposalNavigation(uiText.planningRun.review, () => { void runAction("planning-bundle-open", () => openPlanningRunBundle(id)); })} projectId={projectId} proposals={proposals} busy={busy !== null} canGenerate={canGenerate && projectLanguageReady} modelReady={planningConfigured} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "planning"))}
+              onGenerate={(input) => requestProposalNavigation(uiText.planning.generate, () => { void runAction("longform-blueprint", () => generateLongform("blueprints", input)); })}
+              onExpand={(input) => requestProposalNavigation(uiText.planning.expand, () => { void runAction("longform-expand", () => generateLongform("expansions", input)); })}
+              onReviewPlan={(id) => requestProposalNavigation(uiText.semanticReview.title, () => { setCreatingNewProposal(false); setSelectedProposalId(id); setWorkspaceTab("proposals"); setActiveTab("continuity"); })}
+              onOpen={(id) => requestProposalNavigation(uiText.planning.review, () => { setCreatingNewProposal(false); setSelectedProposalId(id); setWorkspaceTab("proposals"); })} />
+          </div>
 
           {workspaceTab === "write" && !readingChapter && (
             <details className="scene-details">
@@ -3492,6 +3627,8 @@ export default function App() {
 
           {workspaceTab === "proposals" && (
           <ProposalInbox
+            apiBase={apiBase}
+            onApplyPlanningBook={() => requestProposalNavigation(uiText.planningRun.apply, () => { void runAction("planning-bundle-apply", applyPlanningRunBundle); })}
             baseline={effectiveProposalBaseline}
             busy={busy}
             canGenerate={canGenerate}
@@ -3507,6 +3644,16 @@ export default function App() {
             onApplyProjectStructure={() =>
               runAction("proposal-structure", applyProjectStructureProposal)
             }
+            semanticReviewBlocked={proposalSemanticReviewBlocked(selectedProposal, generationReview, projectId, selectedProject?.properties.require_semantic_review === true)}
+            requiresSemanticReview={selectedProject?.properties.require_semantic_review === true}
+            onSemanticReview={() => setActiveTab("continuity")}
+            longformRetryReady={longformRetryMatches(longformApplyRetry, apiBase, projectId, selectedProposal, proposalDirty)}
+            onRetryLongform={() => requestProposalNavigation(uiText.planning.retryApply, () => { void runAction("longform-apply-retry", () => applyLongform(true)); })}
+            longformReviewReady={Boolean(selectedProposal && reviewAllowsPlanApplication(generationReview, projectId, { target_type: "proposal", target_id: selectedProposal.id, expected_version: selectedProposal.version }))}
+            planningModelReady={planningConfigured}
+            planningModelLabel={modelExecutionLabel(resolvedTask(agentSettings, "planning"))}
+            onReviseLongform={(instruction, mode) => requestProposalNavigation(uiText.planning.revise, () => { void runAction("longform-revise", () => reviseLongform(instruction, mode)); })}
+            onApplyLongform={() => requestProposalNavigation(uiText.planning.apply, () => { void runAction("longform-apply", applyLongform); })}
             onApplyComposition={() => requestProposalNavigation(uiText.manuscript.applyComposition, () => { void runAction("composition-apply", applyCompositionProposal); })}
             onApplyOutlineLanguage={() => requestProposalNavigation(uiText.outlineLanguage.apply, () => {
               void runAction("outline-language-apply", applyOutlineLanguageProposal);
@@ -3639,6 +3786,7 @@ export default function App() {
               </div>
               <StatusDot label={formatStatus(run?.status ?? "idle")} tone={statusTone(run?.status)} />
             </summary>
+            {requiresSemanticReview && <p className="proposal-inline-warning">{uiText.semanticReview.reviewedRouteHelp}<button type="button" disabled={!hasScene || busy !== null} onClick={openReviewedSceneWriting}>{uiText.semanticReview.openReviewedWriting}</button></p>}
             <div className="workflow-actions">
               <button className="primary" onClick={() => requestProposalNavigation(uiText.navigation.startWorkflow, () => { void runAction("run", runScene); })} type="button" disabled={!canRunScene || busy !== null}><Play size={15} /> {uiText.navigation.startWorkflow}</button>
               <button onClick={() => runAction("context", buildContext)} type="button" disabled={!hasScene || busy !== null}><RefreshCw size={15} /> {uiText.editor.contextButton}</button>
@@ -3667,11 +3815,20 @@ export default function App() {
           </div>
           {activeTab === "agent" && (
           <div className="agent-workspace agent-dock">
+          <div className="active-style-summary"><strong>{uiText.collaboration.style}</strong><span>{agentSettings?.agent_presets?.find((p) => p.id === agentSettings.selected_preset_id) ? presetDisplay(agentSettings.agent_presets.find((p) => p.id === agentSettings.selected_preset_id)!).name : uiText.common.notSet}</span></div>
+          <ProjectStyleSummary apiBase={apiBase} projectId={projectId} revision={proposals.map((p) => `${p.id}:${p.version}`).join("|")} />
           <details className="agent-preset-options"><summary>{uiText.authorWorkspace.presetOptions}</summary>
           <AgentPresets compact apiBase={apiBase} settings={agentSettings} busy={busy !== null} onChange={setAgentSettings} onManage={() => setActiveTab("settings")} />
           </details>
+          <div className="collaboration-actions" role="group" aria-label={uiText.collaboration.title}>
+            <button type="button" className={workspaceTab !== "planning" && agentTarget === "scene" && agentDiscussionForm.mode === "discuss" ? "active" : ""} onClick={() => { setAgentTarget("scene"); setAgentDiscussionForm((f) => ({ ...f, mode: "discuss" })); setWorkspaceTab("write"); }}>{uiText.collaboration.discuss}</button>
+            <button type="button" className={workspaceTab === "planning" ? "active" : ""} onClick={() => setWorkspaceTab("planning")}>{uiText.collaboration.plan}</button>
+            <button type="button" disabled={!hasScene} onClick={() => { setAgentTarget("scene"); setAgentDiscussionForm((f) => ({ ...f, mode: draft?.text.trim() ? "continue_scene" : "create_scene", includeLatestDraft: Boolean(draft?.text.trim()), selectedText: "", selectedStart: undefined, selectedEnd: undefined, selectedDraftId: undefined })); setWorkspaceTab("write"); }}>{uiText.collaboration.write}</button>
+            <button type="button" onClick={() => setActiveTab("continuity")}>{uiText.collaboration.review}</button>
+          </div>
           <div className="agent-target-tabs"><button type="button" className={agentTarget === "scene" ? "active" : ""} onClick={() => { setReadingChapterId(null); setAgentTarget("scene"); }}>{uiText.manuscript.currentScene}</button><button type="button" className={agentTarget === "composition" ? "active" : ""} onClick={() => setAgentTarget("composition")}>{uiText.manuscript.newWork}</button></div>
-          {agentTarget === "composition" ? <CompositionComposer key={`${apiBase}:${projectId}`} sourceLabels={Array.from(selectedAgentSourceIds).map((id) => { const source = sourceDocuments.find((item) => item.id === id); return source ? `${source.title} · ${formatSourceLanguage(source.language)} · ${id}` : uiText.agentDiscussion.sourceMissing; })} sourcePolicy={crossLanguagePolicy === "explicit_reference" ? uiText.language.explicitReference : uiText.language.projectOnly} draftLabel={!readingChapter && draft?.text.trim() && !draftDirty && draft.project_id === projectId && draft.scene_id === sceneId ? `${selectedScene?.title ?? ""} · v${draft.version} · ${draft.id}` : null} busy={busy !== null} canGenerate={Boolean(projectId) && canGenerate && planningConfigured} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "planning"))} onGenerate={(input) => requestProposalNavigation(uiText.manuscript.generate, () => { void runAction("composition-generate", () => generateComposition(input)); })} /> : <AgentDiscussionPanel
+          {agentTarget === "composition" && requiresSemanticReview && <p className="proposal-inline-warning">{uiText.semanticReview.compositionBlocked}<button type="button" onClick={() => setWorkspaceTab("planning")}>{uiText.planning.title}</button><button type="button" disabled={!hasScene || busy !== null} onClick={openReviewedSceneWriting}>{uiText.semanticReview.openReviewedWriting}</button></p>}
+          {agentTarget === "composition" ? <CompositionComposer key={`${apiBase}:${projectId}`} sourceLabels={Array.from(selectedAgentSourceIds).map((id) => { const source = sourceDocuments.find((item) => item.id === id); return source ? `${source.title} · ${formatSourceLanguage(source.language)} · ${id}` : uiText.agentDiscussion.sourceMissing; })} sourcePolicy={crossLanguagePolicy === "explicit_reference" ? uiText.language.explicitReference : uiText.language.projectOnly} draftLabel={!readingChapter && draft?.text.trim() && !draftDirty && draft.project_id === projectId && draft.scene_id === sceneId ? `${selectedScene?.title ?? ""} · v${draft.version} · ${draft.id}` : null} busy={busy !== null} canGenerate={Boolean(projectId) && canGenerate && planningConfigured && !requiresSemanticReview} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "planning"))} onGenerate={(input) => requestProposalNavigation(uiText.manuscript.generate, () => { void runAction("composition-generate", () => generateComposition(input)); })} /> : <AgentDiscussionPanel
             busy={busy}
             canDiscuss={canDiscussWithAgent}
             draft={draft}
@@ -3709,10 +3866,22 @@ export default function App() {
           </div>
           )}
 
-          {activeTab === "context" && <ContextInspector pack={contextPack} />}
-          {activeTab === "continuity" && <ContinuityInspector run={run} report={continuityReport} />}
+          {activeTab === "context" && <ContextInspector key={`${apiBase}:${projectId}`} apiBase={apiBase} pack={contextPack} labels={graphPreview?.project_id === projectId ? Object.fromEntries(graphPreview.nodes.map((node) => [node.id, node.label])) : {}} temporalOptions={{
+            draft: !draftLoading && draftEditorScopeRef.current && draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId }) ? draft : null, draftDirty: draftDirty || draftLoading, sceneId, selection: draftSelectionRange, busy: busy !== null, canPropose: canGenerate,
+            references: graphPreview?.project_id === projectId ? graphPreview.nodes.map((node) => ({ id: node.id, label: node.label, type: node.type })) : [], execute: runAction,
+            canOpenSourceScene: (id) => Boolean(findScene(projects, projectId, id)),
+            onOpenSourceScene: (id) => { const sourceScene = findScene(projects, projectId, id); if (!sourceScene) return; requestProposalNavigation(uiText.proposals.navigateScene(sourceScene.title), () => { setWorkspaceTab("write"); setReadingChapterId(null); setChapterSelection(null); setAgentTarget("scene"); setManuscriptMode("edit"); if (id !== sceneId) { setSceneId(id); setContextPack(null); setRun(null); setRunEvents([]); setContinuityReport(null); } }); },
+            onSubmitted: async () => { if (activeApiBaseRef.current !== apiBase || activeProjectIdRef.current !== projectId) return; await refreshFacts(); if (activeApiBaseRef.current !== apiBase || activeProjectIdRef.current !== projectId) return; setActiveTab("facts"); setNotice(uiText.temporalState.correctionSubmitted); }
+          }} /> }
+          {activeTab === "continuity" && <>
+            <GenerationReviewPanel apiBase={apiBase} projectId={projectId}
+              target={workspaceTab === "proposals" && selectedProposal && selectedProposal.project_id === projectId && !parsePlanningBook(selectedProposal) && !parsePlanningBranch(selectedProposal) ? { target_type: "proposal", target_id: selectedProposal.id, expected_version: selectedProposal.version } : workspaceTab === "write" && !readingChapter && draft && draft.project_id === projectId && draft.scene_id === sceneId ? { target_type: "draft", target_id: draft.id, expected_version: draft.version, scene_id: sceneId } : null}
+              dirty={workspaceTab === "proposals" ? proposalDirty : draftDirty || draftLoading} busy={busy !== null} canGenerate={canGenerate} modelReady={taskConnectionReady(agentSettings, "continuity")} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "continuity"))} execute={runAction} onReport={setGenerationReview} extractionReady={taskConnectionReady(agentSettings, "extraction")} extractionModelLabel={modelExecutionLabel(resolvedTask(agentSettings, "extraction"))} onExtract={() => requestProposalNavigation(uiText.semanticReview.extract, () => { void runAction("natural-state-extract", extractNaturalState); })} />
+            <ContinuityInspector run={run} report={continuityReport} />
+          </>}
           {activeTab === "facts" && (
             <FactsInspector
+              labels={graphPreview?.project_id === projectId ? Object.fromEntries(graphPreview.nodes.map((node) => [node.id, node.label])) : {}}
               facts={facts}
               busy={busy}
               canReview={canReview}
@@ -3959,11 +4128,13 @@ function AgentDiscussionPanel({
           <button type="button" onClick={onUseDraftSelection} disabled={!draftSelection || busy !== null}>
             <MessageSquare size={14} /> {uiText.agentDiscussion.useDraftSelection}
           </button>
+          <button type="button" disabled={!draftSelection || draftDirty || busy !== null} onClick={() => { onUseDraftSelection(); onFormChange((current) => ({ ...current, mode: "revise_selection", includeLatestDraft: true })); }}>{uiText.collaboration.selection}</button>
         </div>
         <label className="agent-field">
-          <span>{uiText.agentDiscussion.instructionLabel}</span>
+          <span>{uiText.agentDiscussion.instructionLabel}</span><small>{uiText.collaboration.savedOnly}</small>
           <textarea
             value={form.instruction}
+            onKeyDown={(event) => { if (!event.nativeEvent.isComposing && !event.repeat && (event.ctrlKey || event.metaKey) && !event.altKey && event.key === "Enter") { event.preventDefault(); if (canSubmit) onSubmit(); } }}
             onChange={(event) =>
               onFormChange((current) => ({ ...current, instruction: event.target.value }))
             }
@@ -4248,6 +4419,8 @@ function AgentDiscussionPanel({
 }
 
 function ProposalInbox({
+  apiBase,
+  onApplyPlanningBook,
   baseline,
   busy,
   canGenerate,
@@ -4264,6 +4437,16 @@ function ProposalInbox({
   onApplyProjectStructure,
   onApplyOutlineLanguage,
   onApplyComposition,
+  onApplyLongform,
+  onReviseLongform,
+  longformReviewReady,
+  longformRetryReady,
+  onRetryLongform,
+  planningModelReady,
+  planningModelLabel,
+  onSemanticReview,
+  semanticReviewBlocked,
+  requiresSemanticReview,
   onCreateNew,
   onExtractCandidates,
   onFilterChange,
@@ -4294,6 +4477,8 @@ function ProposalInbox({
   versions,
   versionsLoading
 }: {
+  apiBase: string;
+  onApplyPlanningBook: () => void;
   baseline: ExactDraftLookup;
   busy: string | null;
   canGenerate: boolean;
@@ -4310,6 +4495,16 @@ function ProposalInbox({
   onApplyProjectStructure: () => void;
   onApplyOutlineLanguage: () => void;
   onApplyComposition: () => void;
+  onApplyLongform: () => void;
+  onReviseLongform: (instruction: string, mode: LongformRevisionMode) => void;
+  longformReviewReady: boolean;
+  longformRetryReady: boolean;
+  onRetryLongform: () => void;
+  planningModelReady: boolean;
+  planningModelLabel: string;
+  onSemanticReview: () => void;
+  semanticReviewBlocked: boolean;
+  requiresSemanticReview: boolean;
   onCreateNew: () => void;
   onExtractCandidates: () => void;
   onFilterChange: (filter: ProposalStatus | "all") => void;
@@ -4343,8 +4538,12 @@ function ProposalInbox({
   const actionPolicy = selectedProposal
     ? proposalActionPolicy(selectedProposal.status, dirty, selectedProposal.artifact_type)
     : null;
-  const locked = busy !== null || Boolean(selectedProposal && actionPolicy?.readonly);
-  const canSave = canGenerate && busy === null && dirty && (
+  const [bundleVerification, setBundleVerification] = useState<{ apiBase: string; proposalId: string; body: string; ready: boolean } | null>(null);
+  const bundleReady = Boolean(selectedProposal && bundleVerification?.apiBase === apiBase && bundleVerification.proposalId === selectedProposal.id && bundleVerification.body === proposalText && bundleVerification.ready);
+  const planningBook = parsePlanningBook(selectedProposal);
+  const stagedBranch = selectedProposal ? parsePlanningBranch(selectedProposal) : null;
+  const locked = busy !== null || Boolean(stagedBranch) || Boolean(selectedProposal && actionPolicy?.readonly);
+  const canSave = !stagedBranch && canGenerate && busy === null && dirty && (
     !selectedProposal || Boolean(actionPolicy?.canSave)
   );
   const canSubmit = canGenerate && busy === null && Boolean(actionPolicy?.canSubmit);
@@ -4352,7 +4551,7 @@ function ProposalInbox({
   const sourceBaseline = resolveUniqueProposalRef(selectedProposal?.source_refs ?? [], "draft");
   const staleDraftBaseline = sourceBaseline.status === "unique" && sourceBaseline.ref !== currentDraftId;
   const canPromoteDraft =
-    currentDraftReady && !staleDraftBaseline &&
+    !semanticReviewBlocked && currentDraftReady && !staleDraftBaseline &&
     canReview &&
     busy === null &&
     hasScene &&
@@ -4373,10 +4572,13 @@ function ProposalInbox({
     Boolean(actionPolicy?.canPromote) &&
     selectedProposal?.artifact_type === "project_structure_draft";
   const sortedVersions = [...versions].sort((left, right) => right.version - left.version);
+  const editedPlanningBook = selectedProposal ? parsePlanningBook({ ...selectedProposal, body: proposalText }) : null;
+  const longformPlan = parseLongformPlan(selectedProposal);
+  const editedLongform = selectedProposal ? parseLongformPlan({ ...selectedProposal, body: proposalText }) : null;
   const compositionBody = parseComposition(selectedProposal);
   const editedComposition = selectedProposal ? parseComposition({ ...selectedProposal, body: proposalText }) : null;
   const compositionApplied = compositionApplicationRecorded(selectedProposal);
-  const canApplyComposition = canReview && compositionCanApply(selectedProposal, dirty, currentProjectId);
+  const canApplyComposition = canReview && !requiresSemanticReview && compositionCanApply(selectedProposal, dirty, currentProjectId);
   const storedOutlinePatch = parseOutlineLanguagePatch(selectedProposal);
   const editedOutlinePatch = selectedProposal ? parseOutlineLanguagePatch({ ...selectedProposal, body: proposalText }) : null;
   const isOutlinePatch = Boolean(storedOutlinePatch || editedOutlinePatch);
@@ -4388,7 +4590,7 @@ function ProposalInbox({
     onChange={(event) => onTextChange(event.target.value)}
     spellCheck={false}
     aria-label={uiText.proposals.bodyAria}
-    disabled={locked}
+    disabled={locked || Boolean(planningBook)}
   />;
 
   return (
@@ -4460,26 +4662,33 @@ function ProposalInbox({
               disabled={locked}
             />
           </div>
-          {compositionBody ? <>{editedComposition && <CompositionPreview body={editedComposition} />}<details><summary>{uiText.outlineLanguage.advanced}</summary>{bodyEditor}</details></> : isOutlinePatch ? <>
+          {planningBook ? <>{editedPlanningBook ? <PlanningBundlePreview key={`${apiBase}:${selectedProposal?.id}`} apiBase={apiBase} bundle={editedPlanningBook} onReady={(ready) => { if (!selectedProposal) return; setBundleVerification((current) => current?.apiBase === apiBase && current.proposalId === selectedProposal.id && current.body === proposalText && current.ready === ready ? current : { apiBase, proposalId: selectedProposal.id, body: proposalText, ready }); }} /> : <p className="proposal-inline-warning">{uiText.planningRun.bundleInvalid}</p>}<details><summary>{uiText.planning.details}</summary>{bodyEditor}</details></> : stagedBranch ? <><p className="proposal-inline-warning">{uiText.planningRun.staged}</p><LongformPreview plan={stagedBranch} /><details><summary>{uiText.planning.details}</summary>{bodyEditor}</details></> : longformPlan ? <>{editedLongform ? <LongformPreview plan={editedLongform} /> : <p className="proposal-inline-warning">{uiText.planning.invalidPreview}</p>}<details><summary>{uiText.planning.details}</summary>{bodyEditor}</details></> : compositionBody ? <>{editedComposition && <CompositionPreview body={editedComposition} />}<details><summary>{uiText.outlineLanguage.advanced}</summary>{bodyEditor}</details></> : isOutlinePatch ? <>
             {editedOutlinePatch ? <OutlineLanguagePreview patch={editedOutlinePatch} /> : <p className="proposal-inline-warning">{uiText.outlineLanguage.invalidPreview}</p>}
             <details><summary>{uiText.outlineLanguage.advanced}</summary>{bodyEditor}</details>
           </> : selectedProposal?.artifact_type === "scene_draft" ? <>
             {baseline.status === "ready" && reviewProposal?.version === selectedProposal.version ? <ManuscriptDiff before={baseline.draft.text} after={proposalText} labels={{ ...uiText.manuscript, title: uiText.manuscript.diffTitle }} /> : selectedProposal.source_refs.some((ref) => ref.kind === "draft") ? reviewProposal && reviewProposal.version !== selectedProposal.version ? <ManuscriptProse text={proposalText} /> : <p className="proposal-inline-warning">{baseline.status === "loading" || baseline.status === "idle" ? uiText.proposals.baselineLoading : uiText.proposals.baselineUnavailable}</p> : <ManuscriptDiff before="" after={proposalText} labels={{ ...uiText.manuscript, title: uiText.manuscript.diffTitle }} />}
             <details><summary>{uiText.manuscript.edit}</summary>{bodyEditor}</details>
           </> : bodyEditor}
+          {selectedProposal?.artifact_type === "fact_draft" && <><TemporalProposalPreviews body={proposalText} /><FactProposalObservations body={proposalText} /></>}
+          {planningBook && selectedProposal && !planningBookApplied(selectedProposal) && <p>{uiText.planningRun.reviewBeforeApply}</p>}
+          {longformPlan && longformRetryReady && <p className="proposal-inline-warning">{uiText.planning.retryHelp}<button type="button" disabled={busy !== null || dirty || !canReview} onClick={onRetryLongform}>{uiText.planning.retryApply}</button></p>}
+          {longformPlan && selectedProposal && <><LongformRevision key={`${selectedProposal.project_id}:${selectedProposal.id}:${selectedProposal.version}`} applied={longformApplied(selectedProposal)} disabled={busy !== null || dirty || !canGenerate || !planningModelReady} modelLabel={planningModelLabel} onRevise={onReviseLongform} />{!longformApplied(selectedProposal) && !longformReviewReady && <p className="proposal-inline-warning">{uiText.planning.reviewBeforeApply}</p>}</>}
+          {compositionBody && requiresSemanticReview && !compositionApplied && <p className="proposal-inline-warning">{uiText.semanticReview.compositionBlocked}</p>}
+          {semanticReviewBlocked && <p className="proposal-inline-warning">{uiText.semanticReview.adoptionBlocked}</p>}
           <div className="proposal-actions">
+            {selectedProposal && !planningBook && !stagedBranch && <button type="button" onClick={onSemanticReview} disabled={busy !== null || dirty}><ShieldCheck size={14} />{uiText.semanticReview.title}</button>}
             <button type="button" disabled={!proposalText.trim()} onClick={() => exportAuthorText(proposalTitle || "StoryGraph", proposalText)}><Download size={14} /> {uiText.navigation.exportText}</button>
-            {(!selectedProposal || actionPolicy?.editable) && (
+            {!stagedBranch && (!selectedProposal || actionPolicy?.editable) && (
               <button type="button" onClick={onSave} disabled={!canSave}>
                 <Save size={14} /> {uiText.proposals.save}
               </button>
             )}
-            {actionPolicy?.showSubmit && (
+            {!stagedBranch && actionPolicy?.showSubmit && (
               <button type="button" onClick={onSubmitReview} disabled={!canSubmit}>
                 <Clock3 size={14} /> {uiText.proposals.submitReview}
               </button>
             )}
-            {actionPolicy?.showDecision && (
+            {!stagedBranch && actionPolicy?.showDecision && (
               <>
                 <button type="button" onClick={onAccept} disabled={!canDecide}>
                   <Check size={14} /> {uiText.proposals.accept}
@@ -4494,6 +4703,8 @@ function ProposalInbox({
                 <BookOpen size={14} /> {uiText.proposals.applyStructure}
               </button>
             )}
+            {planningBook && selectedProposal?.status === "accepted" && <button type="button" disabled={busy !== null || dirty || !canReview || !editedPlanningBook || !bundleReady || selectedProposal.project_id !== currentProjectId || planningBookApplied(selectedProposal)} onClick={onApplyPlanningBook}><BookOpen size={14} />{planningBookApplied(selectedProposal) ? uiText.planningRun.bundleApplied : uiText.planningRun.apply}</button>}
+            {longformPlan && selectedProposal?.status === "accepted" && <button type="button" disabled={busy !== null || !canReview || dirty || !editedLongform || !longformReviewReady || selectedProposal.project_id !== currentProjectId || longformApplied(selectedProposal)} onClick={onApplyLongform}><BookOpen size={14} />{longformApplied(selectedProposal) ? uiText.planning.applied : uiText.planning.apply}</button>}
             {compositionBody && (selectedProposal?.status === "accepted" || compositionApplied) && <button type="button" disabled={busy !== null || !canApplyComposition} onClick={onApplyComposition}><BookOpen size={14} />{compositionApplied ? uiText.manuscript.compositionApplied : uiText.manuscript.applyComposition}</button>}
             {(canApplyOutlineLanguage || (canReview && outlineApplied && !dirty)) && <button type="button" disabled={busy !== null || outlineApplied} onClick={onApplyOutlineLanguage}>
               <BookOpen size={14} /> {outlineApplied ? uiText.outlineLanguage.alreadyApplied : uiText.outlineLanguage.apply}
@@ -6354,7 +6565,8 @@ function AgentSettingsInspector({
   );
 }
 
-function ContextInspector({ pack }: { pack: ContextPack | null }) {
+function ContextInspector({ pack, labels, apiBase, temporalOptions }: { pack: ContextPack | null; labels: EntityLabels; apiBase: string; temporalOptions: TemporalCorrectionOptions }) {
+  const [historySubject, setHistorySubject] = useState<string | null>(null);
   if (!pack) {
     return <EmptyState icon={<SplitSquareVertical />} title={uiText.inspector.noContextTitle} text={uiText.inspector.noContextText} />;
   }
@@ -6366,6 +6578,8 @@ function ContextInspector({ pack }: { pack: ContextPack | null }) {
         value={formatArtifactLanguage(pack.output_language, false)}
       />
       <MetricRow label={uiText.inspector.graphQueries} value={String(pack.provenance.graph_query_ids.length)} />
+      <TemporalContext projections={pack.temporal_states ?? []} projectId={pack.project_id} sceneId={pack.scene_id} labels={labels} onOpenHistory={setHistorySubject} />
+      {historySubject && <TemporalHistoryPanel key={`${pack.project_id}:${historySubject}`} apiBase={apiBase} projectId={pack.project_id} subjectId={historySubject} labels={labels} options={temporalOptions} />}
       <ListBlock title={uiText.inspector.mustInclude} items={pack.must_include} />
       <ListBlock title={uiText.inspector.mustNotViolate} items={pack.must_not_violate} tone="danger" />
       <ListBlock title={uiText.inspector.relationships} items={pack.active_relationships} />
@@ -6414,6 +6628,7 @@ function ContinuityInspector({ run, report }: { run: WorkflowRun | null; report:
 }
 
 function FactsInspector({
+  labels,
   canReview,
   facts,
   busy,
@@ -6421,6 +6636,7 @@ function FactsInspector({
 }: {
   canReview: boolean;
   facts: CandidateFact[];
+  labels: EntityLabels;
   busy: string | null;
   onReview: (factId: string, action: "accept" | "reject" | "defer") => void;
 }) {
@@ -6432,10 +6648,11 @@ function FactsInspector({
       {facts.map((fact) => (
         <div className="fact-row" key={fact.id}>
           <div>
-            <strong>{localizeSystemValue(fact.fact_type)}</strong>
-            <span>{fact.subject_id} {localizeGraphLabel(fact.relation)} {fact.object_id}</span>
+            {fact.proposed_graph_patch.operation !== "append_state" && <><strong>{localizeSystemValue(fact.fact_type)}</strong><span>{fact.subject_id} {localizeGraphLabel(fact.relation)} {fact.object_id}</span></>}
           </div>
           <p>{fact.rationale}</p>
+          <TemporalCandidateNotice operation={fact.proposed_graph_patch.operation} properties={fact.proposed_graph_patch.properties} subjectId={fact.subject_id} labels={labels} />
+          <ObservationNotice operation={fact.proposed_graph_patch.operation} />
           <div className="fact-actions">
             <button onClick={() => onReview(fact.id, "accept")} disabled={busy !== null || !canReview} type="button"><Check size={14} />{reviewActionLabels.accept}</button>
             <button onClick={() => onReview(fact.id, "defer")} disabled={busy !== null || !canReview} type="button"><Clock3 size={14} />{reviewActionLabels.defer}</button>
@@ -7038,12 +7255,12 @@ function outlineLanguageFailureMessage(error: unknown): string | null {
 
 function manuscriptFailureMessage(error: unknown): string | null {
   if (!(error instanceof ApiRequestError)) return null;
-  const messages: Record<string, string> = { composition_backend_unsupported: uiText.manuscript.localBackendOnly, source_adoption_backend_unsupported: uiText.manuscript.localBackendOnly, composition_input_too_large: uiText.manuscript.compositionTooLarge, composition_invalid: uiText.manuscript.compositionInvalid, composition_stale: uiText.manuscript.compositionStale, source_language_mismatch: uiText.errors.sourceContentLanguageMismatch, source_stale: uiText.manuscript.sourceStale, draft_baseline_stale: uiText.manuscript.staleProposal };
+  const messages: Record<string, string> = { longform_stale: uiText.planning.stale, longform_invalid: uiText.planning.invalid, longform_backend_unsupported: uiText.planning.unsupported, generation_review_required: uiText.semanticReview.adoptionBlocked, generation_review_stale: uiText.semanticReview.stale, generation_review_blocked: uiText.semanticReview.adoptionBlocked, composition_backend_unsupported: uiText.manuscript.localBackendOnly, source_adoption_backend_unsupported: uiText.manuscript.localBackendOnly, composition_input_too_large: uiText.manuscript.compositionTooLarge, composition_invalid: uiText.manuscript.compositionInvalid, composition_stale: uiText.manuscript.compositionStale, source_language_mismatch: uiText.errors.sourceContentLanguageMismatch, source_stale: uiText.manuscript.sourceStale, draft_baseline_stale: uiText.manuscript.staleProposal };
   return messages[error.category ?? ""] ?? null;
 }
 
 function isLocalizedUserError(message: string): boolean {
-  return [...Object.values(uiText.errors), ...Object.values(uiText.manuscript), ...Object.values(uiText.documentImport)].some(
+  return [...Object.values(uiText.errors), ...Object.values(uiText.manuscript), ...Object.values(uiText.documentImport), ...Object.values(uiText.planning), ...Object.values(uiText.semanticReview)].some(
     (value) => typeof value === "string" && value === message
   );
 }

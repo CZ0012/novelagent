@@ -23,3 +23,11 @@ Hard rules:
   "self_check": ["checked POV boundary", "checked canon safety"]
 }
 ```
+# Reviewed temporal state
+
+When supplied, `temporal_states` is the authoritative typed state at the scene's opening
+(`at_scene_start=true`). Explicit `initial_state` is a baseline, not a later state.
+Descriptive character arcs or `current_status` prose cannot override a resolved life,
+injury, location or ownership value. An assertion that occurs within this scene is not
+already true at its opening. Missing or ambiguous tracked state is a context gap; do
+not infer a convenient value or resurrect/move/heal an entity without an evidenced event.

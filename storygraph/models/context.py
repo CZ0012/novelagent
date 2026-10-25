@@ -8,6 +8,7 @@ from pydantic import Field
 
 from storygraph.models.common import ContractModel, Severity
 from storygraph.models.project import OutputLanguage
+from storygraph.models.temporal_state import TemporalStateProjection
 
 
 DEFAULT_PRIORITY_ORDER = ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7"]
@@ -31,6 +32,9 @@ class StyleConstraints(ContractModel):
     diction: str | None = None
     dialogue_style: str | None = None
     banned_patterns: list[str] = Field(default_factory=list)
+    profile_id: str | None = None
+    profile_sha256: str | None = None
+    rubric: list[str] = Field(default_factory=list)
 
 
 class ContextProvenance(ContractModel):
@@ -70,6 +74,8 @@ class ContextPack(ContractModel):
     scene_goal: str
     conflict: str
     required_characters: list[str] = Field(default_factory=list)
+    canon_entities: list[dict] = Field(default_factory=list)
+    temporal_states: list[TemporalStateProjection] = Field(default_factory=list)
     active_relationships: list[str] = Field(default_factory=list)
     knowledge_boundaries: list[KnowledgeBoundary] = Field(default_factory=list)
     must_include: list[str] = Field(default_factory=list)

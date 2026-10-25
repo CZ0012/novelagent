@@ -33,7 +33,8 @@ def test_llm_scene_writer_saves_draft_without_graph_mutation():
     assert len(graph.event_log.list()) == before_events
     assert set(graph.relationships) == before_relations
     assert provider.requests[0].model == "deepseek-chat"
-    assert "output_language: en-US" in provider.requests[0].messages[1].content
+    assert any(message.role == "system" and "output_language: en-US" in message.content
+               for message in provider.requests[0].messages)
     assert "context_pack_v1" in provider.requests[0].messages[-1].content
     assert "must_not_violate" in provider.requests[0].messages[-1].content
 

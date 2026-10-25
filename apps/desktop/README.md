@@ -97,10 +97,10 @@ Install desktop dependencies:
 npm --prefix apps/desktop install
 ```
 
-Build with the existing `apps/web/dist` assets:
+Build with the existing `apps/web/dist` assets and backend sidecar:
 
 ```powershell
-npm --prefix apps/desktop run build
+npm --prefix apps/desktop run build:tauri-only
 ```
 
 Build the full installer after rebuilding the web assets:
@@ -256,3 +256,11 @@ Historical structure imports did not create scene prose or reliable source spans
 The desktop hosts the same default connection, named profiles, five task assignments and protocol adapters as API + Web and CLI. Connections are stored locally in the configured workspace, never in release assets. Existing settings retain their exact model/key and default to Chat Completions. Responses and Anthropic Messages must be selected explicitly; there is no model-family detection or fallback. Protocol support is text generation, not automatic hosted tools or cloud memory.
 
 The WebView performs bounded RTF/TXT/Markdown/DOCX text extraction before the project-scoped Source API persists it. RTF objects and formatting are omitted, Office `~$` files are skipped, and empty files are distinguished from malformed containers. Importing remains separate from adoption into a Draft or reviewed canon changes. No migration automatically reimports files or rewrites existing source text.
+
+## SG-029 source workbench features
+
+A source rebuild includes the project-level long-form planner, approved project style and explicit semantic review/natural prose state extraction. These are the same FastAPI-backed workflows used by the Web workbench; the desktop shell has no additional canon-writing path. Plan/scene budgets do not represent completed manuscript length. Agent prose adoption in newly planned long-form projects requires a current passing semantic report; canon state changes still require explicit human review.
+
+This development checkout is not an installed update or a published signed release. Rebuild locally using the existing PowerShell instructions; distribution still needs the separately verified NSIS setup executable, setup.exe.sig and latest.json channel. Tauri updater signing and Windows Authenticode remain distinct. No author workspace or API credentials belong in build/release assets.
+
+SG-030/031 adds reviewed scene-time state/corrections and bounded background whole-book planning to the same backend. Author acceptance and explicit bundle application remain required; closing the backend stops new planning calls after any in-flight call is checkpointed. Recovery never silently retries an uncertain paid request. No book data, validation corpus, model responses or credentials are bundled into the software.

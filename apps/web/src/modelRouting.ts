@@ -1,13 +1,13 @@
 import type { AgentDiscussionMode, AgentSettings, AgentSettingsUpdate, ConnectionProfileUpdate, ModelExecution, ModelTask, TaskAssignments } from "./api";
 
-export const MODEL_TASKS: ModelTask[] = ["planning", "writing", "revision", "discussion", "extraction"];
+export const MODEL_TASKS: ModelTask[] = ["planning", "writing", "revision", "discussion", "extraction", "continuity"];
 
 export function settingsToForm(settings: AgentSettings): AgentSettingsUpdate {
   return {
     scene_writer: settings.scene_writer, provider_label: settings.provider_label, llm_base_url: settings.llm_base_url,
     llm_model: settings.llm_model, llm_json_mode: settings.llm_json_mode, permission_level: settings.permission_level,
-    llm_protocol: settings.llm_protocol ?? "chat_completions",
-    connection_profiles: settings.connection_profiles?.map((profile) => ({ id: profile.id, name: profile.name, protocol: profile.protocol, base_url: profile.base_url, model: profile.model, json_mode: profile.json_mode })),
+    llm_protocol: settings.llm_protocol ?? "chat_completions", llm_thinking_mode: settings.llm_thinking_mode ?? "provider_default",
+    connection_profiles: settings.connection_profiles?.map((profile) => ({ id: profile.id, name: profile.name, protocol: profile.protocol, base_url: profile.base_url, model: profile.model, json_mode: profile.json_mode, thinking_mode: profile.thinking_mode ?? "provider_default" })),
     task_assignments: settings.task_assignments ? { ...settings.task_assignments } : undefined
   };
 }
@@ -15,12 +15,12 @@ export function settingsToForm(settings: AgentSettings): AgentSettingsUpdate {
 /** Only explicit editable fields cross the settings write boundary. Secret previews never do. */
 export function settingsSavePayload(form: AgentSettingsUpdate, key: string, clear: boolean): AgentSettingsUpdate {
   const profiles = form.connection_profiles?.map((profile): ConnectionProfileUpdate => ({
-    id: profile.id, name: profile.name, protocol: profile.protocol, base_url: profile.base_url, model: profile.model, json_mode: profile.json_mode,
+    id: profile.id, name: profile.name, protocol: profile.protocol, base_url: profile.base_url, model: profile.model, json_mode: profile.json_mode, thinking_mode: profile.thinking_mode ?? "provider_default",
     ...(profile.api_key ? { api_key: profile.api_key } : {}), ...(profile.clear_api_key ? { clear_api_key: true } : {})
   }));
   const assignments = form.task_assignments ? Object.fromEntries(MODEL_TASKS.map((task) => [task, form.task_assignments?.[task] ?? null])) as TaskAssignments : undefined;
   return { scene_writer: form.scene_writer, provider_label: form.provider_label, llm_base_url: form.llm_base_url,
-    llm_model: form.llm_model, llm_protocol: form.llm_protocol, llm_json_mode: form.llm_json_mode, permission_level: form.permission_level,
+    llm_model: form.llm_model, llm_protocol: form.llm_protocol, llm_json_mode: form.llm_json_mode, llm_thinking_mode: form.llm_thinking_mode ?? "provider_default", permission_level: form.permission_level,
     ...(form.selected_preset_id ? { selected_preset_id: form.selected_preset_id } : {}),
     ...(profiles ? { connection_profiles: profiles } : {}), ...(assignments ? { task_assignments: assignments } : {}),
     llm_api_key: key || null, clear_api_key: clear };
@@ -41,9 +41,9 @@ export function resolvedTask(settings: AgentSettings | null, task: ModelTask): M
   const id = settings.task_assignments?.[task];
   if (id) {
     const profile = settings.connection_profiles?.find((candidate) => candidate.id === id);
-    return profile ? { task, profile_id: profile.id, profile_name: profile.name, protocol: profile.protocol, model: profile.model } : null;
+    return profile ? { task, profile_id: profile.id, profile_name: profile.name, protocol: profile.protocol, model: profile.model, ...(profile.thinking_mode ? { thinking_mode: profile.thinking_mode } : {}) } : null;
   }
-  return { task, profile_id: "default", profile_name: settings.provider_label, protocol: settings.llm_protocol ?? "chat_completions", model: settings.llm_model };
+  return { task, profile_id: "default", profile_name: settings.provider_label, protocol: settings.llm_protocol ?? "chat_completions", model: settings.llm_model, ...(settings.llm_thinking_mode ? { thinking_mode: settings.llm_thinking_mode } : {}) };
 }
 export function taskConnectionReady(settings: AgentSettings | null, task: ModelTask): boolean {
   const execution = resolvedTask(settings, task);
@@ -55,4 +55,8 @@ export function taskConnectionReady(settings: AgentSettings | null, task: ModelT
 
 export function settingsRequestIsCurrent(request: { apiBase: string; sequence: number; revision: number }, current: { apiBase: string; sequence: number; revision: number }): boolean {
   return request.apiBase === current.apiBase && request.sequence === current.sequence && request.revision === current.revision;
+}
+
+export function supportsExplicitThinking(baseUrl: string, protocol: string): boolean {
+  try { const url = new URL(baseUrl); return protocol === "chat_completions" && url.protocol === "https:" && url.hostname === "api.deepseek.com" && !url.username && !url.password && (!url.port || url.port === "443") && !url.search && !url.hash; } catch { return false; }
 }

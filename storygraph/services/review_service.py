@@ -7,12 +7,14 @@ from storygraph.core.time import utc_now
 from storygraph.models.candidate import CandidateFact, ReviewDecision
 from storygraph.stores.candidate_store import CandidateStore
 from storygraph.stores.graph_base import GraphStore
+from storygraph.services.natural_state_extraction import validate_natural_candidate_source
 
 
 class ReviewService:
-    def __init__(self, candidate_store: CandidateStore, graph_store: GraphStore) -> None:
+    def __init__(self, candidate_store: CandidateStore, graph_store: GraphStore, *, draft_store=None) -> None:
         self.candidate_store = candidate_store
         self.graph_store = graph_store
+        self.draft_store = draft_store
 
     def submit(self, candidates: list[CandidateFact]) -> list[CandidateFact]:
         validated = [self.validate_candidate_scope(candidate) for candidate in candidates]
@@ -27,6 +29,7 @@ class ReviewService:
         *,
         project_id: str | None = None,
     ) -> CandidateFact:
+        validate_natural_candidate_source(candidate, draft_store=self.draft_store)
         try:
             return self.graph_store.validate_candidate_scope(
                 candidate,
@@ -158,6 +161,7 @@ class ReviewService:
 
         self.candidate_store.update_if_pending(reviewed)
         try:
+            validate_natural_candidate_source(reviewed, draft_store=self.draft_store)
             self.graph_store.commit_candidate_fact(
                 reviewed,
                 reviewer=reviewer,

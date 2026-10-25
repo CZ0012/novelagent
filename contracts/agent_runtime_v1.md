@@ -248,3 +248,42 @@ Malformed model JSON/schema in the standard contract-error API path returns
 `409` with `category: model_output_invalid` and a safe static message. It does
 not save a generated Draft or relax JSON parsing. Specialized composition and
 outline routes retain their existing bounded schema-error categories.
+
+## SG-029 explicit semantic review task
+
+AgentTask and task_assignments add `continuity`, inheriting the default connection when omitted. Existing five tasks and settings are unchanged. Explicit generation-review requests use this frozen task connection and record its non-secret ModelExecution. Existing rule-only check-continuity calls do not become paid operations. Semantic review uses generation_review_v1 and cannot silently fall back to a passing deterministic check.
+
+Author-approved project StyleProfile applies to creative scene generation, discussion/revision/continuation and composition across providers. It outranks generic preset prose preferences; canon, output language and human review remain authoritative. Scene overrides are explicit canon metadata. Neither profile application nor semantic review claims complete independence from the underlying model.
+
+## Explicit official DeepSeek thinking option
+
+The default connection adds `llm_thinking_mode`; named connections add
+`thinking_mode`. Allowed values are `provider_default` (the backward-compatible
+default), `enabled`, and `disabled`. Configuration responses expose this
+nonsecret choice. Environment-driven default connections may use
+`STORYGRAPH_LLM_THINKING_MODE` with the same values.
+
+`provider_default` omits the provider wire field entirely. An explicit choice
+sends `{"thinking":{"type":"enabled"}}` or
+`{"thinking":{"type":"disabled"}}` only to HTTPS `api.deepseek.com` (standard
+443 port) using the explicit Chat Completions protocol. Other hosts, compatible
+gateways, HTTP endpoints, and Responses/Anthropic protocols reject an explicit
+override before network I/O. Model identifiers do not imply compatibility.
+Changing protocol/host requires resetting this vendor-specific option to
+`provider_default` when the new connection is incompatible.
+
+Task resolution freezes the choice with the same connection/model/preset
+snapshot. Newly generated `ModelExecution` records include `thinking_mode`;
+older histories missing the field retain null rather than inventing a choice.
+No option changes the exact configured model, automatically retries a truncated
+response, exposes hidden reasoning, or relaxes strict completed-text/JSON checks.
+`reasoning_content` is never manuscript text or persisted raw provider metadata.
+
+Verified against official documentation on 2026-10-25:
+[DeepSeek Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)
+documents the enabled/disabled `thinking.type` field and enabled default;
+[Thinking Mode guide](https://api-docs.deepseek.com/guides/thinking_mode/)
+distinguishes reasoning content from final answer content. The author may
+explicitly disable thinking to allocate the requested completion budget to final
+structured output. This is an explicit configuration choice, never a silent
+reaction or paid retry after a failed generation.

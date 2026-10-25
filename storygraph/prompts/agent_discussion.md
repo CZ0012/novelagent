@@ -55,3 +55,10 @@ Mode behavior:
 The Proposal Store will save your output as non-canon collaboration data. The
 author must explicitly accept or promote it before it affects drafts or review
 flows.
+# Reviewed temporal state
+
+When a Context Pack is supplied, `temporal_states` records confirmed state at scene
+entry. Use its resolved values over baseline or descriptive arc text. Distinguish an
+event happening during this scene from state already true when the scene begins.
+Never invent a missing or ambiguous state to make a continuation easier. A proposed
+change remains a proposal and must pass exact-version review before adoption.

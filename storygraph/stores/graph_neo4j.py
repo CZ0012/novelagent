@@ -106,6 +106,9 @@ class Neo4jGraphStore(GraphStore):
         event_id: str | None = None,
     ) -> GraphNode:
         node = self.get_node(node_id, include_non_canon=True)
+        if (node.properties.get("event_kind") == "temporal_state_assertion_v1"
+                or properties.get("event_kind") == "temporal_state_assertion_v1"):
+            raise GraphStoreError("canon_write_forbidden", "Temporal assertions are immutable")
         self._validate_project_language_properties(node.type, properties)
         if node.type == "Project":
             current_language = self._effective_project_language(node.properties)
@@ -313,6 +316,8 @@ class Neo4jGraphStore(GraphStore):
         reviewer: str,
         rationale: str,
     ) -> GraphNode:
+        if properties.get("event_kind") == "temporal_state_assertion_v1":
+            raise GraphStoreError("canon_write_forbidden", "Temporal assertions require reviewed append_state")
         now = utc_now()
         node = GraphNode(
             id=node_id,
@@ -456,6 +461,8 @@ class Neo4jGraphStore(GraphStore):
     def commit_candidate_fact(
         self, candidate: CandidateFact, *, reviewer: str, rationale: str
     ) -> EventLogEntry:
+        if candidate.proposed_graph_patch.operation == "append_state":
+            raise GraphStoreError("backend_unavailable", "Temporal state commits currently require local JSON/memory Graph Store.")
         memory = self._snapshot()
         before_relationships = dict(memory.relationships)
         before_nodes = dict(memory.nodes)

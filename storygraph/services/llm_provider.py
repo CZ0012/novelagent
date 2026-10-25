@@ -8,6 +8,8 @@ from typing import Any, Protocol
 from urllib import error, request
 from urllib.parse import urlsplit
 
+from storygraph.core.agent_config import ThinkingMode, validate_thinking_mode
+
 
 @dataclass(frozen=True)
 class LLMMessage:
@@ -39,6 +41,8 @@ class LLMProvider(Protocol):
 class OpenAICompatibleProvider:
     """Small Chat Completions client for third-party OpenAI-compatible APIs."""
 
+    protocol = "chat_completions"
+
     def __init__(
         self,
         *,
@@ -47,6 +51,7 @@ class OpenAICompatibleProvider:
         model: str,
         timeout_seconds: float = 60.0,
         json_mode: bool = True,
+        thinking_mode: ThinkingMode = "provider_default",
     ) -> None:
         try:
             parsed_url = urlsplit(base_url)
@@ -60,13 +65,16 @@ class OpenAICompatibleProvider:
             raise ValueError("api_key is required")
         if not model:
             raise ValueError("model is required")
+        validate_thinking_mode(base_url, self.protocol, thinking_mode)
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.json_mode = json_mode
+        self.thinking_mode = thinking_mode
 
     def generate(self, request_payload: LLMRequest) -> LLMResponse:
+        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode)
         payload: dict[str, Any] = {
             "model": request_payload.model or self.model,
             "messages": [
@@ -78,6 +86,8 @@ class OpenAICompatibleProvider:
         if request_payload.max_tokens is not None:
             payload["max_tokens"] = request_payload.max_tokens
         _reject_extra(request_payload)
+        if self.thinking_mode != "provider_default":
+            payload["thinking"] = {"type": self.thinking_mode}
         if self.json_mode and request_payload.response_format == "json_object":
             payload["response_format"] = {"type": "json_object"}
 
@@ -204,7 +214,10 @@ def _safe_response_metadata(parsed: dict, secret: str) -> dict:
 class ResponsesProvider(OpenAICompatibleProvider):
     """Responses text transport. No implicit tools, history storage, polling or retries."""
 
+    protocol = "responses"
+
     def generate(self, request_payload: LLMRequest) -> LLMResponse:
+        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode)
         _reject_extra(request_payload)
         payload = {
             "model": request_payload.model or self.model,
@@ -250,10 +263,13 @@ class ResponsesProvider(OpenAICompatibleProvider):
 class AnthropicMessagesProvider(OpenAICompatibleProvider):
     """Anthropic Messages transport for providers explicitly exposing that protocol."""
 
+    protocol = "anthropic_messages"
+
     def _auth_headers(self) -> dict[str, str]:
         return {"x-api-key": self.api_key, "anthropic-version": "2023-06-01"}
 
     def generate(self, request_payload: LLMRequest) -> LLMResponse:
+        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode)
         _reject_extra(request_payload)
         payload = {
             "model": request_payload.model or self.model,

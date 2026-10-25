@@ -80,8 +80,28 @@ BUILTIN_AGENT_PRESETS = (
 
 
 ProviderProtocol = Literal["chat_completions", "responses", "anthropic_messages"]
-AgentTask = Literal["planning", "writing", "revision", "discussion", "extraction"]
-AGENT_TASKS = ("planning", "writing", "revision", "discussion", "extraction")
+ThinkingMode = Literal["provider_default", "enabled", "disabled"]
+AgentTask = Literal["planning", "writing", "revision", "discussion", "extraction", "continuity"]
+AGENT_TASKS = ("planning", "writing", "revision", "discussion", "extraction", "continuity")
+
+
+def validate_thinking_mode(base_url: str, protocol: str, mode: str) -> None:
+    """Explicit vendor options are opt-in and never sent to compatible gateways."""
+    if mode not in {"provider_default", "enabled", "disabled"}:
+        raise ValueError("Unsupported thinking mode")
+    if mode == "provider_default":
+        return
+    try:
+        parsed = urlsplit(base_url)
+        supported = (
+            protocol == "chat_completions" and parsed.scheme == "https"
+            and parsed.hostname == "api.deepseek.com" and parsed.port in (None, 443)
+            and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment
+        )
+    except ValueError:
+        supported = False
+    if not supported:
+        raise ValueError("Explicit thinking mode requires official DeepSeek HTTPS Chat Completions")
 
 
 
@@ -105,9 +125,15 @@ class ConnectionProfile(BaseModel):
     base_url: str = Field(default="", max_length=2048)
     model: str = Field(default="", max_length=200)
     json_mode: bool = True
+    thinking_mode: ThinkingMode = "provider_default"
     api_key: str = Field(default="", max_length=4096, repr=False)
 
     _valid_address = field_validator("base_url")(_validate_provider_address)
+
+    @model_validator(mode="after")
+    def validate_thinking(self):
+        validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode)
+        return self
 
     @field_validator("id")
     @classmethod
@@ -129,6 +155,7 @@ class TaskAssignments(BaseModel):
     revision: str | None = None
     discussion: str | None = None
     extraction: str | None = None
+    continuity: str | None = None
 
 
 class ModelExecution(BaseModel):
@@ -137,6 +164,7 @@ class ModelExecution(BaseModel):
     protocol: ProviderProtocol
     model: str
     task: AgentTask
+    thinking_mode: ThinkingMode | None = None
 
 
 class AgentRuntimeConfig(BaseModel):
@@ -147,6 +175,7 @@ class AgentRuntimeConfig(BaseModel):
     llm_api_key: str = ""
     llm_json_mode: bool = True
     llm_protocol: ProviderProtocol = "chat_completions"
+    llm_thinking_mode: ThinkingMode = "provider_default"
     permission_level: AgentPermissionLevel = AgentPermissionLevel.FULL
     selected_preset_id: str = DEFAULT_AGENT_PRESET_ID
     custom_presets: list[AgentPreset] = Field(default_factory=list, max_length=100)
@@ -157,6 +186,7 @@ class AgentRuntimeConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_presets(self) -> "AgentRuntimeConfig":
+        validate_thinking_mode(self.llm_base_url, self.llm_protocol, self.llm_thinking_mode)
         ids = {preset.id for preset in BUILTIN_AGENT_PRESETS}
         for preset in self.custom_presets:
             if preset.builtin or not preset.id.startswith("custom_") or preset.id in ids:
@@ -184,6 +214,7 @@ class AgentRuntimeConfigUpdate(BaseModel):
     clear_api_key: bool = False
     llm_json_mode: bool = True
     llm_protocol: ProviderProtocol = "chat_completions"
+    llm_thinking_mode: ThinkingMode = "provider_default"
     permission_level: AgentPermissionLevel = AgentPermissionLevel.FULL
     selected_preset_id: str = Field(default=DEFAULT_AGENT_PRESET_ID, min_length=1, max_length=100)
 
@@ -197,6 +228,7 @@ class AgentRuntimeConfigResponse(BaseModel):
     api_key_preview: str | None
     llm_json_mode: bool
     llm_protocol: ProviderProtocol
+    llm_thinking_mode: ThinkingMode = "provider_default"
     connection_profiles: list[dict]
     task_assignments: TaskAssignments
     resolved_tasks: dict[str, ModelExecution]
@@ -220,6 +252,7 @@ def load_agent_config(settings: StoryGraphSettings) -> AgentRuntimeConfig:
         llm_api_key=settings.llm_api_key,
         llm_json_mode=settings.llm_json_mode,
         llm_protocol=getattr(settings, "llm_protocol", "chat_completions"),
+        llm_thinking_mode=getattr(settings, "llm_thinking_mode", "provider_default"),
     )
     if not settings.agent_config_path.exists():
         return config
@@ -270,7 +303,11 @@ def update_agent_config(
             secret = "" if profile.clear_api_key else (
                 profile.api_key or (existing.api_key if existing else "")
             )
-            profiles.append({**profile.model_dump(exclude={"clear_api_key", "api_key"}), "api_key": secret})
+            thinking_mode = profile.thinking_mode
+            if "thinking_mode" not in profile.model_fields_set and existing is not None:
+                thinking_mode = existing.thinking_mode
+            profiles.append({**profile.model_dump(exclude={"clear_api_key", "api_key"}),
+                             "api_key": secret, "thinking_mode": thinking_mode})
         values["connection_profiles"] = profiles
     if "task_assignments" in update.model_fields_set:
         values["task_assignments"] = {
@@ -288,6 +325,7 @@ def apply_agent_config(settings: StoryGraphSettings, config: AgentRuntimeConfig)
     settings.llm_model = config.llm_model
     settings.llm_json_mode = config.llm_json_mode
     settings.llm_protocol = config.llm_protocol
+    settings.llm_thinking_mode = config.llm_thinking_mode
     settings.agent_preset = selected_agent_preset(config).model_copy(deep=True)
     # A single pointer publication is the request snapshot boundary.
     settings.agent_runtime_config = config.model_copy(deep=True)
@@ -303,6 +341,7 @@ def config_response(config: AgentRuntimeConfig) -> AgentRuntimeConfigResponse:
         api_key_preview=_preview_secret(config.llm_api_key),
         llm_json_mode=config.llm_json_mode,
         llm_protocol=config.llm_protocol,
+        llm_thinking_mode=config.llm_thinking_mode,
         connection_profiles=[{
             **p.model_dump(exclude={"api_key"}),
             "api_key_configured": bool(p.api_key), "api_key_preview": _preview_secret(p.api_key),
@@ -371,12 +410,14 @@ def resolve_model_execution(config: AgentRuntimeConfig, task: AgentTask, *, prof
     selected = profile_id if profile_id is not None else getattr(config.task_assignments, task)
     if selected in (None, "default"):
         return ModelExecution(profile_id="default", profile_name=config.provider_label,
-                              protocol=config.llm_protocol, model=config.llm_model, task=task)
+                              protocol=config.llm_protocol, model=config.llm_model, task=task,
+                              thinking_mode=config.llm_thinking_mode)
     profile = next((item for item in config.connection_profiles if item.id == selected), None)
     if profile is None:
         raise ValueError("Unknown connection profile")
     return ModelExecution(profile_id=profile.id, profile_name=profile.name,
-                          protocol=profile.protocol, model=profile.model, task=task)
+                          protocol=profile.protocol, model=profile.model, task=task,
+                          thinking_mode=profile.thinking_mode)
 
 
 def settings_for_task(settings: StoryGraphSettings, task: AgentTask, *, profile_id=None) -> StoryGraphSettings:
@@ -390,6 +431,7 @@ def settings_for_task(settings: StoryGraphSettings, task: AgentTask, *, profile_
         snapshot.llm_base_url, snapshot.llm_api_key = profile.base_url, profile.api_key
         snapshot.llm_model, snapshot.llm_json_mode = profile.model, profile.json_mode
         snapshot.llm_protocol = profile.protocol
+        snapshot.llm_thinking_mode = profile.thinking_mode
     snapshot.model_execution = execution.model_dump()
     snapshot.agent_runtime_config = None  # Already resolved; factories must not resolve it again.
     snapshot.resolved_task = task

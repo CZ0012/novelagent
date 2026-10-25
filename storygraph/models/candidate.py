@@ -16,7 +16,7 @@ class SourceSpan(ContractModel):
 
 
 class ProposedGraphPatch(ContractModel):
-    operation: Literal["create_node", "update_node", "create_relation", "update_relation", "none"]
+    operation: Literal["create_node", "update_node", "create_relation", "update_relation", "append_state", "none"]
     target: str
     properties: JsonDict = Field(default_factory=dict)
     source_ref: str

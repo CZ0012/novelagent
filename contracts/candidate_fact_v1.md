@@ -81,7 +81,8 @@ real Draft Store source.
 
 Minimum fields:
 
-- `operation`: `create_node`, `update_node`, `create_relation`, `update_relation`, or `none`
+- `operation`: `create_node`, `update_node`, `create_relation`, `update_relation`,
+  additive `append_state`, or `none`
 - `target`
 - `properties`
 - `source_ref`
@@ -101,6 +102,21 @@ project. A `Project` node may be referenced only when its ID equals
 with that project ID when it is omitted and are rejected when they supply a
 different one. A scope failure rejects the whole candidate batch and must not
 leave pending candidates, graph mutations, or event-log entries behind.
+
+`append_state` is governed by `temporal_state_v1`. It targets an existing
+same-project Character/Item and appends an immutable typed Event assertion after
+human acceptance; it never overwrites that entity or existing relationships.
+Its strict patch binds field, typed value, exact source Scene, complete source
+Draft hash and expected field-slot fingerprint. Source freshness and slot scope
+are revalidated at review/commit. The legacy generic `create_node` path cannot
+create reserved temporal assertion Event records. Unsupported backends reject
+this operation explicitly before any mutation.
+
+An explicit author correction may use append_state action=correct with a scoped
+active supersedes assertion. It remains a pending Candidate until normal human
+accept/edit-accept; source Draft hash, same effective Scene, typed value, active
+target and full-slot compare-and-set are mandatory. Automatic extraction cannot
+select this correction action. See temporal_state_v1 for revision-chain semantics.
 
 ## Review
 

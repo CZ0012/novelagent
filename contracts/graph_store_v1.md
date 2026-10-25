@@ -197,6 +197,23 @@ For a durable graph backend, all node/relationship changes and every provenance
 event produced by one candidate commit must share one backend transaction. Any
 synchronous write failure rolls back the complete graph/event delta.
 
+The additive `append_state` patch uses the existing Event label with reserved
+`event_kind = temporal_state_assertion_v1`; full semantics are in
+`temporal_state_v1`. Local memory/JSON commits stage the assertion and deterministic
+commit event under the graph mutation guard, compare the expected state-slot
+fingerprint, and publish only after staged JSON persistence succeeds. These
+assertions are immutable; seed/generic candidate paths cannot manufacture them.
+Neo4j currently rejects append_state before mutation until equivalent slot CAS
+and transactional semantics are implemented.
+
+`resolve_temporal_state` projects typed life/physical/location/ownership state at
+an exact scoped Scene using NEXT_SCENE partial order, not accept time or ID sort.
+Only explicitly authored `properties.initial_state` values are baselines. Missing,
+cyclic or incomparable chronology produces unknown/ambiguous state, never a
+guessed value. `at_scene_start = true` excludes assertions effective during that
+same Scene; default through-scene projection includes them. State projection is
+read-only and preserves assertion/source provenance.
+
 ### `record_event`
 
 Records the append-only event log entry for every canon mutation.

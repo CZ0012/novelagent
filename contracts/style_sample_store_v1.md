@@ -75,3 +75,7 @@ Context Pack builders may include matched sample snippets in `retrieved_style_sa
 - Style samples must not contain full chapters in retrieved context.
 - Automated draft generation must not auto-ingest style samples.
 - Retrieved samples are `P6` context and should be dropped before hard scene constraints when budget pressure requires trimming.
+
+## SG-029 Chinese style retrieval
+
+Deterministic matching uses Latin word tokens and adjacent Han character bigrams so Chinese samples can match overlapping phrases without spaces. Ranking remains project/language scoped, stable and noncanon; generated drafts are never automatically ingested as style samples.

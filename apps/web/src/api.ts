@@ -6,6 +6,11 @@ export type ContextGap = {
   source?: string | null;
 };
 
+export type TemporalStateField = "life_status" | "physical_state" | "location_id" | "owner_id";
+export type TemporalStateValue = { field: TemporalStateField; status: "resolved" | "unknown" | "ambiguous"; value: string | null; assertion_refs: string[]; reason?: string | null };
+export type TemporalStateProjection = { contract_version: "temporal_state_v1"; project_id: string; subject_id: string; scene_id: string; at_scene_start: boolean; states: TemporalStateValue[]; complete: boolean };
+export type TemporalStatePatch = { contract_version: "temporal_state_v1"; field: TemporalStateField; value: string | null; valid_from_scene: string; expected_slot_fingerprint: string; source_text_sha256: string; action?: "assert" | "correct"; supersedes_assertion_id?: string | null };
+
 export type ContextPack = {
   contract_version: "context_pack_v1";
   project_id: string;
@@ -35,6 +40,7 @@ export type ContextPack = {
   previous_scene_summary?: string | null;
   style_constraints: Record<string, unknown>;
   retrieved_style_samples: string[];
+  temporal_states?: TemporalStateProjection[];
   missing_context: ContextGap[];
   provenance: {
     graph_query_ids: string[];
@@ -465,10 +471,11 @@ export type SceneRunResult = {
 export type AgentPermissionLevel = "read_only" | "read_generate" | "full";
 
 export type ModelProtocol = "chat_completions" | "responses" | "anthropic_messages";
-export type ModelTask = "planning" | "writing" | "revision" | "discussion" | "extraction";
-export type ModelExecution = { task: ModelTask; profile_id: string; profile_name: string; protocol: ModelProtocol; model: string };
-export type ConnectionProfile = { id: string; name: string; protocol: ModelProtocol; base_url: string; model: string; json_mode: boolean; api_key_configured: boolean; api_key_preview?: string | null };
-export type ConnectionProfileUpdate = Pick<ConnectionProfile, "id" | "name" | "protocol" | "base_url" | "model" | "json_mode"> & { api_key?: string | null; clear_api_key?: boolean };
+export type ThinkingMode = "provider_default" | "enabled" | "disabled";
+export type ModelTask = "planning" | "writing" | "revision" | "discussion" | "extraction" | "continuity";
+export type ModelExecution = { task: ModelTask; profile_id: string; profile_name: string; protocol: ModelProtocol; model: string; thinking_mode?: ThinkingMode | null };
+export type ConnectionProfile = { id: string; name: string; protocol: ModelProtocol; base_url: string; model: string; json_mode: boolean; thinking_mode?: ThinkingMode; api_key_configured: boolean; api_key_preview?: string | null };
+export type ConnectionProfileUpdate = Pick<ConnectionProfile, "id" | "name" | "protocol" | "base_url" | "model" | "json_mode" | "thinking_mode"> & { api_key?: string | null; clear_api_key?: boolean };
 export type TaskAssignments = Partial<Record<ModelTask, string | null>>;
 
 export type AgentSettings = {
@@ -476,6 +483,7 @@ export type AgentSettings = {
   agent_presets: AgentPreset[];
   scene_writer: "rule_based" | "llm";
   llm_protocol?: ModelProtocol;
+  llm_thinking_mode?: ThinkingMode;
   connection_profiles?: ConnectionProfile[];
   task_assignments?: TaskAssignments;
   resolved_tasks?: Partial<Record<ModelTask, ModelExecution>>;
@@ -493,6 +501,7 @@ export type AgentSettingsUpdate = {
   selected_preset_id?: string;
   scene_writer: "rule_based" | "llm";
   llm_protocol?: ModelProtocol;
+  llm_thinking_mode?: ThinkingMode;
   connection_profiles?: ConnectionProfileUpdate[];
   task_assignments?: TaskAssignments;
   provider_label: string;

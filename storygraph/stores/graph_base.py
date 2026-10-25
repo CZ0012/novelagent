@@ -66,7 +66,10 @@ class GraphStore(ABC):
                 "graph patch properties belong to another project",
             )
 
-        if patch.operation == "create_node":
+        if patch.operation == "append_state":
+            from storygraph.services.temporal_state import validate_temporal_candidate
+            validate_temporal_candidate(self, candidate)
+        elif patch.operation == "create_node":
             self._validate_create_node_scope(candidate)
             properties["project_id"] = project_id
         elif patch.operation == "update_node":
@@ -81,6 +84,11 @@ class GraphStore(ABC):
                     candidate,
                     "fact review cannot update Project configuration",
                 )
+            if (subject.properties.get("event_kind") == "temporal_state_assertion_v1"
+                    or properties.get("event_kind") == "temporal_state_assertion_v1"):
+                self._raise_candidate_scope_error(candidate, "temporal assertions are immutable")
+            if "initial_state" in properties:
+                self._raise_candidate_scope_error(candidate, "initial baselines require an explicit author seed or reviewed blueprint")
             if subject.type == "Scene":
                 self._validate_scene_patch_references(
                     candidate,
@@ -114,6 +122,8 @@ class GraphStore(ABC):
 
     def _validate_create_node_scope(self, candidate: CandidateFact) -> None:
         patch = candidate.proposed_graph_patch
+        if patch.properties.get("event_kind") == "temporal_state_assertion_v1":
+            self._raise_candidate_scope_error(candidate, "temporal assertions require append_state")
         if patch.target != candidate.subject_id:
             self._raise_candidate_scope_error(
                 candidate,

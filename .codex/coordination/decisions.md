@@ -224,3 +224,9 @@ Chapter selection projects saved scene prose, and empty planned scenes receive e
 ## SG-028 execution boundary
 
 Protocol compatibility is explicit: default legacy Chat Completions remains stable; Responses and Anthropic Messages are selected by saved endpoint profiles and tested independently. A role may inherit the default or use an explicit profile/model; failures never silently fall back or trigger another paid call. Responses transport support does not imply enabling remote built-in tools, conversation storage or autonomous canon writes. Preserve the author's current exact model identifier in live tests; no substitution.
+
+## SG-029 decisions
+
+Plan 500,000-character fiction hierarchically as an accepted world/plot/style blueprint and bounded chapter batches. Persist every phase in versioned Proposal Store; model output never writes canon. Apply requires explicit human acceptance, exact version, scoped references, current canon fingerprint and recoverable provenance.
+
+Semantic continuity review is a distinct, explicitly invoked paid task. Reports cite exact text and scoped canon IDs, record coverage and immutable fingerprints, and become stale when inputs change. Rule-only checks cannot prove semantic consistency. The project StyleProfile is author-approved Agent-designed direction; base-model preferences remain subordinate but absolute independence is not claimed.

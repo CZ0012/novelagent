@@ -44,6 +44,7 @@ from storygraph.stores.json_graph import load_json_graph, save_json_graph
 from storygraph.stores.memory_graph import InMemoryGraphStore
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
 from storygraph.workflows import SceneGenerationWorkflow
+from storygraph.services.quality_policy import require_direct_generation_allowed
 
 
 @dataclass
@@ -81,7 +82,7 @@ def _runtime(workspace: str | Path | None = None) -> CliRuntime:
     candidate_store = SQLiteCandidateStore(settings.candidate_store_path)
     workflow_store = SQLiteWorkflowStore(settings.workflow_store_path)
     style_sample_store = SQLiteStyleSampleStore(settings.style_sample_store_path)
-    review = ReviewService(candidate_store, configured_graph.graph)
+    review = ReviewService(candidate_store, configured_graph.graph, draft_store=draft_store)
     return CliRuntime(
         settings=settings,
         graph=configured_graph.graph,
@@ -422,6 +423,7 @@ def write_scene_command(
                 summary=summary,
             )
             return draft.model_dump()
+        require_direct_generation_allowed(runtime.graph, project_id)
         context_pack = ContextPackBuilder(
             runtime.graph,
             runtime.draft_store,
@@ -611,7 +613,7 @@ def run_review_demo(
     draft_store = SQLiteDraftStore()
     candidate_store = SQLiteCandidateStore()
     extractor = RuleBasedStateExtractor()
-    review = ReviewService(candidate_store, graph)
+    review = ReviewService(candidate_store, graph, draft_store=draft_store)
     marker = (
         f"[[fact:id=fact_cli_review;fact_type=ItemState;subject={ITEM_ID};"
         f"relation=LOCATED_AT;object={LOCATION_ID};confidence=0.95]]"

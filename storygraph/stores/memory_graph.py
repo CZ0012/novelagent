@@ -75,6 +75,8 @@ class InMemoryGraphStore(GraphStore):
         reviewer: str = "author",
         rationale: str = "Manual project seed.",
     ) -> GraphNode:
+        if properties.get("event_kind") == "temporal_state_assertion_v1":
+            raise GraphStoreError("canon_write_forbidden", "Temporal assertions require reviewed append_state")
         with self._mutation_lock:
             now = utc_now()
             node = GraphNode(
@@ -174,6 +176,9 @@ class InMemoryGraphStore(GraphStore):
         source_ref: str,
         event_id: str | None = None,
     ) -> GraphNode:
+        if (node.properties.get("event_kind") == "temporal_state_assertion_v1"
+                or properties.get("event_kind") == "temporal_state_assertion_v1"):
+            raise GraphStoreError("canon_write_forbidden", "Temporal assertions are immutable")
         now = utc_now()
         updated = node.model_copy(
             update={
@@ -626,6 +631,9 @@ class InMemoryGraphStore(GraphStore):
             raise GraphStoreError("invalid_status_transition", "Candidate status is not ACCEPTED_FOR_CANON")
         candidate = self.validate_candidate_scope(candidate)
         patch = candidate.proposed_graph_patch
+        if patch.operation == "append_state":
+            from storygraph.services.temporal_state import commit_temporal_candidate
+            return commit_temporal_candidate(self, candidate, reviewer=reviewer, rationale=rationale)
         if patch.operation == "none":
             return self._record_event(
                 operation="commit_candidate_fact",

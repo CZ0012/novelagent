@@ -91,3 +91,9 @@ All product owners are frozen. Independent reciprocal reviews repaired URL diagn
 
 
 SG-028 closed after signed release publication and three-asset download comparison. Backend, Front and Import owners completed reciprocal review; Main verified user-facing bilingual behavior and preserved original configuration/data. Check approved final source, sidecar and installer. See docs/acceptance-0.1.17.md for results and protocol limitations.
+
+## 0.2.0 local candidate verification (2026-10-25)
+
+Final backend full regression:755 passed,1skipped. Front245 fulltests plus20focused finaldisplay checks/build passed. Local Windows0.2.0 installer static/signature/tamper/privacy audit and isolatedpersistentbackend/restart smoke passed; no installation orpublication. Source16newruntime modules/75compiledsource matches and7Webassets verified. Offline browser exercised complete21stage bookbundle review/accept/apply and100chapter/200scene directory; fixtures clearly labeled synthetic.
+
+Full real-provider book acceptance remains open under SG-031-BUDGET. Implementation/package evidence is not a substitute for that goal criterion. See docs/acceptance-0.2.0.md; author workspace/key material and generated acceptance outputs remain outside Git.

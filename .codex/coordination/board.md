@@ -471,3 +471,33 @@ Acceptance: meaningful chapter/scene reading surface and empty-state actions; pr
 | SG-028 | completed | Main Agent | `codex/sg-028-model-routing-and-imports` | Diagnose the reported empty DOCX import, support text extraction from RTF, and provide explicit task-model routing across Chat Completions, Responses and Anthropic Messages. | Implementation, independent review, 199 Web tests, backend full plus targeted regressions, real RTF/protocol and production-browser checks complete. Final signed package privacy/signature verified; v0.1.17 published and all three re-downloaded public assets match the audited package. |
 
 Acceptance: precise non-alarmist import failures and temporary-file skips; bounded local RTF text extraction; backward-compatible default provider plus per-task assignments; no silent protocol/model fallback; model/protocol provenance visible; original data/config unchanged by tests; independent bilingual UI, API and package/privacy verification.
+
+## SG-029 — Long-form planning, collaboration and evidence-based review (2026-10-25)
+
+| ID | Status | Owner | Branch | Goal | Next action |
+| --- | --- | --- | --- | --- | --- |
+| SG-029 | active | Main Agent | `codex/sg-029-longform-collaboration` | Reach the user goal of an accessible multi-mode novel workbench, Agent-owned style, and independently planned 500,000-character fiction with tested contradiction prevention. | Implement staged planning, grounded review and shared style context; run independent engineering and real-model acceptance before claiming completion. |
+| SG-029A | active | Contract/Creation Agent | shared integration branch | Persistent reviewed blueprint and chapter-batch expansion with budgets, causal/reveal links and safe application. | Freeze schema; implement services, contracts and adversarial tests. |
+| SG-029B | active | Review Creation Agent | shared integration branch | Semantic continuity/style reports grounded in exact text and scoped canon evidence. | Validate citations, coverage, stale reports and Chinese cases. |
+| SG-029C | active | Front Agent | shared integration branch | Project planning workspace and discoverable writing collaboration/review controls. | Integrate real APIs, bilingual views, safe Draft/proposal state. |
+| SG-029D | active | Main Agent | shared integration branch | API integration, project style authority, state extraction, scale and real-provider acceptance. | Preserve existing settings; keep validation in isolated ignored workspace. |
+
+Acceptance is not inferred from baseline tests: 463 backend tests passed and 1 skipped, but current literal-ID QA misses natural Chinese secret disclosure and falsely flags negation. Target-length planning, actual generated prose volume, semantic detection and literary quality must be reported separately. No absolute no-conflict promise or model-independence claim without evidence.
+
+## SG-030 — Reviewed temporal memory (2026-10-25)
+
+| ID | Status | Owner | Branch | Goal | Next action |
+| --- | --- | --- | --- | --- | --- |
+| SG-030 | active | Main + Temporal Creation Agent | shared SG-029 integration branch | Prevent future state from leaking into earlier scenes and preserve explicit historical life/injury/location/ownership changes. | Verify append_state commits, scene-entry projection, source freshness, chronology gaps and user-facing evidence. |
+
+Typed append_state candidates create immutable Event assertions after explicit review. Baselines come only from reviewed initial_state. NEXT_SCENE reachability controls effective state; unknown/cyclic/incomparable chronology fails closed. Local JSON/memory supports atomic graph/event publication; Neo4j rejects this additive operation until equivalent support exists. Same-scene retraction/edit is a separate future action and is not silently simulated.
+
+SG-029 live findings: official DeepSeek connection verified; first default-thinking blueprint exhausted output budget and was rejected. Explicit thinking disabled plus cross-field prompt constraints produced a valid five-volume/500,000-character-budget blueprint. Independent and model-based semantic reviews found real chronology/energy/causality issues plus some speculative suggestions. A revised alternative was generated; it remains blocked from application pending another exact-version passing plan report. Real model outputs, receipts and usage stay only in ignored isolated acceptance workspace, never these coordination files.
+
+## SG-031 — Independent noncanon book planning (2026-10-25)
+
+| ID | Status | Owner | Branch | Goal | Next action |
+| --- | --- | --- | --- | --- | --- |
+| SG-031 | active | Main Agent | shared SG-029 integration branch | Independently design the whole 500,000-character framework in a bounded resumable branch, then require human bundle approval before canon application. | Source/independent audits pass; local0.2.0 package building; full real-model run awaits explicit80-call/30CNY approval. |
+
+Current evidence: backend full suite752 passed/1skipped; one additional shutdown-lifecycle regression passed afterward. Front245 full tests and final20focused display checks/build passed. Independent SG031 audit17 passes include worker-CAS ownership, uncertain calls, budget, source freshness, receipt corruption and persistence recovery. Real five-volume blueprint was generated and iteratively corrected; latest DeepSeek Pro report passes with0issues. A complete autonomous100chapter/200scene REAL model run has not started and is not claimed as passed. Offline full-grid run and actual500000-character persistence corpus are separate evidence.

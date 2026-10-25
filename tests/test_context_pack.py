@@ -88,7 +88,13 @@ def test_context_pack_budget_trims_style_samples_before_hard_context():
     assert pack.must_include == ["bell rings early", "half black wax seal"]
     assert any(SECRET_ID in boundary.does_not_know for boundary in pack.knowledge_boundaries)
     assert any(item.startswith("P6 dropped style samples") for item in pack.budget.dropped_items)
-    assert pack.budget.estimated_tokens <= 550
+    # Named canon facts now remain available even under a deliberately tiny budget.
+    # Never erase world rules to make the number look successful.
+    assert pack.relevant_world_rules
+    assert pack.budget.estimated_tokens > 550
+    assert any(gap.kind == "context_budget_exceeded" for gap in pack.missing_context)
+    with pytest.raises(ContractError, match="critical missing context"):
+        RuleBasedSceneWriter().draft(pack)
 
 
 def test_context_pack_retrieves_style_samples_from_store():

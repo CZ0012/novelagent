@@ -177,3 +177,15 @@ The default priority order is:
   }
 }
 ```
+
+## SG-029 project style and protected context
+
+Context Pack adds `canon_entities`, a scoped structured registry resolving character/location/secret IDs to names and facts. It contains no Draft or Source prose. Missing/foreign canon cannot be replaced with guesses. Project.style_profile_id resolves only a same-project CANON StyleProfile; its fields form the style defaults, with explicit scene overrides. style_constraints adds nullable profile_id/profile_sha256 and rubric (string array), preserving legacy packs. The approved project voice outranks generic runtime presets and examples while remaining subordinate to canon and language rules.
+
+Token estimation counts Han characters conservatively instead of applying the English four-character estimate. Budget trimming removes examples and prior draft summaries before protected canon, knowledge, rules, linked clues and style. If protected context still exceeds the target, emit critical context_budget_exceeded and block full drafting; do not silently remove WorldRules to claim a budget fit.
+
+## SG-030 scene-time state and corrections
+
+ContextPack adds temporal_states projections for explicitly tracked Character/Item slots. `at_scene_start=true` excludes assertions made during the current scene. Resolved typed values override baseline/descriptive arc text; unknown/ambiguous tracked slots are critical context gaps. Legacy entities with no explicit baseline or assertion history do not acquire guessed state slots. Item retrieval uses explicit scene references/names or ownership resolved at scene entry; future ownership alone must not reveal the item. A guarded local graph read keeps each context build internally consistent.
+
+Semantic scene evidence uses the same entry projection from a frozen graph and includes only the used prior assertion references, excluding future/superseded raw assertion text. Plan review excludes explicitly superseded state records while retaining all history in the canon fingerprint. Explicit history routes keep the old audit evidence available.

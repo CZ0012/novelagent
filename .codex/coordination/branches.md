@@ -247,3 +247,7 @@ Branch `codex/sg-028-model-routing-and-imports`, base clean 3e2f917. Shared chec
 
 
 SG-028 publication complete: software 5fb634f/tag v0.1.17 synchronized to main and the integration branch. All three public assets match the independently verified package; no original application/workspace changed, no private data published. Protocol compatibility is distinguished from successful structured generation; the documented rejected Anthropic task is not claimed as a successful revision.
+
+## SG-029 branch strategy
+
+`codex/sg-029-longform-collaboration` starts from clean SG-028 source. Shared checkout with disjoint ownership: Planning owns new longform models/services/contract/tests; Semantic Review owns new canon snapshot/review models/services/contract/tests; Front owns apps/web/src; Main owns API/config/context integration, role instructions, documentation and acceptance. Agents must not switch branches or commit independently. No author workspace or credentials enter source or coordination. Model calls use explicitly authorized credentials only in ignored acceptance workspaces, with usage tracked. Software publication is a separate final operation.

@@ -27,6 +27,7 @@ from storygraph.services.context_pack_builder import ContextPackBuilder
 from storygraph.services.continuity_checker import RuleBasedContinuityChecker
 from storygraph.services.project_language import resolve_project_output_language
 from storygraph.services.review_service import ReviewService
+from storygraph.services.quality_policy import require_workflow_output_allowed
 from storygraph.services.scene_writer import RuleBasedSceneWriter
 from storygraph.services.state_extraction import RuleBasedStateExtractor
 from storygraph.stores.proposal_store import SQLiteProposalStore
@@ -87,6 +88,7 @@ class LocalSceneGenerationRuntime:
         scene_id: str,
         output_target: SceneGenerationOutputTarget = "draft_store",
     ) -> SceneRunResult:
+        require_workflow_output_allowed(self.context_builder.graph_store, project_id, output_target)
         run = self._start_run(project_id=project_id, scene_id=scene_id)
         try:
             context_pack = self.context_builder.build(project_id=project_id, scene_id=scene_id)
@@ -489,6 +491,7 @@ class LangGraphSceneGenerationRuntime(LocalSceneGenerationRuntime):
         scene_id: str,
         output_target: SceneGenerationOutputTarget = "draft_store",
     ) -> SceneRunResult:
+        require_workflow_output_allowed(self.context_builder.graph_store, project_id, output_target)
         if output_target == "proposal_workspace":
             return super().run(
                 project_id=project_id,

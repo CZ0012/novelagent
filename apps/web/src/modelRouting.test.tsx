@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSettings, AgentSettingsUpdate, ConnectionProfile } from "./api";
 import { activateLocale } from "./localization";
 import { ModelRoutingSettings, modelExecutionLabel } from "./ModelRoutingSettings";
-import { discussionTask, MODEL_TASKS, removeConnection, resolvedTask, settingsRequestIsCurrent, settingsSavePayload, settingsToForm, taskConnectionReady } from "./modelRouting";
+import { discussionTask, MODEL_TASKS, removeConnection, resolvedTask, settingsRequestIsCurrent, settingsSavePayload, settingsToForm, taskConnectionReady, supportsExplicitThinking } from "./modelRouting";
 
 const legacy: AgentSettings = { selected_preset_id: "preset", agent_presets: [], scene_writer: "llm", provider_label: "My provider", llm_base_url: "https://example.test/v1", llm_model: "custom-model", api_key_configured: true, api_key_preview: "masked-only", llm_json_mode: true, permission_level: "read_generate" };
 const profile: ConnectionProfile = { id: "novelist", name: "Novel provider", protocol: "anthropic_messages", base_url: "https://other.test", model: "custom-novel", json_mode: false, api_key_configured: true, api_key_preview: "masked-profile" };
@@ -78,12 +78,34 @@ describe("model settings presentation", () => {
     const html = render();
     expect(html).toContain("更多连接配置"); expect(html).toContain("任务模型分工");
     expect(html).not.toContain("<details open");
-    expect(html).toContain("不证明文本接口或工具调用兼容"); expect(html).toContain("当前使用规则检查，不调用模型");
+    expect(html).toContain("不证明文本接口或工具调用兼容"); expect(html).toContain("规则质检不调用模型"); expect(html).toContain("语义连续性审阅");
     expect(html).toContain('type="password"'); expect(html).toContain('value="anthropic_messages"');
   });
   it("loads English independently and describes the exact stored execution", async () => {
     await activateLocale("en-US");
     const html = render(); expect(html).toContain("Anthropic Messages"); expect(html).not.toContain("默认模型连接");
     expect(modelExecutionLabel({ task: "revision", profile_id: profile.id, profile_name: profile.name, protocol: profile.protocol, model: profile.model })).toContain("custom-novel");
+  });
+});
+
+describe("official DeepSeek thinking preferences", () => {
+  it("preserves explicit default and named-profile values through form and save serialization", () => {
+    const settings: AgentSettings = { ...legacy, llm_base_url: "https://api.deepseek.com/v1", llm_thinking_mode: "disabled", connection_profiles: [{ ...profile, protocol: "chat_completions", base_url: "https://api.deepseek.com", thinking_mode: "enabled" }] };
+    const form = settingsToForm(settings); const saved = settingsSavePayload(form, "", false);
+    expect(saved.llm_thinking_mode).toBe("disabled"); expect(saved.connection_profiles?.[0].thinking_mode).toBe("enabled");
+    expect(resolvedTask(settings, "planning")?.thinking_mode).toBe("disabled");
+    expect(resolvedTask({ ...settings, task_assignments: { planning: profile.id } }, "planning")?.thinking_mode).toBe("enabled");
+    expect(settingsSavePayload(settingsToForm(legacy), "", false).llm_thinking_mode).toBe("provider_default");
+    expect(settingsSavePayload({ ...settingsToForm(legacy), connection_profiles: [profile] }, "", false).connection_profiles?.[0].thinking_mode).toBe("provider_default");
+  });
+  it("restricts explicit controls to the official HTTPS Chat Completions endpoint", () => {
+    expect(supportsExplicitThinking("https://api.deepseek.com/v1", "chat_completions")).toBe(true);
+    for (const url of ["http://api.deepseek.com", "https://api.deepseek.com.example.test", "https://example.test", "https://user:password@api.deepseek.com", "https://api.deepseek.com:8443", "https://api.deepseek.com?route=one", "https://api.deepseek.com#other"]) expect(supportsExplicitThinking(url, "chat_completions")).toBe(false);
+    expect(supportsExplicitThinking("https://api.deepseek.com", "responses")).toBe(false);
+  });
+  it("shows selector values without resetting an incompatible saved preference", () => {
+    const settings: AgentSettings = { ...legacy, llm_thinking_mode: "disabled" }; const html = renderToStaticMarkup(<ModelRoutingSettings apiBase="http://localhost" settings={settings} form={settingsToForm(settings)} onFormChange={() => undefined} apiKeyInput="" onApiKeyChange={() => undefined} clearApiKey={false} onClearApiKeyChange={() => undefined} busy={false} />);
+    expect(html).toContain("DeepSeek 思考模式"); expect(html).toContain("请恢复为服务商默认"); expect(html).toMatch(/value="disabled" disabled="" selected=""/);
+    expect(settingsToForm(settings).llm_thinking_mode).toBe("disabled");
   });
 });

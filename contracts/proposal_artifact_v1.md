@@ -1,10 +1,23 @@
 # proposal_artifact_v1
 
+`outline_draft` with `body_format=structured_json` may carry the explicitly
+reviewed `longform_plan_v1` subtype. Its blueprint and bounded chapter-expansion
+phases, frozen parent/version and canon fingerprint, narrow human application,
+style profile and recoverable event/derived-ref receipts are defined in
+`longform_plan_v1.md`. Arbitrary outline JSON remains non-executable; acceptance
+alone does not apply a plan or create Draft prose.
+
 `proposal_artifact_v1` defines non-canon collaboration artifacts used by the
 Proposal Workspace. A proposal artifact is where an author and Agent can revise
 plans, generated draft text, fact drafts, scene rebuild notes, or proposed canon
 patches before any explicit promotion into Draft Store, Candidate Store, or
 canon review.
+
+Whole-book planning adds the non-canon `longform_branch_plan_v1` and exact
+`longform_book_bundle_v1` structured `outline_draft` subtypes governed by
+`planning_run_v1.md`. Branches cannot use the single-plan apply route. Only an
+explicitly accepted, fully verified book bundle may atomically apply its
+referenced structure; generated children are never automatically accepted.
 
 Language semantics follow `language_policy_v1`.
 

@@ -16,6 +16,7 @@ from storygraph.services.json_output import unwrap_json_fence
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
 from storygraph.services.project_language import authoritative_language_message
 from storygraph.services.project_language import validate_generated_output_language
+from storygraph.services.project_style import project_style_message
 from storygraph.stores.draft_store import SQLiteDraftStore
 
 
@@ -162,9 +163,11 @@ class LLMSceneWriter:
             "context_pack": context_pack.model_dump(),
         }
         preset_message = agent_preset_system_message(self.agent_preset)
+        style_message = project_style_message(context_pack.style_constraints.model_dump())
         return [
             LLMMessage(role="system", content=prompt_contract),
             *([LLMMessage(role="system", content=preset_message)] if preset_message else []),
+            *([LLMMessage(role="system", content=style_message)] if style_message else []),
             LLMMessage(
                 role="system",
                 content=authoritative_language_message(context_pack.output_language),

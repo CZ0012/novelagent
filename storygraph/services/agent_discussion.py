@@ -16,6 +16,7 @@ from storygraph.models.draft import Draft
 from storygraph.models.proposal import ProposalArtifactType, ProposalBodyFormat, ProposalRef
 from storygraph.models.project import CrossLanguagePolicy, OutputLanguage, localized
 from storygraph.services.text_span import utf16_span
+from storygraph.services.project_style import project_style_message
 from storygraph.services.json_output import unwrap_json_fence
 from storygraph.services.llm_provider import LLMMessage, LLMProvider, LLMRequest
 from storygraph.services.project_language import (
@@ -121,6 +122,7 @@ class AgentDiscussionService:
         max_local_source_chars: int = 5000,
         temperature: float = 0.2,
         agent_preset: AgentPreset | None = None,
+        project_style: dict | None = None,
     ) -> None:
         self.provider = provider
         self.model = model
@@ -130,6 +132,7 @@ class AgentDiscussionService:
         self.max_local_source_chars = max_local_source_chars
         self.temperature = temperature
         self.agent_preset = agent_preset.model_copy(deep=True) if agent_preset else None
+        self.project_style = json.loads(json.dumps(project_style)) if project_style else {}
 
     def discuss(
         self,
@@ -220,6 +223,7 @@ class AgentDiscussionService:
             web_results=web_results,
         )
         preset_message = agent_preset_system_message(self.agent_preset)
+        style_message = project_style_message(self.project_style)
         response = self.provider.generate(
             LLMRequest(
                 model=self.model,
@@ -228,6 +232,7 @@ class AgentDiscussionService:
                 messages=[
                     LLMMessage(role="system", content=self.prompt_path.read_text(encoding="utf-8")),
                     *([LLMMessage(role="system", content=preset_message)] if preset_message else []),
+                    *([LLMMessage(role="system", content=style_message)] if style_message else []),
                     LLMMessage(
                         role="system",
                         content=authoritative_language_message(output_language),

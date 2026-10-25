@@ -26,7 +26,9 @@ def open_configured_graph_store(
 ) -> ConfiguredGraphStore:
     backend = _effective_backend(settings, default_backend)
     if backend == "json":
-        return ConfiguredGraphStore(load_json_graph(settings.graph_path), backend)
+        graph = load_json_graph(settings.graph_path)
+        graph.temporal_persist_snapshot = lambda staged, path=settings.graph_path: save_json_graph(staged, path)
+        return ConfiguredGraphStore(graph, backend)
     if backend == "memory":
         from storygraph.demo import build_fantasy_demo_graph
 
