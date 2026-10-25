@@ -160,3 +160,6 @@ Main acceptance update: user explicitly raised sharedcallcap80to120, CNY30unchan
 
 
 Verified engineering checkpoint: integrated backend1012passed/1skipped, Front264passed, exactauthorized-key scan326sources0hits. NewofflineCUA recovery smoke usesfreshwrappers/freshreports withoutcanonapplication; no realprovider calls. Realwholebook acceptance stillNOTpassed: independentfirstvolume audit foundcross-batchdayresets andessentialproof/sourceidentitygaps despiteearlierautomaticpasses. Fullprioroutcome/timeledger, strongerproofcriteria andexplicitretain/recheck recovery nowimplemented; currentactualplanisbeingreconciled. Mostrecentlocalinstaller predatesnewsource andisnotfinaldeliverable.
+
+
+Latest human authorization supersedes prior80/120caps: no GLOBALcallcount limit, TOTALCNY100 including priorcharges. Migratedonlywhileworkerpausedand84receiptssettled; noreset orfreshmoneyperiod. Productper-run128technicalbound remains. Main delegatedsoleliveoperation toLongformAgent, withsharedguard/officialFlashlow/hostescalation only; Main doesnotissueconcurrentpaidcalls. Newproductbugs orunknownpendingcalls mustpause forMain. Localcandidatefromfb77134 engineeringauditcomplete; noinstallation/publication, literaryacceptance remainsinprogress/unpassed.

@@ -47,3 +47,9 @@ After this small follow-up: Context/localization focused suite **11 tests passed
 Main Agent's real browser fixture with 100 Chapters/200 Scenes exposed an unbounded graph/timeline footer squeezing Context evidence to a 28px row. The active inspector panels now occupy one dedicated scrollable flexible row. Graph/timeline display is collapsed by default and bounded when expanded; all underlying nodes/scenes remain available. Inspector tab changes reset the shared viewport to its top without discarding editor or settings state.
 
 After this layout fix: **14 focused markup/CSS/context tests passed**, including a 200-scene nontruncation/collapsed-default regression; production build and diff checks passed. Main Agent owns the actual browser geometry recheck. No provider call or browser interaction was performed by Front Agent.
+
+## Integrated checkpoint and recovery browser smoke
+
+The later frozen frontend suite passed **29 files / 264 tests** in 3.36 seconds. The explicit targeted/full restart and preserve-later controls were exercised through CUA against a separate offline fixture: 14 synthetic calls, five passed planning stages, new Proposal/review identifiers for copied content, and no canon application. A separate protected fixture showed the actual selected 8000-token budget. The transient pending badge was covered by tests but was not screenshot-captured. These are engineering checks, not a real-fiction quality pass.
+
+The temporary backend preference was restored; only the owned fixture on port 18767 was stopped and verified no longer listening. No real provider call or author-workspace mutation occurred.
