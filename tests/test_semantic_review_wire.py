@@ -61,7 +61,7 @@ def test_source_id_still_resolves_encoded_quote_against_original_not_decoded_tre
         registry = sent["evidence_sources"]
         first = next(key for key, entry in registry.items() if entry["path"].endswith("/text#0"))
         second = next(key for key, entry in registry.items() if entry["path"] == "$/blueprint/rules/0#0")
-        return {"status": "needs_revision", "summary": "两处原文需要作者核对。", "dimensions_checked": list(REVIEW_DIMENSIONS),
+        return {"evidence_registry_id": sent["evidence_registry_id"], "status": "needs_revision", "summary": "两处原文需要作者核对。", "dimensions_checked": list(REVIEW_DIMENSIONS),
             "issues": [{"id": "i", "finding": "required_gap", "dimension": "causality", "severity": "medium",
                 "description": "原文表述需要明确联系。", "suggestion": "保留原文证据并由作者补足因果解释。",
                 "evidence": [{"source_id": first}, {"source_id": second}]}]}

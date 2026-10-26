@@ -504,3 +504,16 @@ Current evidence: backend full suite752 passed/1skipped; one additional shutdown
 
 
 SG-031 current correction (2026-10-25): prior approval/start-status and test counts above are historical. User approved80calls/30CNY; primary is official DeepSeek Flash with explicit low reasoning. Shared ledger currently29calls and conservative3.575808CNY, no uncertain reservations. Real blueprint and firstfive-chapter draft exist but real fullbook is NOT passed; upstream evidence/knowledge and expansion chronology/pacing defects are being repaired through explicit restart preserving prior outputs. Latest full backend904passed/1skipped; subsequent focused changes still require their own validation. Current local installer predates these functional fixes and must be rebuilt. No paid calls delegated; no private prose or keys in coordination.
+
+## SG-031 current checkpoint (2026-10-26)
+
+Earlier SG-031 counts and authorization above are historical. The user's current authorization is unlimited global call count and TOTAL CNY100 including all earlier costs, enforced by the same ignored guarded ledger. Last verified:97 completed reservations, conservative settled upper19.180993CNY, no pending request. Product per-run technical cap remains128.
+
+| Work | Owner | Status | Next evidence |
+| --- | --- | --- | --- |
+| Actual100chapter/200scene planning | Longform Operator | Held at known terminal review failure; no live paid worker | Consolidated upstream repair, then current-version reviews and independent volume reading |
+| Compact exact citation transport | Citation Protocol Creation Agent | In progress | Request-local aliases with invocation binding; strict invalid/stale rejection and focused tests |
+| Whole-book scale review | Scale Review Agent | Read-only | Quantify target, registry and context bounds with rich full-grid inputs before further spend |
+| Integration and acceptance | Main Agent | Active | Keep engineering and literary evidence distinct; rebuild candidate after runtime changes freeze |
+
+Baseline runtimefb77134:1012backend passes/1skip,264frontend passes and verified local0.2.0 candidate. This candidate predates the next citation change. The latest independent blueprint audit still requires revision; complete real-book acceptance remains unproven. All generated content stays in ignored isolation, not coordination or canon. No software publication or author-installation change.

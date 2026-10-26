@@ -1,4 +1,4 @@
-"""Short ephemeral aliases remain exact, collision-checked source selectors."""
+"""Request-local compact handles retain exact source and invocation binding."""
 
 import copy
 import json
@@ -9,7 +9,7 @@ from storygraph.models.generation_review import GenerationReviewReport
 from storygraph.services.canon_snapshot import build_canon_snapshot
 from storygraph.services.llm_provider import LLMResponse
 from storygraph.services.semantic_review import (
-    EvidenceSourceCollisionError, SemanticReviewService, build_evidence_sources,
+    SemanticReviewService, build_evidence_sources,
     resolve_evidence_sources, review_is_current,
 )
 from test_semantic_review import graph as graph
@@ -23,45 +23,44 @@ def inputs(graph):
     return value, snapshot, registry
 
 
-def test_future_aliases_are_stable_sixteen_hex_with_original_exact_quotes(graph):
+def test_compact_handles_are_request_local_and_exact(graph):
     value, snapshot, registry = inputs(graph)
-    assert registry and all(key.startswith("ev_") and len(key) == 19 for key in registry)
-    assert all(all(ch in "0123456789abcdef" for ch in key[3:]) for key in registry)
+    assert list(registry) == [f"E{i}" for i in range(1, len(registry)+1)]
     assert registry == build_evidence_sources(target=value, canon=snapshot, style_sources={})[0]
     sources = {"target": {value.target_id: value.text}, "canon": {fact.id: fact.text for fact in snapshot.facts}}
     assert all(entry["quote"] in sources[entry["kind"]][entry["ref"]] for entry in registry.values())
 
 
-@pytest.mark.parametrize("bad", ["missing_one", "unknown", "ev_8bfd6de5ec5c49e7882eda436c14de2", None])
+@pytest.mark.parametrize("bad", ["E", "e1", "E01", "E99999", "ev_9c53", None])
 def test_missing_unknown_and_old_malformed_ids_are_never_fuzzy_repaired(graph, bad):
     _, _, registry = inputs(graph)
-    key = next(iter(registry))
-    bad = key[:-1] if bad == "missing_one" else "ev_" + "f" * 16 if bad == "unknown" else bad
-    original = payload([issue(evidence=[{"source_id": bad}])])
-    saved = copy.deepcopy(original)
+    raw = payload([issue(evidence=[{"source_id": bad}])], evidence_registry_id="request-a")
+    saved = copy.deepcopy(raw)
     with pytest.raises(ValueError, match="unknown_or_overridden"):
-        resolve_evidence_sources(original, registry)
-    assert original == saved
+        resolve_evidence_sources(raw, registry, registry_id="request-a")
+    assert raw == saved
 
 
-def test_different_sources_with_same_prefix_fail_closed_before_provider(graph, monkeypatch):
-    import storygraph.services.semantic_review as module
-    original_hash = module.content_hash
-    def collide(value):
-        digest = original_hash(value)
-        return "0" * 16 + digest[16:] if value.startswith('["target"') or value.startswith('["canon"') else digest
-    monkeypatch.setattr(module, "content_hash", collide)
-    value = target()
-    snapshot = build_canon_snapshot(graph, project_id="p", scene_id="s")
-    with pytest.raises(EvidenceSourceCollisionError, match="evidence_source_id_collision"):
-        build_evidence_sources(target=value, canon=snapshot, style_sources={})
-    class NeverCalled:
-        def generate(self, _):
-            pytest.fail("Alias collision must fail before provider invocation")
-    report = SemanticReviewService(NeverCalled(), "fixture").review(target=value, canon=snapshot)
-    assert report.status == "inconclusive" and not report.issues
-    assert "semantic_review_evidence_collision" in report.coverage.limitations
-    assert report.model_execution is None and report.coverage.method == "deterministic_only"
+@pytest.mark.parametrize("supplied", [None, "request-old", 1])
+def test_compact_aliases_require_exact_request_instance_token(graph, supplied):
+    _, _, registry = inputs(graph)
+    raw = payload([issue(evidence=[{"source_id": "E1"}])])
+    if supplied is not None:
+        raw["evidence_registry_id"] = supplied
+    with pytest.raises(ValueError, match="invalid_evidence_registry_id"):
+        resolve_evidence_sources(raw, registry, registry_id="request-new")
+
+
+def test_mixed_canonical_alias_evidence_and_override_rejection(graph):
+    value, _, registry = inputs(graph)
+    direct = {"kind": "target", "ref": value.target_id, "quote": value.text[:10]}
+    raw = payload([issue(evidence=[direct, {"source_id": "E1"}])], evidence_registry_id="request-a")
+    resolved = resolve_evidence_sources(raw, registry, registry_id="request-a")
+    assert "evidence_registry_id" not in resolved
+    assert resolved["issues"][0]["evidence"][0] == direct
+    raw["issues"][0]["evidence"][1]["quote"] = "override"
+    with pytest.raises(ValueError, match="unknown_or_overridden"):
+        resolve_evidence_sources(raw, registry, registry_id="request-a")
 
 
 def test_valid_exact_legacy_quote_form_does_not_require_an_alias(graph):
@@ -71,22 +70,45 @@ def test_valid_exact_legacy_quote_form_does_not_require_an_alias(graph):
     assert resolve_evidence_sources(raw, registry) == raw
 
 
-def test_old_canonical_report_remains_current_after_ephemeral_alias_change(graph, monkeypatch):
-    import storygraph.services.semantic_review as module
+def test_canonical_report_stays_current_independently_of_ephemeral_registry(graph):
     value, snapshot, _ = inputs(graph)
-    class ExactAliases:
+    class CanonicalLegacy:
         def generate(self, request):
-            registry = json.loads(request.messages[-1].content)["evidence_sources"]
-            first = next(key for key, entry in registry.items() if entry["kind"] == "target")
-            second = next(key for key, entry in registry.items() if entry["kind"] == "canon" and entry["ref"] == "secret")
-            return LLMResponse(json.dumps(payload([issue(evidence=[{"source_id": first}, {"source_id": second}])]), ensure_ascii=False))
-    monkeypatch.setattr(module, "EVIDENCE_SOURCE_HEX_CHARS", 32)
-    old = SemanticReviewService(ExactAliases(), "fixture").review(target=value, canon=snapshot)
+            return LLMResponse(json.dumps(payload([issue()]), ensure_ascii=False))
+    old = SemanticReviewService(CanonicalLegacy(), "fixture").review(target=value, canon=snapshot)
     assert old.status == "needs_revision"
     saved = old.model_dump_json()
-    monkeypatch.setattr(module, "EVIDENCE_SOURCE_HEX_CHARS", 16)
-    assert all(len(key) == 19 for key in build_evidence_sources(target=value, canon=snapshot, style_sources={})[0])
+
+    assert list(build_evidence_sources(target=value, canon=snapshot, style_sources={})[0])[0] == "E1"
     reloaded = GenerationReviewReport.model_validate_json(saved)
     assert review_is_current(reloaded, target=value, canon=snapshot)
     assert all(set(evidence.model_dump()) == {"kind", "ref", "quote"} for evidence in reloaded.issues[0].evidence)
     assert reloaded.model_dump_json() == saved
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_stale_response_cannot_select_new_registry_even_for_same_target(graph, changed):
+    value, snapshot, _ = inputs(graph)
+    class Stale:
+        previous = None
+        def generate(self, request):
+            sent = json.loads(request.messages[-1].content)
+            if self.previous is None:
+                self.previous = payload([issue(finding="advice", severity="low", evidence=[{"source_id": "E1"}])],
+                    evidence_registry_id=sent["evidence_registry_id"])
+            return LLMResponse(json.dumps(self.previous, ensure_ascii=False))
+    service = SemanticReviewService(Stale(), "fixture")
+    assert service.review(target=value, canon=snapshot).status == "pass"
+    if changed:
+        value = value.model_copy(update={"text": value.text+"extra"})
+    result = service.review(target=value, canon=snapshot)
+    assert result.status == "inconclusive" and not result.issues
+    assert "semantic_review_invalid_output" in result.coverage.limitations
+
+
+@pytest.mark.parametrize("token", [None, 1, "old-request"])
+def test_supplied_invalid_token_rejected_even_with_canonical_only_evidence(graph, token):
+    _, _, registry = inputs(graph)
+    raw = payload([issue()], evidence_registry_id=token)
+    with pytest.raises(ValueError, match="invalid_evidence_registry_id"):
+        resolve_evidence_sources(raw, registry, registry_id="current-request")

@@ -61,7 +61,7 @@ class SourceIdReviewer:
         registry = self.sent["evidence_sources"]
         target_id = next(key for key, source in registry.items() if source["kind"] == "target")
         canon_id = next(key for key, source in registry.items() if source["kind"] == "canon" and source["ref"] == "secret" and "继承人" in source["quote"])
-        output = payload([issue(evidence=[{"source_id": target_id}, {"source_id": canon_id}])])
+        output = payload([issue(evidence=[{"source_id": target_id}, {"source_id": canon_id}])], evidence_registry_id=self.sent["evidence_registry_id"])
         if self.mutate:
             self.mutate(output, target_id)
         return LLMResponse(json.dumps(output, ensure_ascii=False))
@@ -99,7 +99,7 @@ def test_structured_json_quotes_are_encoded_substrings_not_decoded_fabrications(
             registry = json.loads(request.messages[-1].content)["evidence_sources"]
             ids = {source["path"]: key for key, source in registry.items()}
             assert all(source["quote"] in text for source in registry.values() if source["kind"] == "target")
-            return LLMResponse(json.dumps(payload([issue(dimension="timeline", severity="low", finding="advice",
+            return LLMResponse(_request_payload(request, payload([issue(dimension="timeline", severity="low", finding="advice",
                 description="可以展开证据递进。", suggestion="保持存疑、确认和量化的不同阶段。", evidence=[
                     {"source_id": ids["$/first#0"]}, {"source_id": ids["$/second#0"]}])]), ensure_ascii=False))
     result = SemanticReviewService(Reviewer(), "m").review(target=value, canon=canon)
@@ -169,7 +169,7 @@ def test_readable_plan_content_preserves_raw_text_hash_and_context_is_not_model_
             first = {"source_id": ids["$/blueprint/volumes/0/ending_hook#0"]}
             if override:
                 first["context"] = {"volume_index": 1}
-            return LLMResponse(json.dumps(payload([issue(finding="advice", severity="low", dimension="timeline",
+            return LLMResponse(_request_payload(request, payload([issue(finding="advice", severity="low", dimension="timeline",
                 description="可在扩章中明确日历日期。", suggestion="保留第二卷与第五卷的信息递进。", evidence=[first,
                     {"source_id": ids["$/blueprint/volumes/1/ending_hook#0"]}])]), ensure_ascii=False))
     result = SemanticReviewService(Reviewer(), "same-model").review(target=value, canon=canon)
@@ -224,7 +224,7 @@ def test_chinese_review_with_exact_known_machine_ids_passes_language_guard_witho
         def generate(self, request):
             registry = json.loads(request.messages[-1].content)["evidence_sources"]
             ids = {source["path"]: key for key, source in registry.items()}
-            return LLMResponse(json.dumps(payload([issue(dimension="knowledge_boundary", finding="required_gap", severity="medium",
+            return LLMResponse(_request_payload(request, payload([issue(dimension="knowledge_boundary", finding="required_gap", severity="medium",
                 description="开篇已知事实与结构化知识基线不一致。", suggestion=suggestion,
                 evidence=[{"source_id": ids["$/entities/0/description#0"]},
                           {"source_id": ids["$/entities/0/initial_knowledge/0#0"]}])]), ensure_ascii=False))
@@ -243,7 +243,7 @@ def test_review_identifier_filter_does_not_waive_english_or_unknown_identifier_p
         def generate(self, request):
             registry = json.loads(request.messages[-1].content)["evidence_sources"]
             ids = {source["path"]: key for key, source in registry.items()}
-            return LLMResponse(json.dumps(payload([issue(dimension="knowledge_boundary", finding="required_gap", severity="low",
+            return LLMResponse(_request_payload(request, payload([issue(dimension="knowledge_boundary", finding="required_gap", severity="low",
                 description="结构化知识基线尚有缺口。", suggestion=suggestion,
                 evidence=[{"source_id": ids["$/entities/0/description#0"]},
                           {"source_id": ids["$/entities/0/initial_knowledge/0#0"]}])]), ensure_ascii=False))
@@ -274,7 +274,7 @@ def test_language_style_finding_has_explicit_policy_source_without_invented_cita
             registry = sent["evidence_sources"]
             target_id = next(key for key, entry in registry.items() if entry["kind"] == "target")
             policy_id = next(key for key, entry in registry.items() if entry["kind"] == "style" and entry["ref"] == "output_language_policy")
-            return LLMResponse(json.dumps(payload([issue(dimension="style_constraint", finding="advice", severity="low",
+            return LLMResponse(_request_payload(request, payload([issue(dimension="style_constraint", finding="advice", severity="low",
                 description="句中存在不必要的英语正文残留。", suggestion="将该处改为中文表述。", evidence=[
                     {"source_id": target_id}, {"source_id": policy_id}])]), ensure_ascii=False))
     result = review(graph, Reviewer(), value)
@@ -337,3 +337,8 @@ def review_advice_scope(graph, output, purpose):
     value = target(purpose="plan", target_type="proposal", scene_id=None)
     return SemanticReviewService(Replay(output), "fixture-model").review(target=value,
         canon=build_canon_snapshot(graph, project_id="p", purpose="plan"))
+
+
+def _request_payload(request, output, **kwargs):
+    output["evidence_registry_id"] = json.loads(request.messages[-1].content)["evidence_registry_id"]
+    return json.dumps(output, **kwargs)

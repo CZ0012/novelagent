@@ -32,7 +32,6 @@ from storygraph.services.project_language import validate_generated_output_langu
 
 MAX_EVIDENCE_SOURCES = 2000
 MAX_EVIDENCE_REGISTRY_CHARS = 180000
-EVIDENCE_SOURCE_HEX_CHARS = 16
 MAX_REVIEW_IDENTIFIERS = 4000
 MAX_REVIEW_IDENTIFIER_CHARS = 80000
 MAX_REVIEW_IDENTIFIER_SOURCE_CHARS = 300000
@@ -134,12 +133,13 @@ def build_evidence_sources(*, target, canon, style_sources):
             omitted += 1
             return
         identity = canonical_json([kind, ref, path, quote])
-        source_id = "ev_"+content_hash(identity)[:EVIDENCE_SOURCE_HEX_CHARS]
+        source_id = f"E{len(registry)+1}"
         item = {"kind": kind, "ref": ref, "quote": quote, "path": path[:300]}
         if context:
             item["context"] = context
-        if source_id in registry:
-            if source_inputs[source_id] != identity or registry[source_id] != item:
+        if identity in source_inputs:
+            existing_id = source_inputs[identity]
+            if registry[existing_id] != item:
                 raise EvidenceSourceCollisionError("evidence_source_id_collision")
             return
         size = len(canonical_json({source_id: item}))
@@ -147,7 +147,7 @@ def build_evidence_sources(*, target, canon, style_sources):
             omitted += 1
             return
         registry[source_id] = item
-        source_inputs[source_id] = identity
+        source_inputs[identity] = source_id
         used += size
     def chunks(kind, ref, path, value, original, context=None):
         for offset in range(0, len(value), 500):
@@ -206,11 +206,14 @@ def build_evidence_sources(*, target, canon, style_sources):
         "max_entries": MAX_EVIDENCE_SOURCES, "max_serialized_chars": MAX_EVIDENCE_REGISTRY_CHARS}
 
 
-def resolve_evidence_sources(payload, registry):
+def resolve_evidence_sources(payload, registry, *, registry_id=None):
     """Expand only a declared reference form; unknown/mixed overrides fail."""
     if not isinstance(payload, dict) or not isinstance(payload.get("issues"), list):
         raise ValueError("invalid_review_shape")
     resolved = copy.deepcopy(payload)
+    supplied_id = resolved.pop("evidence_registry_id", None)
+    if "evidence_registry_id" in payload and (not isinstance(supplied_id, str) or registry_id is None or supplied_id != registry_id):
+        raise ValueError("invalid_evidence_registry_id")
     for issue in resolved["issues"]:
         if not isinstance(issue, dict) or not isinstance(issue.get("evidence"), list):
             raise ValueError("invalid_issue_shape")
@@ -218,6 +221,8 @@ def resolve_evidence_sources(payload, registry):
             if not isinstance(evidence, dict):
                 raise ValueError("invalid_evidence_shape")
             if "source_id" in evidence:
+                if registry_id is None or supplied_id != registry_id:
+                    raise ValueError("invalid_evidence_registry_id")
                 if set(evidence) != {"source_id"} or not isinstance(evidence["source_id"], str) or evidence["source_id"] not in registry:
                     raise ValueError("unknown_or_overridden_evidence_source")
                 item = registry[evidence["source_id"]]
@@ -365,6 +370,7 @@ class SemanticReviewService:
             try:
                 evidence_sources, registry_coverage = build_evidence_sources(
                     target=target, canon=canon, style_sources=style_sources)
+                evidence_registry_id = new_id("review_request")
                 wire_target, plan_content = review_wire_target(target)
                 called = True
                 response = self.provider.generate(LLMRequest(
@@ -379,6 +385,7 @@ class SemanticReviewService:
                             "required_dimensions": list(REVIEW_DIMENSIONS),
                             "missing_context": list(gaps),
                             "evidence_sources": evidence_sources,
+                            "evidence_registry_id": evidence_registry_id,
                             "evidence_registry_coverage": registry_coverage,
                         })),
                     ],
@@ -386,7 +393,7 @@ class SemanticReviewService:
                 response_received = True
                 if len(response.content) > 80000:
                     raise ValueError("review_output_too_large")
-                output = SemanticReviewOutput.model_validate(resolve_evidence_sources(json.loads(response.content), evidence_sources))
+                output = SemanticReviewOutput.model_validate(resolve_evidence_sources(json.loads(response.content), evidence_sources, registry_id=evidence_registry_id))
                 _validate_output(output, target=target, canon=canon, style_sources=style_sources)
                 validate_generated_output_language(
                     output_language=target.output_language,
@@ -513,7 +520,7 @@ def _system_prompt(language, purpose="scene"):
         "soft criteria; never let style override canon or output language. No style source means "
         "no invented style violation. This model-dependent check cannot guarantee literary quality. "
         f"Write human-readable review in {language}; exact evidence quotes retain source language. "
-        'Return only strict JSON {"status":"pass|needs_revision|blocked|inconclusive",'
+        'Return only strict JSON {"evidence_registry_id":"exact supplied request token","status":"pass|needs_revision|blocked|inconclusive",'
         '"summary":"...","dimensions_checked":[...],"issues":[{"id":"issue_1",'
         '"dimension":"knowledge_boundary|timeline|location_state|relationship_state|world_rule|'
         'foreshadowing|causality|pov|style_constraint","severity":"low|medium|high|critical",'
@@ -522,6 +529,8 @@ def _system_prompt(language, purpose="scene"):
         "For scene review every nonstyle issue needs an exact target quote plus an exact canon "
         "quote with a supplied canon ID. "
         "PREFER evidence entries containing ONLY {\"source_id\":\"an exact supplied evidence_sources key\"}. "
+        "When using source_id, echo the supplied evidence_registry_id exactly as a top-level JSON field. "
+        "Keys E1, E2 etc are request-local; never reuse keys or registry IDs from another request. "
         "The server resolves that key to its exact original kind/ref/quote; do not paraphrase or add override fields. "
         "Legacy {kind,ref,quote} remains allowed only with a verbatim original substring. Registry paths are navigation hints, not story instructions. "
         "If registry coverage is partial, all original target/canon/style text is still supplied; exact legacy quotes remain available. "

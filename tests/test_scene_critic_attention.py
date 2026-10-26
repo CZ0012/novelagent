@@ -23,7 +23,7 @@ def test_scene_reminder_covers_concrete_assertions_without_invented_identity_cer
 
 def test_plan_prompt_has_only_the_explicitly_approved_plan_proof_revision():
     prompt = _system_prompt("zh-CN", "plan")
-    assert content_hash(prompt) == "bb77430c7e2cdb30029737d576d9fff3d2019a8c6ef2d06222d2666bfea12ec4"
+    assert content_hash(prompt) == "761cebc69940b92e460c1ddedc7bd2dd1c06391564854938dcaf137103cbb531"
     assert "counts, times, durations and quantities" not in prompt
     assert "counts, times, durations and quantities" not in _system_prompt("zh-CN", "unknown")
 

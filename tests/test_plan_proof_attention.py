@@ -19,7 +19,7 @@ def test_only_plan_prompt_adds_general_resolution_entailment_and_source_identity
         "a sealed original cannot silently be overwritten", "report, upload and export timestamps",
         "flashbacks/nonlinear narration", "do not guess chronology"):
         assert text in plan
-    assert content_hash(_system_prompt("zh-CN", "scene")) == "d20ca77057b5590b60eed3f637bebdf3389fe19046978a16b9535981c87620dc"
+    assert content_hash(_system_prompt("zh-CN", "scene")) == "b5cfb523fd8a8f04ece43965a683d7dab3d5566cd0a09ac71bba213a0576b0e2"
     assert "CENTRAL CLAIMED RESOLUTION" not in _system_prompt("zh-CN", "unknown")
     assert "13:44" not in plan and "压力曲线" not in plan
 
@@ -28,7 +28,7 @@ def test_existing_plan_prompt_bytes_outside_approved_proof_paragraph_are_unchang
     plan = _system_prompt("zh-CN", "plan")
     before, added = plan.split("For every CENTRAL CLAIMED RESOLUTION", 1)
     _, after = added.split("For each CausalLink", 1)
-    assert content_hash(before + "For each CausalLink" + after) == "fb94626db1962b0e5f6367d99a96af2bbfb49a89591ee87bb67ed84762a7e473"
+    assert content_hash(before + "For each CausalLink" + after) == "ca95a609bbff49d75e53216dee22531562af42132b7e90119b30409e2e0ad548"
 
 
 @pytest.mark.parametrize("finding,severity,expected", [("required_gap", "medium", "needs_revision"),
@@ -46,7 +46,7 @@ def test_grounded_essential_gap_remains_blocking_and_minor_advice_remains_nonblo
         def generate(self, request):
             sent = json.loads(request.messages[-1].content)
             aliases = {entry["path"]: key for key, entry in sent["evidence_sources"].items()}
-            return LLMResponse(json.dumps({"status": "needs_revision" if finding == "required_gap" else "pass",
+            return LLMResponse(json.dumps({"evidence_registry_id": sent["evidence_registry_id"], "status": "needs_revision" if finding == "required_gap" else "pass",
                 "summary": "检查结论与证据之间的联系。", "dimensions_checked": list(REVIEW_DIMENSIONS),
                 "issues": [{"id": "i", "dimension": "causality", "finding": finding, "severity": severity,
                     "description": "需要区分证据完整性与结论的充分依据。", "suggestion": "明确必要的因果桥梁，或收窄当前声称的结论。",

@@ -153,7 +153,7 @@ Semantic review explicitly opts into a validated 65536-token total ceiling only 
 
 Scene Writer examples now derive all natural-language example values from the authoritative project output_language, including self_check. JSON keys stay unchanged. Custom prompt files may use {{scene_writer_response_example}}; legacy custom files remain verbatim and receive a separate localized example. Preserve strict output-language validation; verify Chinese/English captures and rejection of copied English self-checks.
 
-New generation_review_v1 ephemeral citation aliases are ev_ plus 16 hex digits. Detect different full source identities or metadata colliding under one prefix and fail closed before provider calls. Never fuzzy-repair missing/unknown IDs or reclassify an earlier failed response as valid; persisted canonical refs/quotes and report freshness remain unchanged.
+New generation_review_v1 citation handles are request-local sequential E1/E2 selectors. Require the exact fresh evidence_registry_id echo for any source_id use; reject stale same-content requests, missing/mismatched tokens, unknown handles and mixed overrides. Canonical-only evidence may omit the transport token; validate it whenever supplied and strip it before persistence. Detect conflicting metadata for a complete source identity before provider calls. Never fuzzy-repair IDs/tokens or recertify an earlier failed response; canonical refs/quotes, grounding, coverage and freshness remain unchanged.
 
 ## Explicit planning recovery
 

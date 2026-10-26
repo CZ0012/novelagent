@@ -315,7 +315,7 @@ def test_advisory_only_critic_does_not_trigger_paid_repair(setup):
                     quotes.add(value["quote"])
                 if len(selected) == 2:
                     break
-            return LLMResponse(json.dumps({"status": "needs_revision", "summary": "可在扩章时细化交接。",
+            return LLMResponse(json.dumps({"evidence_registry_id": payload["evidence_registry_id"], "status": "needs_revision", "summary": "可在扩章时细化交接。",
                 "dimensions_checked": list(REVIEW_DIMENSIONS), "issues": [{"id": "advice", "dimension": "timeline",
                 "finding": "advice", "severity": "low", "description": "可在扩章时补充交接步骤。", "suggestion": "补充具体时间即可。",
                 "evidence": selected}]}, ensure_ascii=False))
@@ -348,7 +348,7 @@ def test_explicit_recheck_preserves_refs_and_exhausted_repair_count_without_rege
         entries = [(key, entry) for key, entry in payload["evidence_sources"].items() if entry["kind"] == "target"]
         first_key, first_entry = entries[0]
         second_key = next(key for key, entry in entries if entry["quote"] != first_entry["quote"])
-        return LLMResponse(json.dumps({"status": "needs_revision", "summary": "可以在扩章中补充可选细节。",
+        return LLMResponse(json.dumps({"evidence_registry_id": payload["evidence_registry_id"], "status": "needs_revision", "summary": "可以在扩章中补充可选细节。",
             "dimensions_checked": list(REVIEW_DIMENSIONS), "issues": [{"id": "optional", "dimension": "timeline",
             "finding": "advice", "severity": "low", "description": "可补充具体交接时刻。", "suggestion": "扩章时写明即可。",
             "evidence": [{"source_id": first_key}, {"source_id": second_key}]}]}, ensure_ascii=False))

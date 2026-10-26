@@ -123,8 +123,7 @@ or issue IDs, and unsupported fields invalidate the entire model judgment.
 
 ### Exact citation registry
 
-Provider inputs additionally expose `evidence_sources`, a bounded map of stable
-content/path-derived IDs to exact `{kind,ref,quote,path}` source segments. The
+Provider inputs additionally expose `evidence_sources`, a bounded map of request-local sequential handles (`E1`, `E2`, ...) to exact `{kind,ref,quote,path}` source segments. The
 provider may cite an alternative evidence object containing exactly
 `{source_id:"a supplied key"}`. The server resolves this declared form to the
 existing canonical `{kind,ref,quote}` before strict model and original-source
@@ -132,20 +131,24 @@ validation. Unknown IDs, non-string IDs, or mixed `source_id` plus overrides or
 extra metadata invalidate the judgment. Canonical persisted evidence does not
 gain a provider-authored quote, alternate source kind or unverified ref.
 
-New ephemeral aliases use `ev_` plus 16 hexadecimal characters to reduce model
-copy burden. Before registering an alias, compare its complete source identity
-and metadata against any existing record under the same prefix. A different
-record colliding with that prefix fails closed with a safe
-`semantic_review_evidence_collision` diagnostic before provider invocation; it
-must not silently overwrite, merge, drop or select a source. Identical repeated
-source records may reuse their exact alias.
+Compact handles are scoped to one provider invocation. The request also supplies
+`evidence_registry_id`, a fresh opaque request-instance token. Any output using
+`source_id` MUST echo that exact token as a top-level field. A missing, non-string
+or mismatched token invalidates the judgment. If supplied, the token is validated
+even when all evidence uses canonical kind/ref/quote. The server removes this
+transport field before strict output validation and persistence. Canonical-only
+outputs may omit it for compatibility. A fresh request for identical content gets
+a fresh token, so stale compact-handle output cannot select another registry.
 
-Lookup is still exact and case-sensitive. Missing characters, unknown IDs,
-unregistered legacy IDs and mixed overrides remain invalid; no prefix, edit
-distance or other fuzzy repair is permitted. Shortening future aliases cannot
-make an earlier failed response valid, and failed reports/responses remain
-unchanged. Persisted evidence contains only canonical kind/ref/quote, not these
-aliases; target/canon/style hashes and existing report freshness do not change.
+Lookup remains exact and case-sensitive. Missing characters, unknown IDs,
+unregistered old hash IDs and mixed overrides remain invalid; no prefix, edit
+distance, token correction or fuzzy repair is permitted. Handles are convenience
+selectors, never persisted identities. Identical source records may reuse a
+handle; conflicting metadata for one complete source identity fails closed before
+provider invocation with `semantic_review_evidence_collision`. No shortened hash
+prefix is used to assign handles. This change never replays or recertifies earlier
+failed responses/reports. Persisted evidence remains canonical kind/ref/quote;
+target/canon/style hashes, versions, coverage and report freshness are unchanged.
 
 Every registered quote is a nonempty substring of the ORIGINAL validation text,
 at most 500 characters. For structured JSON string leaves, use the inner

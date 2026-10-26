@@ -145,7 +145,7 @@ Review actual writer inputs and meaningful causal/clue beats, uncertainty UX and
 
 Semantic review explicitly opts into a validated 65536-token total ceiling only for explicit thinking/effort; default/non-thinking review ceilings stay unchanged. Structured plan transport sends the complete parsed plan once plus original hash/metadata and the exact citation registry, retaining original serialized text locally for strict validation; legacy/prose stays raw. This neither drops fields nor relaxes coverage, findings or exact quotes.
 
-New generation_review_v1 ephemeral citation aliases are ev_ plus 16 hex digits. Detect different full source identities or metadata colliding under one prefix and fail closed before provider calls. Never fuzzy-repair missing/unknown IDs or reclassify an earlier failed response as valid; persisted canonical refs/quotes and report freshness remain unchanged.
+New generation_review_v1 citation handles are request-local sequential E1/E2 selectors. Require the exact fresh evidence_registry_id echo for any source_id use; reject stale same-content requests, missing/mismatched tokens, unknown handles and mixed overrides. Canonical-only evidence may omit the transport token; validate it whenever supplied and strip it before persistence. Detect conflicting metadata for a complete source identity before provider calls. Never fuzzy-repair IDs/tokens or recertify an earlier failed response; canonical refs/quotes, grounding, coverage and freshness remain unchanged.
 
 ## Explicit planning recovery
 
