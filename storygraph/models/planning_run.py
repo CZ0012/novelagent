@@ -1,12 +1,16 @@
 """Bounded non-canon whole-book planning state and exact artifact manifests."""
 
-from typing import Literal
+from typing import Annotated, Literal
 from pydantic import Field, model_validator
 from storygraph.models.longform import Blueprint, BlueprintRequest, Expansion, StrictModel
 from storygraph.models.project import OutputLanguage
 
 
 MAX_PLANNING_RUN_CALLS = 512
+RevisionPaths = Annotated[
+    list[Annotated[str, Field(min_length=1, max_length=500)]],
+    Field(min_length=1, max_length=40),
+]
 
 
 class PlanningRunRequest(BlueprintRequest):
@@ -38,11 +42,13 @@ class PlanningRunResume(PlanningRunControl):
     recheck_current_step: bool = False
     preserve_later_outputs: bool = False
     revision_mode: Literal["targeted", "full"] = "targeted"
+    revision_paths: RevisionPaths | None = None
 
     @model_validator(mode="after")
     def explicit_restart_instruction(self):
         if self.recheck_current_step and (self.restart_from_step is not None or self.revision_instruction is not None
-                                         or self.preserve_later_outputs or self.revision_mode != "targeted"):
+                                         or self.preserve_later_outputs or self.revision_mode != "targeted"
+                                         or self.revision_paths is not None):
             raise ValueError("Recheck cannot be combined with a restart or revision instruction.")
         if self.revision_instruction is not None and (self.restart_from_step is None or not self.revision_instruction.strip()):
             raise ValueError("A nonblank revision instruction requires an explicit restart step.")
@@ -50,6 +56,11 @@ class PlanningRunResume(PlanningRunControl):
             raise ValueError("Retaining later outputs requires an explicit restart step.")
         if self.revision_mode == "full" and (self.restart_from_step is None or not self.revision_instruction):
             raise ValueError("Full revision requires an explicit restart step and instruction.")
+        if self.revision_paths is not None:
+            if self.revision_mode != "targeted" or self.restart_from_step is None or not self.revision_instruction:
+                raise ValueError("Revision paths require an explicit targeted restart and instruction.")
+            if len(set(self.revision_paths)) != len(self.revision_paths):
+                raise ValueError("Revision paths must be unique.")
         return self
 
 
@@ -72,6 +83,15 @@ class PlanningStep(StrictModel):
     revision_instruction: str | None = None
     retained_output_ref: PlanningRef | None = None
     revision_mode: Literal["targeted", "full"] = "targeted"
+    revision_paths: RevisionPaths | None = None
+
+    @model_validator(mode="after")
+    def compatible_revision_paths(self):
+        if self.revision_paths is not None and (
+            self.revision_mode != "targeted" or len(set(self.revision_paths)) != len(self.revision_paths)
+        ):
+            raise ValueError("Revision paths must be unique and require targeted mode.")
+        return self
 
 
 class PlanningCall(StrictModel):

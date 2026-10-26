@@ -461,9 +461,16 @@ def _targeted_paths(value, phase):
     return paths
 
 
-def _apply_targeted_changes(authored, phase, changes):
+def _apply_targeted_changes(authored, phase, changes, *, allowed_paths=None):
     source = authored.model_dump()
     allowed = _targeted_paths(source, phase)
+    if allowed_paths is not None:
+        if (not allowed_paths or len(allowed_paths) > 40
+                or any(not isinstance(path, str) for path in allowed_paths)
+                or len(set(allowed_paths)) != len(allowed_paths)
+                or not set(allowed_paths).issubset(allowed)):
+            raise _invalid("Targeted revision scope is not a subset of allowed authored paths.")
+        allowed = {path: allowed[path] for path in allowed_paths}
     paths = [change.path for change in changes.changes]
     if len(set(paths)) != len(paths):
         raise _invalid("Targeted revision must contain unique changed paths.")

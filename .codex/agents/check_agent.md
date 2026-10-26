@@ -212,3 +212,10 @@ drafting without truncation. Writing must honor planned times/departures/actions
 and cannot invent major evidence acquisition or secret/identity disclosure for
 padding. Plans remain intentions, not realized knowledge or canon. Capture
 checks prove delivery, not live-model compliance or universal leakage prevention.
+
+Planning-run targeted restarts may explicitly pin revision_paths (1–40 unique
+existing authored leaves). Validate before reservation, keep the fence through
+ordinary resume/reopen and automatic repair, and enforce it again when applying
+changes. Critic suggestions never widen the fence. None retains legacy behavior;
+FULL/recheck cannot carry it. Explicit restart chooses a new scope and records it.
+Do not treat natural-language "only these fields" as a structural scope guarantee.

@@ -41,7 +41,7 @@ does not require human acceptance or graph application.
 - `POST .../{run_id}/stop` accepts `{expected_version}`.
 - `POST .../{run_id}/resume` accepts `{expected_version,
   retry_uncertain_call=false,max_calls?,restart_from_step?,revision_instruction?,recheck_current_step=false,
-  preserve_later_outputs=false,revision_mode="targeted"}`. A budget increase is explicit and
+  preserve_later_outputs=false,revision_mode="targeted",revision_paths?}`. A budget increase is explicit and
   capped at 512; it cannot be below already reserved calls. Existing runs keep their stored
   limit unless an explicit resume supplies a replacement. Increasing the limit
   preserves cumulative reservations, outputs and restart history; it never resets
@@ -103,7 +103,7 @@ full-length manuscript was generated.
 
 Steps are an initial blueprint followed by all ordered batches. Each records
 `index,phase,volume_index,chapter_start,chapter_count,status,proposal_ref,
-review_id,repairs,revision_instruction`. Statuses: `pending`, `generated`, `needs_revision`, `passed`.
+review_id,repairs,revision_instruction,revision_paths?`. Statuses: `pending`, `generated`, `needs_revision`, `passed`.
 An exact ref is `{id,version,body_sha256}`. Review IDs pin immutable reports.
 Pause reasons are stable nonsecret codes, including `stopped`, `call_budget`,
 `schema_invalid`, `review_failed`, `repair_limit`, `uncertain_call`,
@@ -290,6 +290,44 @@ and before first bundle application. Existing completed application receipts
 retain their documented idempotent retry behavior. This mechanism preserves
 unaccepted authored work; it does not accept children or guarantee semantic
 correctness, and the new reviews/repairs still consume the normal bounded budget.
+
+### Explicit targeted revision scope
+
+`PlanningRunResume.revision_paths: list[string] | null = null` optionally makes
+the author's selected JSON Pointer paths a runtime request boundary. A non-null
+scope contains 1–40 unique, nonempty paths (at most 500 characters each), and
+requires an explicit `restart_from_step`, nonblank `revision_instruction`, and
+`revision_mode="targeted"`. It cannot be supplied with `full` or
+`recheck_current_step`; a scope never silently switches revision modes.
+
+Before saving the restart or reserving any provider call, resolve its exact
+current or retained source and require every path to be an existing permitted
+targeted path of that source and phase. Unknown paths, another phase, stable
+identities, numeric budgets, typed physical-state slots and reference arrays
+remain forbidden. The already-supported Character `initial_knowledge` list/null
+exception stays available when its exact path is selected; this does not add
+another editable field or relax its Secret ownership/type checks. Invalid scope
+rejects the control atomically, without a run update, Proposal or paid call.
+
+The selected `PlanningStep.revision_paths` is persisted alongside its revision
+instruction and recorded in restart history. All automatic repairs of that step,
+plain resumes, rechecks and process restarts preserve the stored scope; critic
+issues cannot clear or widen it. Each targeted provider request contains only
+the selected `allowed_paths` and `current_values`, and the local apply validator
+independently enforces that same subset for both creative replacements and
+legacy exact-before changes. A provider response outside the subset fails
+without publishing an alternative; the attempted call remains reserved and its
+source remains unchanged.
+
+A new explicit restart sets the selected step's scope from that new request:
+omitted/null restores the legacy unrestricted *permitted targeted leaf* set,
+while an explicit subset replaces the former subset. This reset is auditable in
+restart history. Later steps reset with the existing preserve-and-recheck
+semantics, without inheriting the selected earlier step's scope. Historical run
+and step payloads lacking this optional field default to null. Full revision,
+old unscoped targeted requests and manual long-form revision retain their
+existing behavior. No scope bypass, failed-response salvage, automatic paid
+retry, review-status change, canon write or budget reset is introduced.
 
 
 Plan critics receive the immutable run.request.instruction as an explicit trusted

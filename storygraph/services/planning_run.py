@@ -289,6 +289,11 @@ class PlanningRunService:
                         raise _error("planning_bundle_already_reviewed")
                 selected = steps[index]
                 source_ref = selected.proposal_ref or selected.retained_output_ref
+                if request.revision_paths is not None:
+                    if source_ref is None:
+                        raise _error("planning_revision_source_missing")
+                    _, branch = self._retained_source(run, selected, source_ref)
+                    self._revision_values(branch.blueprint or branch.expansion, selected.phase, request.revision_paths)
                 retained = {}
                 if request.preserve_later_outputs:
                     for later in steps[index+1:]:
@@ -299,22 +304,24 @@ class PlanningRunService:
                 restart_history.append({"step_index": index, "source_ref": source_ref.model_dump() if source_ref else None,
                     "prior_repairs": selected.repairs, "instruction_sha256": content_hash(request.revision_instruction or ""),
                     "preserve_later_outputs": request.preserve_later_outputs, "revision_mode": request.revision_mode,
+                    "revision_paths": request.revision_paths,
                     "retained_refs": {str(key): ref.model_dump() for key, ref in retained.items()}, "created_at": utc_now()})
                 if request.revision_instruction and source_ref:
                     self._retained_source(run, selected, source_ref)
                     steps[index] = selected.model_copy(update={"status": "needs_revision", "repairs": 0,
                         "proposal_ref": source_ref, "review_id": None,
-                        "revision_instruction": request.revision_instruction, "revision_mode": request.revision_mode})
+                        "revision_instruction": request.revision_instruction, "revision_mode": request.revision_mode,
+                        "revision_paths": request.revision_paths})
                 else:
                     if request.revision_mode == "full":
                         raise _error("planning_revision_source_missing")
                     steps[index] = selected.model_copy(update={"status": "pending", "proposal_ref": None, "review_id": None,
                         "retained_output_ref": None, "repairs": 0, "revision_instruction": request.revision_instruction,
-                        "revision_mode": request.revision_mode})
+                        "revision_mode": request.revision_mode, "revision_paths": None})
                 for later in range(index+1, len(steps)):
                     steps[later] = steps[later].model_copy(update={"status": "pending", "proposal_ref": None,
                         "retained_output_ref": retained.get(later), "review_id": None, "repairs": 0,
-                        "revision_instruction": None, "revision_mode": "targeted"})
+                        "revision_instruction": None, "revision_mode": "targeted", "revision_paths": None})
                 final_review_id, bundle_id, stage = None, None, selected.phase
             if run.pause_reason == "review_failed" and request.restart_from_step is None:
                 for step in steps:
@@ -327,6 +334,16 @@ class PlanningRunService:
                 "steps": steps, "final_review_id": final_review_id, "bundle_proposal_id": bundle_id,
                 "stage": stage, "restart_history": restart_history,
                 "max_calls": request.max_calls if request.max_calls is not None else run.max_calls}), run.version)
+
+    @staticmethod
+    def _revision_values(authored, phase, revision_paths):
+        values = _targeted_paths(authored.model_dump(), phase)
+        if revision_paths is not None:
+            if (not revision_paths or len(set(revision_paths)) != len(revision_paths)
+                    or not set(revision_paths).issubset(values)):
+                raise _error("planning_revision_paths_invalid")
+            values = {path: values[path] for path in revision_paths}
+        return values
 
     def recover_interrupted(self):
         recovered = []
@@ -682,7 +699,7 @@ class PlanningRunService:
                             "author_instruction": step.revision_instruction,
                             "issues": [i.model_dump() for i in blocking_issues(report.issues)] if report else []}))
                     if step.revision_mode == "targeted":
-                        values = _targeted_paths(authored.model_dump(), step.phase)
+                        values = self._revision_values(authored, step.phase, step.revision_paths)
                         payload.update(current_values=values, allowed_paths=sorted(values))
                     reserved, execution = self._reserve(run, "planning", "repair", step.index)
                     if execution is None:
@@ -691,7 +708,7 @@ class PlanningRunService:
                         revised = _call(execution.provider, execution.model, run.output_language, output_type, payload, execution.agent_preset)
                     else:
                         changes = _call(execution.provider, execution.model, run.output_language, TargetedRevisionOutput, payload, execution.agent_preset)
-                        revised = _apply_targeted_changes(authored, step.phase, changes)
+                        revised = _apply_targeted_changes(authored, step.phase, changes, allowed_paths=step.revision_paths)
                     updated_step = step.model_copy(update={"repairs": step.repairs+1})
                     self._store_output(reserved, updated_step, self._new_proposal(reserved, step, revised, execution, repair_source=source))
         except Exception as exc:
