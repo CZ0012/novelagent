@@ -547,3 +547,45 @@ def test_creative_repair_does_not_switch_selected_ref_after_source_edited_during
     assert failed.status == "paused" and failed.pause_reason == "source_changed"
     assert failed.steps[0].proposal_ref == original_ref and proposals.get(source.id).version == source.version+1
     assert len(proposals.list()) == 1
+
+
+def test_explicit_call_cap_boundary_and_large_grid_keep_default_budget():
+    from pydantic import ValidationError
+    from storygraph.models.planning_run import MAX_PLANNING_RUN_CALLS
+    assert MAX_PLANNING_RUN_CALLS == 512
+    # FastAPI uses these shared models for create/resume request schemas.
+    assert PlanningRunRequest.model_json_schema()["properties"]["max_calls"] == {"default": 80, "maximum": 512, "minimum": 1, "title": "Max Calls", "type": "integer"}
+    assert {"maximum": 512, "minimum": 1, "type": "integer"} in PlanningRunResume.model_json_schema()["properties"]["max_calls"]["anyOf"]
+    assert PlanningRunRequest(instruction="synthetic").max_calls == 80
+    assert PlanningRunResume(expected_version=1).max_calls is None
+    assert PlanningRunRequest(instruction="synthetic", max_calls=512).max_calls == 512
+    assert PlanningRunResume(expected_version=1, max_calls=512).max_calls == 512
+    for cls, values in ((PlanningRunRequest, {"instruction": "synthetic"}),
+                        (PlanningRunResume, {"expected_version": 1})):
+        with pytest.raises(ValidationError):
+            cls(**values, max_calls=513)
+    # 144 expansion batches need 291 minimum calls, above the old 128 cap.
+    large = PlanningRunRequest(instruction="synthetic", volume_count=12,
+        chapters_per_volume=60, batch_size=5)
+    assert large.max_calls == 80
+    with pytest.raises(ValidationError, match="512-call minimum"):
+        PlanningRunRequest(instruction="synthetic", volume_count=12,
+            chapters_per_volume=60, batch_size=1, max_calls=512)
+
+
+def test_explicit_512_resume_preserves_reservations_history_and_outputs(setup):
+    run = create(setup, max_calls=2)
+    service, runs = setup[5], setup[2]
+    paused = service.execute(run.id)
+    saved = paused.model_dump()
+    provider_counts = len(setup[3].calls), len(setup[4].requests)
+    with pytest.raises(GraphStoreError):
+        service.resume("book", run.id, PlanningRunResume(expected_version=paused.version,
+            max_calls=paused.calls_reserved-1))
+    assert runs.get(run.id).model_dump() == saved
+    queued = service.resume("book", run.id, PlanningRunResume(expected_version=paused.version, max_calls=512))
+    assert queued.max_calls == 512 and queued.request.max_calls == 2
+    assert queued.calls_reserved == paused.calls_reserved
+    assert queued.steps == paused.steps and queued.restart_history == paused.restart_history
+    assert (len(setup[3].calls), len(setup[4].requests)) == provider_counts
+    assert queued.status == "queued"  # Explicit execution remains a separate operation.

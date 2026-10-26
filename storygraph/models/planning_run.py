@@ -6,9 +6,12 @@ from storygraph.models.longform import Blueprint, BlueprintRequest, Expansion, S
 from storygraph.models.project import OutputLanguage
 
 
+MAX_PLANNING_RUN_CALLS = 512
+
+
 class PlanningRunRequest(BlueprintRequest):
     batch_size: int = Field(default=5, ge=1, le=5)
-    max_calls: int = Field(default=80, ge=1, le=128)
+    max_calls: int = Field(default=80, ge=1, le=MAX_PLANNING_RUN_CALLS)
     max_repairs_per_step: int = Field(default=2, ge=0, le=2)
     seed_blueprint_id: str | None = Field(default=None, min_length=1, max_length=200)
     seed_blueprint_version: int | None = Field(default=None, ge=1)
@@ -18,8 +21,8 @@ class PlanningRunRequest(BlueprintRequest):
         if (self.seed_blueprint_id is None) != (self.seed_blueprint_version is None):
             raise ValueError("Seed blueprint ID and version must be supplied together.")
         batches = self.volume_count*((self.chapters_per_volume+self.batch_size-1)//self.batch_size)
-        if 2*(1+batches)+1-(self.seed_blueprint_id is not None) > 128:
-            raise ValueError("The requested grid exceeds the 128-call minimum; use larger batches or fewer chapters/volumes.")
+        if 2*(1+batches)+1-(self.seed_blueprint_id is not None) > MAX_PLANNING_RUN_CALLS:
+            raise ValueError(f"The requested grid exceeds the {MAX_PLANNING_RUN_CALLS}-call minimum; use larger batches or fewer chapters/volumes.")
         return self
 
 
@@ -29,7 +32,7 @@ class PlanningRunControl(StrictModel):
 
 class PlanningRunResume(PlanningRunControl):
     retry_uncertain_call: bool = False
-    max_calls: int | None = Field(default=None, ge=1, le=128)
+    max_calls: int | None = Field(default=None, ge=1, le=MAX_PLANNING_RUN_CALLS)
     restart_from_step: int | None = Field(default=None, ge=0)
     revision_instruction: str | None = Field(default=None, min_length=1, max_length=12000)
     recheck_current_step: bool = False

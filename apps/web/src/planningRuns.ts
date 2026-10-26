@@ -1,5 +1,6 @@
 import { apiPost, type ModelTask, type ProposalArtifact } from "./api";
 import { isRenderableBlueprint, isRenderableExpansion, type BlueprintRequest, type LongformBlueprint, type LongformExpansion } from "./longformPlanning";
+export const MAX_PLANNING_RUN_CALLS = 512;
 export type PlanningRunRequest = BlueprintRequest & { batch_size: number; max_calls: number; max_repairs_per_step: number; seed_blueprint_id?: string; seed_blueprint_version?: number };
 export type PlanningArtifactRef = { id: string; version: number; body_sha256: string };
 export type PlanningRunStatus = "queued" | "running" | "paused" | "awaiting_review" | "completed";
@@ -15,13 +16,13 @@ export function blueprintInputValid(request: BlueprintRequest): boolean {
   return Boolean(request.instruction.trim()) && [...request.instruction].length <= 12000 && bounded(request.target_length, 10000, 2000000) && bounded(request.volume_count, 1, 12) && bounded(request.chapters_per_volume, 1, 60) && bounded(request.scenes_per_chapter, 1, 6);
 }
 export function planningRunInputValid(request: PlanningRunRequest): boolean {
-  return blueprintInputValid(request) && ((request.seed_blueprint_id === undefined && request.seed_blueprint_version === undefined) || Boolean(request.seed_blueprint_id && Number.isSafeInteger(request.seed_blueprint_version) && request.seed_blueprint_version! >= 1)) && Number.isSafeInteger(request.batch_size) && request.batch_size >= 1 && request.batch_size <= 5 && Number.isSafeInteger(request.max_calls) && request.max_calls >= 1 && request.max_calls <= 128 && Number.isSafeInteger(request.max_repairs_per_step) && request.max_repairs_per_step >= 0 && request.max_repairs_per_step <= 2;
+  return blueprintInputValid(request) && ((request.seed_blueprint_id === undefined && request.seed_blueprint_version === undefined) || Boolean(request.seed_blueprint_id && Number.isSafeInteger(request.seed_blueprint_version) && request.seed_blueprint_version! >= 1)) && Number.isSafeInteger(request.batch_size) && request.batch_size >= 1 && request.batch_size <= 5 && Number.isSafeInteger(request.max_calls) && request.max_calls >= 1 && request.max_calls <= MAX_PLANNING_RUN_CALLS && Number.isSafeInteger(request.max_repairs_per_step) && request.max_repairs_per_step >= 0 && request.max_repairs_per_step <= 2;
 }
 export function planningRunReady(run: PlanningRun): boolean {
   return (run.status === "awaiting_review" || run.status === "completed") && run.stage === "done" && Boolean(run.bundle_proposal_id) && Boolean(run.final_review_id) && !run.pending_call && run.steps.length > 0 && run.steps.every((step) => step.status === "passed" && step.proposal_ref && step.review_id);
 }
 export function planningRunNeedsUncertainRetry(run: PlanningRun): boolean { return run.status === "paused" && (run.pause_reason === "uncertain_call" || Boolean(run.pending_call)); }
-export function planningRunCanResume(run: PlanningRun, maxCalls = run.max_calls): boolean { return run.status === "paused" && run.pause_reason !== "canon_changed" && run.pause_reason !== "source_changed" && run.pause_reason !== "connection_changed" && Number.isSafeInteger(maxCalls) && maxCalls >= run.max_calls && maxCalls <= 128 && maxCalls > run.calls_reserved; }
+export function planningRunCanResume(run: PlanningRun, maxCalls = run.max_calls): boolean { return run.status === "paused" && run.pause_reason !== "canon_changed" && run.pause_reason !== "source_changed" && run.pause_reason !== "connection_changed" && Number.isSafeInteger(maxCalls) && maxCalls >= run.max_calls && maxCalls <= MAX_PLANNING_RUN_CALLS && maxCalls > run.calls_reserved; }
 export function planningBookApplied(proposal: ProposalArtifact): boolean { return proposal.status === "accepted" && proposal.derived_refs.some((ref) => ref.kind === "longform_book_application" && ref.ref === proposal.id); }
 const validRef = (ref: unknown): ref is PlanningArtifactRef => typeof ref === "object" && ref !== null && "id" in ref && typeof ref.id === "string" && Boolean(ref.id) && "version" in ref && Number.isSafeInteger(ref.version) && Number(ref.version) > 0 && "body_sha256" in ref && typeof ref.body_sha256 === "string" && /^[a-f0-9]{64}$/.test(ref.body_sha256);
 export function parsePlanningBook(proposal: ProposalArtifact | null): PlanningBookBundle | null {

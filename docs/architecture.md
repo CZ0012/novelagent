@@ -1986,3 +1986,12 @@ CLI、API 与源码构建桌面后端共用的模型 HTTP socket 超时默认值
 可选 scene_plan 标记为 approved_plan_not_realized_facts，携带当前场景预期结局、情绪转折、篇幅预算、最多 30 条直接因果前置规划和当前伏笔埋设/回收动作。运行使用已归属项目的稳定图谱 ID，不把本地规划 ID 或标题猜成引用。前置摘要/结局是已批准意图，不证明正文已写或事件已经实现；Draft 摘要仍是固定引用的非正典证据。埋设动作不发送隐藏回收含义，回收动作才携带相应预期解释。
 
 这些语义节拍属于受保护的 P0 上下文，不机械复制到 must_include；文风仍由作者批准的风格约束控制。缺失、跨项目、无有效说明或超限的前置/伏笔关联产生 critical 缺口；预算不足时报告并阻止完整生成，不能截掉硬规划或补造前提。缺少规划的旧场景保持 scene_plan=null，不回写投影默认值。API/Web 与源码桌面共用此后端，CLI 保留既有入口；GitHub 仍只服务软件发布/更新。真实模型覆盖与剩余限制另记于 docs/acceptance-0.2.0.md，不把合成规模、篇幅分配或假服务商测试宣称为已完成真实百章整书验收。
+
+
+Planning runs default to 80 model calls and allow an explicit per-run ceiling of
+512 through creation or resume. Existing stored limits do not change automatically.
+Resume cannot set a limit below cumulative reserved calls; increasing the limit
+preserves call counts, outputs and history. The Web controls use the same ceiling.
+This technical per-run bound is separate from any shared monetary or global-call
+guard and does not authorize additional spending or automatic retries. Desktop
+builds need a rebuilt backend and Web bundle to include this source change.

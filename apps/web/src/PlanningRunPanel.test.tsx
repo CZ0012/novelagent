@@ -20,7 +20,8 @@ describe("bounded whole-book planning run controls", () => {
   });
   it("validates blueprint, batch, call and repair budgets before a paid create action", () => {
     const request = run().request; expect(planningRunInputValid(request)).toBe(true);
-    for (const patch of [{ instruction: " " }, { target_length: 5000 }, { volume_count: 13 }, { batch_size: 0 }, { batch_size: 6 }, { max_calls: 129 }, { max_calls: 0 }, { max_repairs_per_step: 3 }, { max_repairs_per_step: -1 }, { max_calls: 1.5 }]) expect(planningRunInputValid({ ...request, ...patch })).toBe(false);
+    expect(planningRunInputValid({ ...request, max_calls: 512 })).toBe(true);
+    for (const patch of [{ instruction: " " }, { target_length: 5000 }, { volume_count: 13 }, { batch_size: 0 }, { batch_size: 6 }, { max_calls: 513 }, { max_calls: 0 }, { max_repairs_per_step: 3 }, { max_repairs_per_step: -1 }, { max_calls: 1.5 }]) expect(planningRunInputValid({ ...request, ...patch })).toBe(false);
   });
   it("never calls a run complete while steps, reports, final check or bundle are missing", () => {
     const value = run(); expect(planningRunReady(value)).toBe(true);
@@ -44,8 +45,10 @@ describe("bounded whole-book planning run controls", () => {
   it("raises an exhausted call budget only through explicit resume input", () => {
     const value = { ...run(), status: "paused" as const, pause_reason: "call_budget", calls_reserved: 80 };
     expect(planningRunResumeBody(value, false)).toBeNull();
+    expect(planningRunResumeBody(value, false, 512)).toEqual({ expected_version: 7, retry_uncertain_call: false, max_calls: 512 });
+    expect(value.calls_reserved).toBe(80); expect(value.max_calls).toBe(80);
     expect(planningRunResumeBody(value, false, 100)).toEqual({ expected_version: 7, retry_uncertain_call: false, max_calls: 100 });
-    expect(planningRunResumeBody(value, false, 129)).toBeNull(); expect(planningRunResumeBody(value, false, 70)).toBeNull();
+    expect(planningRunResumeBody(value, false, 513)).toBeNull(); expect(planningRunResumeBody(value, false, 70)).toBeNull();
   });
   it("pins seed ID/version and copies the original flat request without invisible or changed inputs", () => {
     const original = run().request;

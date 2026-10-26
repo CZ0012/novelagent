@@ -522,3 +522,12 @@ A timeout or lost connection leaves the paid call's outcome unknown. The planner
 Writing context distinguishes **scene entry**, **approved plan** and **realized state**. Knowledge first acquired during a scene is excluded at its opening; only explicitly reviewed starting knowledge and prior reachable acquisitions are available. Optional `scene_plan` supplies the intended ending, emotional turn, length budget, up to 30 direct causal predecessor plans and explicit seed/payoff actions using stable graph IDs. These are semantic writing beats, not facts already realized or phrases to copy literally. Seed actions withhold their hidden payoff. Missing, foreign or over-budget protected planning context blocks full drafting rather than inventing a prerequisite. See [context-pack contract](contracts/context_pack_v1.md).
 
 Current real-model coverage is recorded separately in [0.2.0 acceptance](docs/acceptance-0.2.0.md). Allocated 500,000-character budgets, a 100-chapter grid and offline synthetic tests do not by themselves establish completed real-model acceptance of a whole book. These controls use the same local backend from API/Web and source-built desktop; they do not publish a release or change the CLI's existing scene entrypoints.
+
+
+Planning runs default to 80 model calls and allow an explicit per-run ceiling of
+512 through creation or resume. Existing stored limits do not change automatically.
+Resume cannot set a limit below cumulative reserved calls; increasing the limit
+preserves call counts, outputs and history. The Web controls use the same ceiling.
+This technical per-run bound is separate from any shared monetary or global-call
+guard and does not authorize additional spending or automatic retries. Desktop
+builds need a rebuilt backend and Web bundle to include this source change.

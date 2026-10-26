@@ -24,9 +24,9 @@ does not require human acceptance or graph application.
 ## Routes and request shapes
 
 - `POST /projects/{id}/planning-runs` accepts existing flat BlueprintRequest
-  fields plus `batch_size=5` (1–5), `max_calls=80` (1–128), and
+  fields plus `batch_size=5` (1–5), `max_calls=80` (1–512), and
   `max_repairs_per_step=2` (0–2). The grid's minimum generation/review call count
-  must fit the hard 128-call limit. A deliberately lower initial budget may
+  must fit the hard 512-call limit. A deliberately lower initial budget may
   pause partway and be explicitly increased later.
   Optional paired `seed_blueprint_id,seed_blueprint_version` selects an exact
   same-project, confirmed-language, valid UNAPPLIED `longform_plan_v1` blueprint.
@@ -42,7 +42,12 @@ does not require human acceptance or graph application.
 - `POST .../{run_id}/resume` accepts `{expected_version,
   retry_uncertain_call=false,max_calls?,restart_from_step?,revision_instruction?,recheck_current_step=false,
   preserve_later_outputs=false,revision_mode="targeted"}`. A budget increase is explicit and
-  capped at 128; it cannot be below already reserved calls.
+  capped at 512; it cannot be below already reserved calls. Existing runs keep their stored
+  limit unless an explicit resume supplies a replacement. Increasing the limit
+  preserves cumulative reservations, outputs and restart history; it never resets
+  spent calls or starts work by itself. This per-run technical ceiling is separate
+  from any external account, monetary or global-call guard; raising it does not
+  waive such guards or authorize unlimited spending.
   An optional zero-based chosen step restarts planning explicitly. With a
   nonblank instruction (up to 12,000 characters) and a current valid saved
   output, perform a targeted repair by default (explicit `revision_mode="full"`

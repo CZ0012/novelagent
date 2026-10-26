@@ -299,3 +299,12 @@ Unknown transport outcomes keep the saved diagnostic, original pending call and 
 The same writing Context Pack uses scene-entry knowledge and state: current-scene revelations are not opening knowledge. Optional approved `scene_plan` carries the ending, emotional turn, length budget, direct causal preconditions and seed/payoff actions as planned intentions, never realized facts. Seed actions withhold the payoff. These semantic beats remain protected under context-budget pressure; missing or foreign references block full generation. See [context-pack contract](../../contracts/context_pack_v1.md).
 
 The npm backend/installer scripts invoke **Windows PowerShell** (`powershell.exe`); PowerShell 7 is `pwsh`. Source-built candidates, published updater channels and Windows Authenticode signing remain distinct. Actual live-model coverage is recorded in [0.2.0 acceptance](../../docs/acceptance-0.2.0.md); a 100-chapter plan grid or synthetic corpus is not completed real-model whole-book acceptance. These source changes do not update an installed author application or synchronize its workspace.
+
+
+Planning runs default to 80 model calls and allow an explicit per-run ceiling of
+512 through creation or resume. Existing stored limits do not change automatically.
+Resume cannot set a limit below cumulative reserved calls; increasing the limit
+preserves call counts, outputs and history. The Web controls use the same ceiling.
+This technical per-run bound is separate from any shared monetary or global-call
+guard and does not authorize additional spending or automatic retries. Desktop
+builds need a rebuilt backend and Web bundle to include this source change.
