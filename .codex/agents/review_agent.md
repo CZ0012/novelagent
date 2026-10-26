@@ -189,3 +189,9 @@ The critic output_schema reflects the existing style_constraint evidence rule: r
 ## Preferred reply nonce and wire order
 
 Every NEW critic reply must echo the exact nonce from the final user-JSON field; preferred output_schema requires it even for canonical-only/no-issue replies. The runtime parser and historical compatibility remain unchanged; never insert a missing field, relax aliases, retry automatically or recertify an old response. Preserve user-message insertion order with stable canon/style/plan/target/coverage sources first, output_schema penultimate and evidence_registry_id last. The schema still contains a dynamic const, so only the long prefix before it is stable; no cache-hit guarantee. Keep the system prompt static with no current nonce. Only wire serialization stops sorting; all canonical hashes/fingerprints/currentness still use unchanged canonical_json.
+
+Applied long-form scene snapshots distinguish exact local plan/Proposal metadata
+from true graph references only under bound Scene/Project blueprint identity.
+Keep stored IDs and project/PLAN fingerprints unchanged; resolve plan semantics
+through scoped reviewed edges. Missing/mismatched links and real chapter, POV,
+location, previous-scene, style, required/custom references must still fail closed.

@@ -1,5 +1,12 @@
 # Context Pack Contract v1
 
+Applied long-form local plan identifiers and Proposal provenance remain stored
+unchanged. Scene semantic-review/extraction snapshots use the same distinction
+as Context Pack planning: actual CAUSES/SEEDED_IN/PAID_OFF_IN edges supply scoped
+semantics; local declarations expose missing/mismatched links rather than being
+treated as graph IDs. This does not waive actual entity, hierarchy, style or
+previous-scene reference validation, and does not make a planned event realized.
+
 ## Project-aware default budget
 
 `ContextPackBuilder.build(target_tokens=None)` resolves the context target without

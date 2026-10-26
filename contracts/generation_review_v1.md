@@ -1,5 +1,23 @@
 # Generation Review Contract v1
 
+## Applied planning metadata in scene snapshots
+
+An applied long-form Scene retains `longform_blueprint_id` (a Proposal identity),
+`longform_scene_id`, `causal_dependencies`, `foreshadowing_seed_ids` and
+`foreshadowing_payoff_ids` as exact planning provenance/local identifiers. They
+are not Graph Store node references. Scene evidence recognizes this boundary
+only when the Scene's derived stable ID and the owning Project's blueprint
+identity agree. These properties remain unchanged in storage, evidence and
+fingerprints; there is no migration or inferred canon write.
+
+Planning semantics still resolve through scoped CANON `planning_only` CAUSES,
+SEEDED_IN and PAID_OFF_IN edges, with the Context Pack's existing plan validation.
+Declared local IDs must match the corresponding stable edge sources. Missing,
+foreign, mistyped or inconsistent plan links remain incomplete coverage. Actual
+chapter, POV, location, previous-scene, style and required-character references,
+and unknown custom suffix-ID references, retain fail-closed checks. This narrow
+scene-scope handling does not change project/PLAN snapshot selection or hashes.
+
 ## Purpose and boundary
 
 `generation_review_v1` is an explicit, model-assisted continuity and style review

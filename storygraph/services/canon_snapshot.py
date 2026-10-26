@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 import hashlib
 import json
+import re
 
 from storygraph.core.errors import ContractError
 from storygraph.models.generation_review import CanonFact, CanonSnapshot
@@ -17,6 +18,19 @@ def canonical_json(value) -> str:
 
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _longform_scene_metadata(scene, project):
+    """Recognize applied-plan provenance, never waive arbitrary suffix-ID fields."""
+    blueprint_id = scene.properties.get("longform_blueprint_id")
+    local_id = scene.properties.get("longform_scene_id")
+    if (not isinstance(blueprint_id, str) or not 0 < len(blueprint_id) <= 200
+            or project.properties.get("longform_blueprint_id") != blueprint_id
+            or not isinstance(local_id, str)
+            or re.fullmatch(r"v\d{2}_c\d{3}_s\d{2}", local_id) is None):
+        return False
+    expected = f"scene_lp_{hashlib.sha256(blueprint_id.encode()).hexdigest()[:16]}_{local_id}"
+    return scene.id == expected
 
 
 def build_canon_snapshot(
@@ -47,6 +61,7 @@ def build_canon_snapshot(
                 else n.properties.get("project_id") == project_id
             )
         }
+        project = nodes[project_id]
         if scene_id is not None:
             scene = nodes.get(scene_id)
             if scene is None or scene.type != "Scene":
@@ -145,11 +160,19 @@ def build_canon_snapshot(
                               if fact.id not in assertion_ids or fact.id in active_ids]
     elif scene_id:
         relevant.add(scene_id)
+        longform_metadata = _longform_scene_metadata(nodes[scene_id], project)
+        plan_metadata_fields = {"longform_blueprint_id", "longform_scene_id",
+                                "causal_dependencies", "foreshadowing_seed_ids", "foreshadowing_payoff_ids"}
         for key, value in nodes[scene_id].properties.items():
+            if longform_metadata and key in plan_metadata_fields:
+                # Proposal provenance/local plan IDs stay unchanged in storage.
+                # Actual planning semantics and scope come from reviewed edges below.
+                continue
             if isinstance(value, str) and value in nodes:
                 relevant.add(value)
                 expected_type = {"chapter_id": "Chapter", "pov_character_id": "Character",
-                                 "location_id": "Location"}.get(key)
+                                 "location_id": "Location", "previous_scene_id": "Scene",
+                                 "style_profile_id": "StyleProfile"}.get(key)
                 if expected_type and nodes[value].type != expected_type:
                     missing.append("invalid_scene_reference_type")
             elif isinstance(value, list):
@@ -227,6 +250,37 @@ def build_canon_snapshot(
         frozen = InMemoryGraphStore()
         frozen.nodes = nodes
         frozen.relationships = {relation.id: relation for relation in relations}
+        if purpose == "scene" and _longform_scene_metadata(nodes[scene_id], project):
+            from storygraph.services.context_pack_builder import ContextPackBuilder
+
+            for key in ("chapter_id", "pov_character_id", "location_id", "style_profile_id"):
+                ref = nodes[scene_id].properties.get(key)
+                if not isinstance(ref, str) or ref not in nodes:
+                    missing.append("missing_scene_reference")
+            required = nodes[scene_id].properties.get("required_characters")
+            if not isinstance(required, list) or not required:
+                missing.append("missing_scene_reference")
+            gaps = []
+            ContextPackBuilder(frozen)._approved_scene_plan(
+                project_id=project_id, scene=nodes[scene_id],
+                output_language=project.properties.get("language", "zh-CN"), missing_context=gaps)
+            missing.extend(gap.kind for gap in gaps)
+            blueprint_id = nodes[scene_id].properties["longform_blueprint_id"]
+            prefix = hashlib.sha256(blueprint_id.encode()).hexdigest()[:16]
+            for field, kind, edge in (("causal_dependencies", "scene", "CAUSES"),
+                    ("foreshadowing_seed_ids", "foreshadowing", "SEEDED_IN"),
+                    ("foreshadowing_payoff_ids", "foreshadowing", "PAID_OFF_IN")):
+                declared = nodes[scene_id].properties.get(field)
+                if isinstance(declared, list):
+                    actual = {r.source_id for r in relations if r.target_id == scene_id
+                              and r.type == edge and r.properties.get("planning_only") is True}
+                    expected = {f"{kind}_lp_{prefix}_{ref}" for ref in declared if isinstance(ref, str)}
+                    if not expected.issubset(actual):
+                        missing.append("missing_scene_plan_relation")
+            previous = nodes[scene_id].properties.get("previous_scene_id")
+            if any(r.type == "NEXT_SCENE" and r.target_id == scene_id
+                   and r.source_id != previous for r in relations):
+                missing.append("missing_scene_reference")
         projections, used_assertions = {}, set()
         entry_knowledge = {
             subject_id: frozen.get_character_knowledge(subject_id, scene_id=scene_id,
