@@ -234,6 +234,7 @@ def semantic_review_output_schema(*, registry, registry_id):
     """Model-facing transport shape only; local parsing/grounding remain authoritative."""
     schema = SemanticReviewOutput.model_json_schema()
     schema["properties"]["evidence_registry_id"] = {"type": "string", "const": registry_id}
+    schema["required"].append("evidence_registry_id")
     evidence = schema["$defs"]["GenerationReviewIssue"]["properties"]["evidence"]
     if registry:
         evidence["items"] = {"anyOf": [evidence["items"], {
@@ -241,7 +242,8 @@ def semantic_review_output_schema(*, registry, registry_id):
             "properties": {"source_id": {"type": "string", "enum": list(registry)}},
             "required": ["source_id"],
         }]}
-        # Exact canonical-only output can omit the nonce; any compact alias cannot.
+        # Keep the explicit alias condition; new replies always prefer a nonce.
+        # Canonical-only nonce omission remains a parser compatibility path only.
         schema["allOf"] = [{"if": {"required": ["issues"], "properties": {
             "issues": {"contains": {"required": ["evidence"], "properties": {
                 "evidence": {"contains": {"required": ["source_id"]}}
@@ -422,18 +424,20 @@ class SemanticReviewService:
                     max_tokens=completion_budget(self.provider, 8000, thinking_allowance=65536),
                     messages=[
                         LLMMessage(role="system", content=_system_prompt(target.output_language, target.purpose)),
-                        LLMMessage(role="user", content=canonical_json({
-                            "target": wire_target, "canon": canon.model_dump(),
-                            "plan_content": plan_content,
+                        # Preserve a stable source prefix; canonical_json remains for all hashes.
+                        LLMMessage(role="user", content=json.dumps({
+                            "canon": canon.model_dump(),
                             "style_sources": style_sources,
+                            "plan_content": plan_content,
+                            "target": wire_target,
                             "required_dimensions": list(REVIEW_DIMENSIONS),
                             "missing_context": list(gaps),
                             "evidence_sources": evidence_sources,
-                            "evidence_registry_id": evidence_registry_id,
+                            "evidence_registry_coverage": registry_coverage,
                             "output_schema": semantic_review_output_schema(
                                 registry=evidence_sources, registry_id=evidence_registry_id),
-                            "evidence_registry_coverage": registry_coverage,
-                        })),
+                            "evidence_registry_id": evidence_registry_id,
+                        }, ensure_ascii=False, separators=(",", ":"))),
                     ],
                 ))
                 response_received = True
@@ -577,7 +581,7 @@ def _system_prompt(language, purpose="scene"):
         "Follow the supplied output_schema exactly for the accepted JSON shape; additional fields such as status_reason are not supported. "
         "The schema describes transport shape only; all evidence, scope, coverage and semantic rules still apply. "
         "PREFER evidence entries containing ONLY {\"source_id\":\"an exact supplied evidence_sources key\"}. "
-        "When using source_id, echo the supplied evidence_registry_id exactly as a top-level JSON field. "
+        "For EVERY new reply, echo the exact evidence_registry_id value from the FINAL field of the user JSON as a top-level field, including canonical-only evidence or no issues. "
         "Keys E1, E2 etc are request-local; never reuse keys or registry IDs from another request. "
         "The server resolves that key to its exact original kind/ref/quote; do not paraphrase or add override fields. "
         "Every style finding must cite target evidence AND applicable kind=style evidence; when it concerns the supplied author brief, cite style_sources.author_brief. "

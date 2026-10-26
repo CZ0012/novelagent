@@ -404,12 +404,14 @@ failed judgments nor proves model performance; new review remains explicit.
 Each semantic critic user message includes output_schema, freshly derived from
 SemanticReviewOutput.model_json_schema(). It retains the model's existing
 required fields, bounds, enums and strict additionalProperties=false objects.
-The only transport additions describe already-supported exact wire forms:
-optional top-level evidence_registry_id is a string const for this request;
+The transport variants use the existing parser-supported exact citation forms.
+For NEW replies the preferred schema unconditionally requires top-level
+evidence_registry_id as a string const for this request;
 evidence items may be canonical kind/ref/quote or an object containing only
 source_id selected from the current bounded registry. A schema conditional
-requires the nonce when any alias occurs. Canonical-only output may still omit
-it. The registry's existing 2000-entry bound also bounds the alias enum/schema.
+also requires the nonce when any alias occurs. Canonical-only output without
+it remains a parser compatibility path, not the recommended new reply shape.
+The registry's existing 2000-entry bound also bounds the alias enum/schema.
 
 This is message data and prompt guidance, not a provider protocol/response-format
 change or a new validator. Local strict parsing, token matching, grounding,
@@ -429,3 +431,25 @@ still permit valid canonical pairs, and nonstyle issue shapes remain unchanged.
 The kind-specific alias enums partition the existing bounded registry, keeping
 the complete advertised schema bounded. This changes only model-facing schema
 guidance; strict parser/grounding acceptance and historical reports are unchanged.
+
+
+### Preferred nonce and stable wire prefix
+
+Every new critic reply is instructed to echo the exact top-level nonce found in
+the FINAL user-JSON field, even when using only canonical evidence or no issues.
+The preferred advertised schema requires it unconditionally. The runtime parser
+is unchanged: canonical-only historical/default replies may omit it, any alias
+requires the exact token, and a supplied token is always validated. No missing
+field is inserted or repaired; historical invalid responses remain invalid.
+
+Only model-facing user-JSON serialization preserves explicit insertion order
+without sorting: canon, style_sources, plan_content, target, required_dimensions,
+missing_context, evidence_sources, evidence_registry_coverage, output_schema,
+then evidence_registry_id. All field values and full source inputs are retained.
+The output schema itself still contains the dynamic nonce const near the end,
+so only the source prefix before that const is stable across identical requests,
+not the entire schema/message. The system prompt is static across requests and
+never embeds the current nonce. This ordering permits stable-prefix reuse but
+does not guarantee provider cache hits or compliance. Canonical hashing remains
+on the unchanged sorted canonical_json path; report fingerprints, freshness,
+provider protocol and accepted runtime shapes do not change.

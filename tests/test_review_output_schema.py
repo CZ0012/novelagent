@@ -17,7 +17,7 @@ def test_model_facing_schema_retains_parser_shape_with_only_exact_transport_vari
     base = SemanticReviewOutput.model_json_schema()
     schema = semantic_review_output_schema(registry={"E1": {}, "E2": {}}, registry_id="request-a")
     assert schema["additionalProperties"] is False
-    assert schema["required"] == base["required"]
+    assert schema["required"] == [*base["required"], "evidence_registry_id"]
     assert schema["properties"]["evidence_registry_id"] == {"type": "string", "const": "request-a"}
     assert "status_reason" not in schema["properties"]
     items = schema["$defs"]["GenerationReviewIssue"]["properties"]["evidence"]["items"]["anyOf"]
@@ -29,6 +29,7 @@ def test_model_facing_schema_retains_parser_shape_with_only_exact_transport_vari
     original = copy.deepcopy(schema)
     original.pop("allOf")
     original["properties"].pop("evidence_registry_id")
+    original["required"].remove("evidence_registry_id")
     original["$defs"]["GenerationReviewIssue"]["properties"]["evidence"]["items"] = items[0]
     original["$defs"]["GenerationReviewIssue"].pop("allOf")
     assert original == base

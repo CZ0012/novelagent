@@ -23,7 +23,7 @@ def test_phase_prompt_is_plan_only_and_preserves_semantic_requirements():
     assert "PHASE SCOPE" not in _system_prompt("zh-CN", "scene")
     assert "PHASE SCOPE" not in _system_prompt("zh-CN", "unknown")
     # Scene instructions are unaffected by the plan-only clarification.
-    assert content_hash(_system_prompt("zh-CN", "scene")) == "b5acd79bb34d653834d8567de77622a22745c061f117668575613a3853724a73"
+    assert content_hash(_system_prompt("zh-CN", "scene")) == "6e3b22b6d6c1727ba07ba99ce6fadb6eae4647115b8c5669a5d20c6db0716a7d"
     assert "Never downgrade a real incompatible fact to advice" in prompt
     assert "For every CENTRAL CLAIMED RESOLUTION" in prompt
 
