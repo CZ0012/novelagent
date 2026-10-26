@@ -572,7 +572,16 @@ def _system_prompt(language, purpose="scene"):
     if purpose != "plan":
         return base
     return base + (
-        "\nPURPOSE=PLAN: Review the complete proposed long-form plan for INTERNAL CONSISTENCY, "
+        "\nPURPOSE=PLAN: Review the declared proposed planning stage for INTERNAL CONSISTENCY. "
+        "PHASE SCOPE: Use the existing validated metadata, not prose guesses: current_plan.phase identifies a planning-run step; "
+        "top-level phase identifies a manual longform_plan_v1 target; review_scope=whole_book_blueprint_and_scene_outcome_ledger identifies final-book review. "
+        "For phase=blueprint, require the world/entities, rules, character arcs, volume design and declared chapter/scene/length budgets; "
+        "individual chapters and scenes are produced by later expansion batches and are NOT required inside a blueprint. "
+        "For phase=expansion, review the supplied current batch and its compatibility with the fixed blueprint and prior planning context; "
+        "missing future batches/chapters/scenes are not a required_gap for this batch. Check actual missing prerequisites, contradictions and premature resolutions within its declared scope. "
+        "For final-book review, require the complete planned grid and all exact_refs, and check the supplied full blueprint and complete scene outcome ledger across batches. "
+        "The author_brief describes the overall workflow goal; it does not require later-stage outputs to exist inside an earlier-stage schema. "
+        "These scope rules never waive required fields for the current phase, real upstream contradictions, proof sufficiency, citation grounding or dimension coverage. "
         "Read plan_content as the decoded structured view of the exact target.text, so escaped JSON strings and array positions do not obscure record labels. "
         "For an unambiguous structured plan, that complete tree is transmitted once: target metadata carries "
         "target_text_sha256 instead of a duplicate escaped text body. The original serialized text remains "

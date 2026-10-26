@@ -378,3 +378,22 @@ then target segments, retaining original ordering within each group. The
 target text/parsed plan is still sent; exact canonical quotes remain supported
 when aliases omit a segment. Token binding, exact IDs/quotes, coverage and all
 blocking rules remain unchanged.
+
+
+### Plan phase scope
+
+The PLAN critic uses existing validated target metadata: planning-run and manual
+expansion projections expose current_plan.phase; a manual blueprint exposes
+top-level longform_plan_v1 phase; final-book projection has
+review_scope=whole_book_blueprint_and_scene_outcome_ledger and exact_refs.
+Blueprint review covers world/entities/rules/arcs, volume design and declared
+chapter/scene/length budgets; it cannot demand individual later expansion
+chapters/scenes inside that blueprint schema. Expansion review covers the current
+batch plus its compatibility with blueprint/prior context; missing future
+batches alone are not required gaps. Final-book review requires the complete
+planned grid and all exact refs, covering the full blueprint/outcome ledger.
+The author brief's full-workflow goal applies across these phases. No prose
+guess introduces a phase, and no new transport field is required. Actual missing
+current-phase prerequisites, upstream contradictions, proof sufficiency, strict
+evidence and coverage checks remain. This prompt guidance neither certifies old
+failed judgments nor proves model performance; new review remains explicit.

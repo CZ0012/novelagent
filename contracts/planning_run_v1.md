@@ -305,3 +305,11 @@ reports, refs, call reservations and history; it never schedules paid refreshes.
 Existing explicit restart with retained later sources can obtain fresh reviews,
 but may revise/regenerate the chosen starting stage. No new automatic migration
 or recovery API is implied. Human apply independently checks current reports.
+
+
+Critic phase scope follows generation_review_v1 using existing current_plan.phase
+and final review_scope/exact_refs metadata. The overall author instruction does
+not require future expansion chapters/scenes to be embedded in a blueprint or
+missing future batches to exist in a current expansion. Final-book checking
+still requires the complete planned grid and all refs. Real current-stage gaps
+and contradictions remain blocking; no historical report is reclassified.

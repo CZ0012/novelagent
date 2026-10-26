@@ -28,7 +28,7 @@ def test_existing_plan_prompt_bytes_outside_approved_proof_paragraph_are_unchang
     plan = _system_prompt("zh-CN", "plan")
     before, added = plan.split("For every CENTRAL CLAIMED RESOLUTION", 1)
     _, after = added.split("For each CausalLink", 1)
-    assert content_hash(before + "For each CausalLink" + after) == "c7fcf3bfd26131b897552bbb3c0acf86d500bbefbc6b77d6de19f91caa55e941"
+    assert content_hash(before + "For each CausalLink" + after) == "594baeaa5b5f09583d1e422d9a26a644483e592166200f27d6e6ae086d978cc3"
 
 
 @pytest.mark.parametrize("finding,severity,expected", [("required_gap", "medium", "needs_revision"),
