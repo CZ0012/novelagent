@@ -30,6 +30,7 @@ def test_model_facing_schema_retains_parser_shape_with_only_exact_transport_vari
     original.pop("allOf")
     original["properties"].pop("evidence_registry_id")
     original["$defs"]["GenerationReviewIssue"]["properties"]["evidence"]["items"] = items[0]
+    original["$defs"]["GenerationReviewIssue"].pop("allOf")
     assert original == base
     assert base["additionalProperties"] is False
     assert all(v["additionalProperties"] is False for v in schema["$defs"].values())
@@ -75,7 +76,7 @@ def test_explicit_schema_does_not_accept_unknown_extra_fields_or_status_reason(g
 def test_schema_is_bounded_and_complete_plan_payload_and_registry_budgets_are_preserved():
     registry = {f"E{i}": {} for i in range(1, MAX_EVIDENCE_SOURCES+1)}
     schema = semantic_review_output_schema(registry=registry, registry_id="review_request_123456789012")
-    assert len(canonical_json(schema)) < 22000
+    assert len(canonical_json(schema)) < 40000
     value = plan_target(text=canonical_json({"full_content": "中"*140000, "tail": "完整结尾。"}))
     class Capture:
         def generate(self, request):

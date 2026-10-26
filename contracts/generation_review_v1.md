@@ -418,3 +418,14 @@ including status_reason are still invalid at output, issue and evidence levels.
 Full target/plan, canon, style and registry inputs remain present under their
 existing budgets; no source is dropped to add the schema. Report shape and
 freshness are unchanged, and no old failed response is replayed or salvaged.
+
+
+The advertised issue schema additionally reflects the existing style grounding
+rule: when dimension=style_constraint, evidence must contain at least one target
+and one style citation. Each may use canonical kind/ref/quote or an exact alias
+whose registered source has the corresponding kind. A target copy of an author
+brief is not a style source; no alias is remapped or inferred. Empty registries
+still permit valid canonical pairs, and nonstyle issue shapes remain unchanged.
+The kind-specific alias enums partition the existing bounded registry, keeping
+the complete advertised schema bounded. This changes only model-facing schema
+guidance; strict parser/grounding acceptance and historical reports are unchanged.

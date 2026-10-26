@@ -187,3 +187,8 @@ Use generation_review_v1 phase guidance from existing validated current_plan.pha
 ## Explicit critic output schema
 
 Semantic review user messages include output_schema derived from the existing strict SemanticReviewOutput model, with only supported transport variants: canonical evidence or a strict current-registry source_id alias, and an optional exact request-nonce const required for aliases. Existing registry bounds constrain the alias enum. This is model-facing message data, not a provider protocol, report model or parser change. Extra fields such as status_reason remain invalid everywhere; preserve strict tokens, exact grounding, scope/coverage, complete input delivery and freshness. Never salvage an old invalid response or claim offline wire tests establish model compliance.
+
+
+## Advertised style citation requirement
+
+The critic output_schema reflects the existing style_constraint evidence rule: require target plus style, each as canonical evidence or an exact registered alias of that kind. A target author_brief copy never becomes style authority. Empty registries support canonical pairs; nonstyle shapes and all runtime validators remain unchanged. Kind-specific enums stay bounded by the existing registry; never remap missing/wrong-kind aliases, relax evidence, retry automatically or salvage failed historical responses. Verify with an existing standard JSON Schema validator when available; do not add a runtime dependency solely for these tests.

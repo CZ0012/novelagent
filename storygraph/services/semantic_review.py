@@ -247,6 +247,21 @@ def semantic_review_output_schema(*, registry, registry_id):
                 "evidence": {"contains": {"required": ["source_id"]}}
             }}}
         }}, "then": {"required": ["evidence_registry_id"]}}]
+    # Reflect the existing style grounding rule for either supported citation form.
+    def kind_selector(kind):
+        variants = [{"type": "object", "required": ["kind"],
+                     "properties": {"kind": {"const": kind}}}]
+        aliases = [key for key, source in registry.items() if source.get("kind") == kind]
+        if aliases:
+            variants.append({"type": "object", "required": ["source_id"],
+                             "properties": {"source_id": {"enum": aliases}}})
+        return {"anyOf": variants}
+    schema["$defs"]["GenerationReviewIssue"]["allOf"] = [{
+        "if": {"required": ["dimension"], "properties": {"dimension": {"const": "style_constraint"}}},
+        "then": {"properties": {"evidence": {"allOf": [
+            {"contains": kind_selector("style")}, {"contains": kind_selector("target")},
+        ]}}},
+    }]
     return schema
 
 
