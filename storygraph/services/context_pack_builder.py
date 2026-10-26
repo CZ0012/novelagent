@@ -445,7 +445,10 @@ class ContextPackBuilder:
                 gap("missing_scene_plan_relation")
         if outcome is None and emotional is None and length is None and not causes and not actions:
             return None
-        return ApprovedScenePlan(planned_outcome=outcome, emotional_turn=emotional,
+        # Summary cannot create approval/plan eligibility for a legacy scene.
+        # Only an already-present plan receives its exact current-scene summary.
+        summary = text(scene.properties, "summary")
+        return ApprovedScenePlan(planned_summary=summary, planned_outcome=outcome, emotional_turn=emotional,
             target_length=length, causal_preconditions=causes, foreshadowing_actions=actions)
 
     @staticmethod

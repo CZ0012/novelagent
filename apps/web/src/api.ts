@@ -12,7 +12,7 @@ export type TemporalStateProjection = { contract_version: "temporal_state_v1"; p
 export type TemporalStatePatch = { contract_version: "temporal_state_v1"; field: TemporalStateField; value: string | null; valid_from_scene: string; expected_slot_fingerprint: string; source_text_sha256: string; action?: "assert" | "correct"; supersedes_assertion_id?: string | null };
 
 export type ApprovedScenePlan = {
-  semantics: "approved_plan_not_realized_facts"; planned_outcome: string | null; emotional_turn: string | null; target_length: number | null;
+  semantics: "approved_plan_not_realized_facts"; planned_summary?: string | null; planned_outcome: string | null; emotional_turn: string | null; target_length: number | null;
   causal_preconditions: Array<{ scene_id: string; relation_id: string; planned_summary: string | null; planned_outcome: string | null }>;
   foreshadowing_actions: Array<{ id: string; relation_id: string; action: "seed" | "payoff"; clue_text: string | null; planned_payoff: string | null; seed_scene_ids: string[]; do_not_reveal_payoff: boolean }>;
 };

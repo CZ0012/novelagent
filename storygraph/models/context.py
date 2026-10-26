@@ -81,6 +81,7 @@ class PlannedForeshadowingAction(ContractModel):
 
 class ApprovedScenePlan(ContractModel):
     semantics: Literal["approved_plan_not_realized_facts"] = "approved_plan_not_realized_facts"
+    planned_summary: str | None = Field(default=None, max_length=4000)
     planned_outcome: str | None = Field(default=None, max_length=4000)
     emotional_turn: str | None = Field(default=None, max_length=4000)
     target_length: int | None = Field(default=None, ge=1, le=2000000)

@@ -106,8 +106,23 @@ the same entry boundary instead of leaking a through-scene SUSPECTS edge.
 `scene_plan` carries semantic author-approved planning metadata with
 `semantics = approved_plan_not_realized_facts`. It is not realized canon state,
 proof a predecessor was written, or a literal phrase list. Optional fields are
-`planned_outcome`, `emotional_turn`, and positive integer `target_length`.
+`planned_summary`, `planned_outcome`, `emotional_turn`, and positive integer `target_length`.
 Missing fields are not guessed, copied from prose or written back to Graph Store.
+
+Optional `planned_summary` (null or at most 4,000 characters) projects only the
+exact current approved Scene's `summary`, after the existing plan-eligibility
+decision. A legacy Scene summary alone never creates a scene plan; absent/old
+plan payloads remain compatible. It does not copy a Chapter summary, future
+Scene summary, whole-book synopsis or imported prose. Malformed/oversized
+summary on an existing plan creates a critical gap rather than truncation.
+The complete field is protected P0 context under the same budget policy.
+
+The writer must realize explicit current-plan times, departures and actions,
+not treat them as already realized canon. Connecting description/dialogue is
+allowed, but expanding prose must not invent unplanned major evidence retrieval
+or secret/identity disclosure; another character's knowledge is not permission
+to reveal it to the POV at an arbitrary time. This additional input/guidance
+does not prove that a model follows every beat or eliminate all leakage risk.
 
 `causal_preconditions` contains at most 30 DIRECT incoming CANON CAUSES edges
 marked `planning_only = true`, each with exact stable source Scene ID, relation

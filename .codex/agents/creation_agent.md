@@ -205,3 +205,12 @@ from true graph references only under bound Scene/Project blueprint identity.
 Keep stored IDs and project/PLAN fingerprints unchanged; resolve plan semantics
 through scoped reviewed edges. Missing/mismatched links and real chapter, POV,
 location, previous-scene, style, required/custom references must still fail closed.
+
+Current planned_summary is optional protected P0 context only after existing
+scene-plan eligibility: exact current approved Scene.summary, never Chapter,
+future scene, imported prose or a legacy-summary approval shortcut. Preserve
+None/legacy compatibility; malformed/over-budget approved plan data blocks full
+drafting without truncation. Writing must honor planned times/departures/actions
+and cannot invent major evidence acquisition or secret/identity disclosure for
+padding. Plans remain intentions, not realized knowledge or canon. Capture
+checks prove delivery, not live-model compliance or universal leakage prevention.

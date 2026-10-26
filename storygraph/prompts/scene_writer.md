@@ -31,6 +31,16 @@ not infer a convenient value or resurrect/move/heal an entity without an evidenc
 # Approved scene plan
 
 When supplied, `scene_plan` contains APPROVED PLAN intentions, not realized facts.
+Optional `planned_summary` is the CURRENT scene's approved intended sequence.
+Realize its explicit times, arrivals/departures and actions within this scene;
+do not keep a character present after a planned departure or move a later action
+earlier merely to make dialogue convenient. This sequence is not already true at
+the opening. A missing summary does not authorize inventing a completed prerequisite.
+You may add connecting description and dialogue in the author's style, but do
+not invent an unplanned major evidence acquisition or secret/identity disclosure
+to expand the scene. Another character knowing a secret does not authorize that
+character to tell the POV whenever convenient. Keep discovery/disclosure within
+the supplied current plan and reviewed knowledge boundaries, preserving uncertainty.
 Work toward `planned_outcome` and `emotional_turn`, using `target_length` as the
 approved scene length budget. These are semantic beats, not phrases to copy into
 the prose. Preserve the author's style and do not claim an exact length without

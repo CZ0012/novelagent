@@ -22,6 +22,29 @@ describe("author-visible context evidence", () => {
     const html = renderToStaticMarkup(<ContextEvidence pack={pack()} labels={{ previous: "码头来信", clue: "封蜡线索" }} />);
     expect(html).toContain("已批准的场景写作计划"); expect(html).toContain("不代表事件已经发生"); expect(html).toContain("林舟发现封蜡上的暗记"); expect(html).toContain("警觉"); expect(html).toContain("2500"); expect(html).toContain("码头来信"); expect(html).toContain("只埋设线索"); expect(html).not.toContain("此处不能显示的未来回收"); expect(html).toContain("cause-edge");
   });
+  it("shows optional current scene beats in the approved plan without translating author text", async () => {
+    const data = pack(); data.scene_plan!.planned_summary = "13:21:40同伴离场；主角仍在门槛前核对铅封。";
+    data.canon_entities!.push({ id: "future-chapter", type: "Chapter", properties: { summary: "后卷才揭露的真相不能补进这里" } });
+    const chinese = renderToStaticMarkup(<ContextEvidence pack={data} />);
+    expect(chinese).toContain("当前场景规划摘要"); expect(chinese).toContain(data.scene_plan!.planned_summary);
+    expect(chinese).toContain("不代表事件已经发生"); expect(chinese).not.toContain("后卷才揭露的真相不能补进这里");
+    await activateLocale("en-US");
+    const english = renderToStaticMarkup(<ContextEvidence pack={data} />);
+    expect(english).toContain("Current scene plan summary"); expect(english).toContain(data.scene_plan!.planned_summary);
+    expect(english).toContain("not evidence that events already happened");
+  });
+  it("keeps missing or null summaries explicit and never upgrades a legacy summary to a plan", () => {
+    const data = pack();
+    const missing = renderToStaticMarkup(<ContextEvidence pack={data} />);
+    expect(missing).toContain("<dt>当前场景规划摘要</dt><dd>未列出（不额外推断）</dd>");
+    data.scene_plan!.planned_summary = null;
+    expect(renderToStaticMarkup(<ContextEvidence pack={data} />)).toContain("<dt>当前场景规划摘要</dt><dd>未列出（不额外推断）</dd>");
+    data.scene_plan = null;
+    data.canon_entities!.push({ id: "legacy-scene", type: "Scene", properties: { summary: "只有摘要并不代表已有批准计划" } });
+    const legacy = renderToStaticMarkup(<ContextEvidence pack={data} />);
+    expect(legacy).toContain("未提供已批准的场景计划"); expect(legacy).not.toContain("只有摘要并不代表已有批准计划");
+    expect(legacy).not.toContain("<dt>当前场景规划摘要</dt>");
+  });
   it("distinguishes entry knowledge and suspicion, using the actual snapshot names and style evidence", () => {
     const html = renderToStaticMarkup(<ContextEvidence pack={pack()} labels={{ hero: "较新名称", suspected: "可疑账本" }} />);
     expect(html).toContain("场景开始时的知识边界"); expect(html).toContain("林舟"); expect(html).not.toContain("较新名称"); expect(html).toContain("明确未知"); expect(html).toContain("雾城的来历"); expect(html).toContain("怀疑"); expect(html).toContain("可疑账本"); expect(html).toContain("未列出（不额外推断）");
