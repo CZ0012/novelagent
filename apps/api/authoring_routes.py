@@ -168,6 +168,17 @@ def register_authoring_routes(
         runtime = settings_for_task(settings, "continuity")
         kwargs = {"style_rubric": rubric, "banned_phrases": style.get("banned_patterns", []),
                   "preset_text": runtime.agent_preset.system_prompt}
+        if target.purpose == "plan":
+            from storygraph.services.longform_planning import parse_longform, _parent
+            proposal = proposal_store.get(target.target_id, version=target.target_version)
+            plan = parse_longform(proposal.body)
+            guard = getattr(graph, "persistence_guard", None)
+            with guard() if callable(guard) else nullcontext(), proposal_store._lock:
+                # Reuse exact original-request/parent validation; never parse authority from target prose.
+                manual_longform_review_text(graph=graph, store=proposal_store,
+                    project_id=target.project_id, proposal=proposal, plan=plan)
+                kwargs["author_brief"] = (plan.request.instruction if plan.phase == "blueprint"
+                    else _parent(proposal_store, target.project_id, plan.request)[1].request.instruction)
         return canon, kwargs, runtime, gaps
 
     def error_response(exc):

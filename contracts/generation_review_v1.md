@@ -351,3 +351,30 @@ For autonomous expansion batches, the review projection includes the shared
 whole-volume progress (for example current chapters 1–5, total 20, remaining
 6–20). The critic checks pacing against that scope without treating a partial
 batch as the entire volume or confusing partial proof with final resolution.
+
+
+### Trusted plan author brief
+
+PLAN semantic review may receive an explicit `author_brief` from the frozen
+PlanningRun request instruction, or the validated original manual blueprint
+request (manual expansion uses its exact accepted/applied parent request).
+This optional service argument is a nonblank string of at most 12000 characters,
+allowed only for plan-purpose review. It is never inferred from generated target
+text, a target field named author_brief, or model-authored prose. It is exposed
+as `style_sources.author_brief`; matching style findings still require exact
+target evidence plus an applicable kind=style citation. A target copy of the
+brief cannot substitute for style authority.
+
+The explicit brief is included in style freshness fingerprints only when
+provided. Omission/null preserves the historical fingerprint exactly. Changes,
+addition or removal invalidate the corresponding report; all plan read/apply
+gates resolve the same trusted input. Old failed results are never replayed or
+recertified; prior plan reports without the newly supplied authority require
+fresh review. Scene/default paths do not acquire this authority.
+
+The bounded convenience registry registers style sources, then scoped canon,
+then target segments, retaining original ordering within each group. The
+2000-entry/180000-character limits and explicit omission coverage remain. Full
+target text/parsed plan is still sent; exact canonical quotes remain supported
+when aliases omit a segment. Token binding, exact IDs/quotes, coverage and all
+blocking rules remain unchanged.

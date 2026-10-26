@@ -340,3 +340,11 @@ and budget failures, explicit review gates, concurrent apply, snapshot staleness
 atomic graph failure, restart recovery and missing evidence. These tests prove
 the planning workflow and safety boundaries, not literary quality or absolute
 absence of plot contradictions.
+
+
+Manual plan semantic reviews use the validated immutable original request
+instruction as a trusted author-brief style source. Expansion reviews use the
+exact accepted/applied parent blueprint request. Generated target fields cannot
+replace that authority. Read/apply freshness resolves the same source and follows
+generation_review_v1; historical reports lacking it may require explicit fresh
+review, without replay or automatic paid calls.

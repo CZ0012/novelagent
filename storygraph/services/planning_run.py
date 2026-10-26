@@ -589,7 +589,8 @@ class PlanningRunService:
         canon = canon.model_copy(update={"scope": "plan", "missing_context": gaps, "complete": not gaps})
         blueprint = branch_from_ref(self.proposals, run.steps[0].proposal_ref).blueprint
         style = blueprint.style_brief
-        return canon, {"style_rubric": style.rubric, "banned_phrases": style.banned_patterns}
+        return canon, {"style_rubric": style.rubric, "banned_phrases": style.banned_patterns,
+                       "author_brief": run.request.instruction}
 
     def review(self, project_id, run_id, review_id):
         run = self.get(project_id, run_id)
@@ -715,6 +716,17 @@ class PlanningRunService:
                 self._worker_tokens.pop(run_id, None)
 
     def _finish_book(self, run):
+        # Cached passing labels cannot certify a bundle after review inputs change.
+        # Pause without migrating reports or automatically scheduling paid rechecks.
+        for step in run.steps:
+            if step.status != "passed" or step.review_id is None:
+                return self._pause(run.id, "review_failed")
+            try:
+                checked = self.review(run.project_id, run.id, step.review_id)
+            except GraphStoreError:
+                return self._pause(run.id, "review_failed")
+            if checked["report"]["status"] != "pass" or not checked["current"]:
+                return self._pause(run.id, "review_failed")
         if run.final_review_id is None:
             target = self._review_target(run)
             canon, style = self._review_inputs(run)
@@ -736,7 +748,8 @@ class PlanningRunService:
                 return run
             if report.status != "pass":
                 return self._pause(run.id, "review_failed")
-        elif self.runs.report(run.id, run.final_review_id).status != "pass":
+        elif (self.runs.report(run.id, run.final_review_id).status != "pass"
+                or not self.review(run.project_id, run.id, run.final_review_id)["current"]):
             return self._pause(run.id, "review_failed")
         paused = self._check(run)
         if paused:

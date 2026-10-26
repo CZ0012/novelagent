@@ -290,3 +290,18 @@ and before first bundle application. Existing completed application receipts
 retain their documented idempotent retry behavior. This mechanism preserves
 unaccepted authored work; it does not accept children or guarantee semantic
 correctness, and the new reviews/repairs still consume the normal bounded budget.
+
+
+Plan critics receive the immutable run.request.instruction as an explicit trusted
+author-brief style source under generation_review_v1. Per-step, final-book,
+report-currentness and human-apply audits use the same source and fingerprint.
+Historical reports without it remain unchanged and become stale for these
+current plan gates; no automatic retry, budget reset or retroactive pass occurs.
+
+Before any final-book review call, every passed step must also have a current
+passing report. Cached final-book reports must be current and passing before a
+ready bundle can be created. Failure pauses with review_failed, preserving
+reports, refs, call reservations and history; it never schedules paid refreshes.
+Existing explicit restart with retained later sources can obtain fresh reviews,
+but may revise/regenerate the chosen starting stage. No new automatic migration
+or recovery API is implied. Human apply independently checks current reports.

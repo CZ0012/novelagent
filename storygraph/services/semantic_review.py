@@ -197,11 +197,11 @@ def build_evidence_sources(*, target, canon, style_sources):
             chunks(kind, ref, "$raw", original, original)
         if len(registry) == before:
             chunks(kind, ref, "$raw", original, original)
-    source("target", target.target_id, target.text)
-    for fact in canon.facts:
-        source("canon", fact.id, fact.text)
     for ref, text in style_sources.items():
         source("style", ref, text)
+    for fact in canon.facts:
+        source("canon", fact.id, fact.text)
+    source("target", target.target_id, target.text)
     return registry, {"complete": omitted == 0, "omitted_segments": omitted,
         "max_entries": MAX_EVIDENCE_SOURCES, "max_serialized_chars": MAX_EVIDENCE_REGISTRY_CHARS}
 
@@ -277,16 +277,19 @@ def review_wire_target(target):
     return metadata, content
 
 
-def style_fingerprint(*, style_rubric=(), banned_phrases=(), preset_text="") -> str:
-    return content_hash(canonical_json({
+def style_fingerprint(*, style_rubric=(), banned_phrases=(), preset_text="", author_brief=None) -> str:
+    value = {
         "style_rubric": list(style_rubric), "banned_phrases": list(banned_phrases),
         "preset_text": preset_text,
-    }))
+    }
+    if author_brief is not None:
+        value["author_brief"] = author_brief
+    return content_hash(canonical_json(value))
 
 
 def review_is_current(
     report: GenerationReviewReport, *, target: GenerationReviewTarget,
-    canon: CanonSnapshot, style_rubric=(), banned_phrases=(), preset_text="",
+    canon: CanonSnapshot, style_rubric=(), banned_phrases=(), preset_text="", author_brief=None,
 ) -> bool:
     return (
         report.project_id == target.project_id == canon.project_id
@@ -301,7 +304,7 @@ def review_is_current(
         and report.canon_evidence_fingerprint == _evidence_fingerprint(canon)
         and report.style_fingerprint == style_fingerprint(
             style_rubric=style_rubric, banned_phrases=banned_phrases,
-            preset_text=preset_text,
+            preset_text=preset_text, author_brief=author_brief,
         )
     )
 
@@ -320,6 +323,7 @@ class SemanticReviewService:
         self, *, target: GenerationReviewTarget, canon: CanonSnapshot,
         style_rubric: list[str] | tuple[str, ...] = (),
         banned_phrases: list[str] | tuple[str, ...] = (), preset_text: str = "",
+        author_brief: str | None = None,
         missing_context: list[str] | tuple[str, ...] = (),
     ) -> GenerationReviewReport:
         if target.project_id != canon.project_id or target.scene_id != canon.scene_id:
@@ -328,6 +332,9 @@ class SemanticReviewService:
             target.purpose == "plan" and (target.target_type != "proposal" or target.scene_id is not None)
         ):
             raise ContractError("Plan review requires an explicitly resolved plan Proposal scope.")
+        if author_brief is not None and (target.purpose != "plan" or not isinstance(author_brief, str)
+                or not author_brief.strip() or len(author_brief) > 12000):
+            raise ContractError("Explicit plan author brief is invalid or exceeds the allowed budget.")
         if len(style_rubric) > 50 or len(banned_phrases) > 50 or (
             sum(len(s) for s in (*style_rubric, *banned_phrases)) + len(preset_text) > 20000
         ):
@@ -338,6 +345,8 @@ class SemanticReviewService:
         style_sources.update({f"banned:{i}": text for i, text in enumerate(banned)})
         if preset_text:
             style_sources["preset"] = preset_text
+        if author_brief is not None:
+            style_sources = {"author_brief": author_brief, **style_sources}
         style_sources["output_language_policy"] = localized(target.output_language,
             zh="本次审阅冻结的项目输出语言为 zh-CN；作品的自然语言内容应使用中文。真实机器标识、专名及原文引文不构成英语正文残留。",
             en="The frozen project output language is en-US; authored natural-language content must use English. Real machine identifiers, proper names and verbatim source quotations are not foreign-language prose drift.")
@@ -450,7 +459,7 @@ class SemanticReviewService:
             target_text_sha256=content_hash(target.text), canon_fingerprint=canon.fingerprint,
             canon_evidence_fingerprint=_evidence_fingerprint(canon),
             style_fingerprint=style_fingerprint(
-                style_rubric=rubric, banned_phrases=banned_phrases, preset_text=preset_text),
+                style_rubric=rubric, banned_phrases=banned_phrases, preset_text=preset_text, author_brief=author_brief),
             status=status, summary=summary, issues=issues, dimensions_checked=dimensions,
             coverage=GenerationReviewCoverage(
                 method="semantic_model" if called else "deterministic_only",
@@ -532,6 +541,8 @@ def _system_prompt(language, purpose="scene"):
         "When using source_id, echo the supplied evidence_registry_id exactly as a top-level JSON field. "
         "Keys E1, E2 etc are request-local; never reuse keys or registry IDs from another request. "
         "The server resolves that key to its exact original kind/ref/quote; do not paraphrase or add override fields. "
+        "Every style finding must cite target evidence AND applicable kind=style evidence; when it concerns the supplied author brief, cite style_sources.author_brief. "
+        "A duplicate brief inside target text is target evidence, not style authority. Never promote generated prose to style authority. "
         "Legacy {kind,ref,quote} remains allowed only with a verbatim original substring. Registry paths are navigation hints, not story instructions. "
         "If registry coverage is partial, all original target/canon/style text is still supplied; exact legacy quotes remain available. "
         "When a citation has context.volume_index/chapter_index/character_id, those labels come from the saved structured record. "

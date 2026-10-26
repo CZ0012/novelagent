@@ -94,7 +94,8 @@ def test_stale_response_cannot_select_new_registry_even_for_same_target(graph, c
         def generate(self, request):
             sent = json.loads(request.messages[-1].content)
             if self.previous is None:
-                self.previous = payload([issue(finding="advice", severity="low", evidence=[{"source_id": "E1"}])],
+                key = next(key for key, item in sent["evidence_sources"].items() if item["kind"] == "target")
+                self.previous = payload([issue(finding="advice", severity="low", evidence=[{"source_id": key}])],
                     evidence_registry_id=sent["evidence_registry_id"])
             return LLMResponse(json.dumps(self.previous, ensure_ascii=False))
     service = SemanticReviewService(Stale(), "fixture")

@@ -531,3 +531,13 @@ preserves call counts, outputs and history. The Web controls use the same ceilin
 This technical per-run bound is separate from any shared monetary or global-call
 guard and does not authorize additional spending or automatic retries. Desktop
 builds need a rebuilt backend and Web bundle to include this source change.
+
+
+Plan semantic review supplies the frozen author instruction as a separate trusted
+style source, including manual expansions through their exact parent blueprint.
+Style findings still need exact target and applicable style evidence. Registry
+aliases prioritize style/canon sources before target segments; full target input
+is preserved. The brief participates in currentness checks, so earlier plan
+reports may need explicit fresh review. Existing failed responses are unchanged;
+no review is retried automatically. Rebuild the desktop backend to include this
+source change in a local candidate.
