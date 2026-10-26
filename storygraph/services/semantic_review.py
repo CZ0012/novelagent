@@ -230,6 +230,26 @@ def resolve_evidence_sources(payload, registry, *, registry_id=None):
     return resolved
 
 
+def semantic_review_output_schema(*, registry, registry_id):
+    """Model-facing transport shape only; local parsing/grounding remain authoritative."""
+    schema = SemanticReviewOutput.model_json_schema()
+    schema["properties"]["evidence_registry_id"] = {"type": "string", "const": registry_id}
+    evidence = schema["$defs"]["GenerationReviewIssue"]["properties"]["evidence"]
+    if registry:
+        evidence["items"] = {"anyOf": [evidence["items"], {
+            "type": "object", "additionalProperties": False,
+            "properties": {"source_id": {"type": "string", "enum": list(registry)}},
+            "required": ["source_id"],
+        }]}
+        # Exact canonical-only output can omit the nonce; any compact alias cannot.
+        schema["allOf"] = [{"if": {"required": ["issues"], "properties": {
+            "issues": {"contains": {"required": ["evidence"], "properties": {
+                "evidence": {"contains": {"required": ["source_id"]}}
+            }}}
+        }}, "then": {"required": ["evidence_registry_id"]}}]
+    return schema
+
+
 def decoded_plan_content(target):
     """Lossless structured view only; ambiguous JSON retains the legacy raw path."""
     if target.purpose != "plan":
@@ -395,6 +415,8 @@ class SemanticReviewService:
                             "missing_context": list(gaps),
                             "evidence_sources": evidence_sources,
                             "evidence_registry_id": evidence_registry_id,
+                            "output_schema": semantic_review_output_schema(
+                                registry=evidence_sources, registry_id=evidence_registry_id),
                             "evidence_registry_coverage": registry_coverage,
                         })),
                     ],
@@ -537,6 +559,8 @@ def _system_prompt(language, purpose="scene"):
         '"description":"...","suggestion":"...","evidence":[{"source_id":"exact supplied evidence_sources key"}]}]}. '
         "For scene review every nonstyle issue needs an exact target quote plus an exact canon "
         "quote with a supplied canon ID. "
+        "Follow the supplied output_schema exactly for the accepted JSON shape; additional fields such as status_reason are not supported. "
+        "The schema describes transport shape only; all evidence, scope, coverage and semantic rules still apply. "
         "PREFER evidence entries containing ONLY {\"source_id\":\"an exact supplied evidence_sources key\"}. "
         "When using source_id, echo the supplied evidence_registry_id exactly as a top-level JSON field. "
         "Keys E1, E2 etc are request-local; never reuse keys or registry IDs from another request. "

@@ -174,3 +174,8 @@ Follow generation_review_v1: optional explicit author_brief is PLAN-only, nonbla
 ## Plan critic phase scope
 
 Use generation_review_v1 phase guidance from existing validated current_plan.phase, manual top-level phase, or final review_scope/exact_refs. Blueprint checks world/entities/rules/arcs, volumes and grid/length budgets; individual chapters/scenes belong to later expansion batches. Expansion checks its current batch and blueprint/prior alignment, not the existence of future batches. Final-book review still requires the complete grid and all exact refs. The frozen author brief describes the workflow goal across phases. Never use prose guesses to invent phase metadata, suppress real current-phase prerequisites/upstream contradictions, relax evidence/coverage or recertify an old failed report. Prompt capture tests verify transport/guidance only, not live model quality.
+
+
+## Explicit critic output schema
+
+Semantic review user messages include output_schema derived from the existing strict SemanticReviewOutput model, with only supported transport variants: canonical evidence or a strict current-registry source_id alias, and an optional exact request-nonce const required for aliases. Existing registry bounds constrain the alias enum. This is model-facing message data, not a provider protocol, report model or parser change. Extra fields such as status_reason remain invalid everywhere; preserve strict tokens, exact grounding, scope/coverage, complete input delivery and freshness. Never salvage an old invalid response or claim offline wire tests establish model compliance.

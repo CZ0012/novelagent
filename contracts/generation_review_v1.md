@@ -397,3 +397,24 @@ guess introduces a phase, and no new transport field is required. Actual missing
 current-phase prerequisites, upstream contradictions, proof sufficiency, strict
 evidence and coverage checks remain. This prompt guidance neither certifies old
 failed judgments nor proves model performance; new review remains explicit.
+
+
+### Model-facing output schema
+
+Each semantic critic user message includes output_schema, freshly derived from
+SemanticReviewOutput.model_json_schema(). It retains the model's existing
+required fields, bounds, enums and strict additionalProperties=false objects.
+The only transport additions describe already-supported exact wire forms:
+optional top-level evidence_registry_id is a string const for this request;
+evidence items may be canonical kind/ref/quote or an object containing only
+source_id selected from the current bounded registry. A schema conditional
+requires the nonce when any alias occurs. Canonical-only output may still omit
+it. The registry's existing 2000-entry bound also bounds the alias enum/schema.
+
+This is message data and prompt guidance, not a provider protocol/response-format
+change or a new validator. Local strict parsing, token matching, grounding,
+coverage and semantic checks remain authoritative. Unsupported extra fields
+including status_reason are still invalid at output, issue and evidence levels.
+Full target/plan, canon, style and registry inputs remain present under their
+existing budgets; no source is dropped to add the schema. Report shape and
+freshness are unchanged, and no old failed response is replayed or salvaged.

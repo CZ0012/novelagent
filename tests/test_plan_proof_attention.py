@@ -19,7 +19,7 @@ def test_only_plan_prompt_adds_general_resolution_entailment_and_source_identity
         "a sealed original cannot silently be overwritten", "report, upload and export timestamps",
         "flashbacks/nonlinear narration", "do not guess chronology"):
         assert text in plan
-    assert content_hash(_system_prompt("zh-CN", "scene")) == "8130df330fa821302c74e1f65b048127001df53e94c27b42e04d3cd0a9e819ff"
+    assert content_hash(_system_prompt("zh-CN", "scene")) == "b5acd79bb34d653834d8567de77622a22745c061f117668575613a3853724a73"
     assert "CENTRAL CLAIMED RESOLUTION" not in _system_prompt("zh-CN", "unknown")
     assert "13:44" not in plan and "压力曲线" not in plan
 
@@ -28,7 +28,7 @@ def test_existing_plan_prompt_bytes_outside_approved_proof_paragraph_are_unchang
     plan = _system_prompt("zh-CN", "plan")
     before, added = plan.split("For every CENTRAL CLAIMED RESOLUTION", 1)
     _, after = added.split("For each CausalLink", 1)
-    assert content_hash(before + "For each CausalLink" + after) == "594baeaa5b5f09583d1e422d9a26a644483e592166200f27d6e6ae086d978cc3"
+    assert content_hash(before + "For each CausalLink" + after) == "bcd9aad918372d56f16ccac03a15667ef1529a92a64927bea4afd61220384ea2"
 
 
 @pytest.mark.parametrize("finding,severity,expected", [("required_gap", "medium", "needs_revision"),
