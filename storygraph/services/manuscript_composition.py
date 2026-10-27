@@ -516,15 +516,16 @@ def apply_composition(
                     chapter_id,
                     scene_id,
                 )
-                if previous:
-                    expected_relations[slug_id("rel", f"{previous}_NEXT_SCENE_{scene_id}")] = (
-                        "NEXT_SCENE",
-                        previous,
-                        scene_id,
-                    )
                 previous = scene_id
                 n += 1
         if completed_graph:
+            # Existing composition receipts retain their original structure.
+            # Composition has no reviewed timeline intervals, so new applies
+            # create navigation previous_scene_id without world NEXT_SCENE.
+            for event in events:
+                p = event.payload
+                if event.operation == "create_relation" and event.source_ref == source_ref and p.get("type") == "NEXT_SCENE":
+                    expected_relations[event.target] = ("NEXT_SCENE", p["source_id"], p["target_id"])
             if existing != expected_nodes:
                 raise _error("Incomplete composition structure evidence.")
             for node_id, (node_type, properties) in expected_properties.items():
@@ -720,6 +721,7 @@ def apply_composition(
                             "source_composition_proposal_id": proposal.id,
                         },
                         previous_scene_id=previous,
+                        link_world_previous=False,
                         reviewer=request.reviewer,
                         rationale=request.rationale,
                         source_ref=source_ref,

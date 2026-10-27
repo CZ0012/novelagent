@@ -303,7 +303,7 @@ it does not prohibit an author from saving manual Drafts or silently change
 legacy projects.
 
 Expansion application creates only new Chapter/Scene nodes, `HAS_CHAPTER`,
-`HAS_SCENE`, consecutive `NEXT_SCENE`, planned `CAUSES`, `SEEDED_IN` and
+`HAS_SCENE`, interval-proven `NEXT_SCENE` world chronology, planned `CAUSES`, `SEEDED_IN` and
 `PAID_OFF_IN` relationships. Plan-specific causal/clue edges carry
 `planning_only=true`; they do not assert that unwritten events occurred.
 Chapter volume grouping uses `Chapter.volume_index`/`volume_title`; no Volume
@@ -348,3 +348,28 @@ exact accepted/applied parent blueprint request. Generated target fields cannot
 replace that authority. Read/apply freshness resolves the same source and follows
 generation_review_v1; historical reports lacking it may require explicit fresh
 review, without replay or automatic paid calls.
+
+
+## Narrative order and reliable world chronology
+
+Chapter/scene list positions and `previous_scene_id` retain narrative/editor order;
+these are not proof that every event in the preceding narrative Scene occurred
+before the next Scene opens. `causal_dependencies` creates planning-only CAUSES
+links, not an all-events temporal precedence grant. Explicitly framed parallel
+or nonlinear narration is valid.
+
+New single-expansion and whole-book application may derive world NEXT_SCENE
+relations only from accepted, deterministically parseable `timeline_position`
+intervals that prove strict nonoverlap in story time. They may connect reliably
+earlier/later Scenes across narrative slots; overlap, equal uncertain boundaries,
+unsupported text or incompatible time anchors must not acquire guessed order.
+No model infers dates, and slot/chapter indexes never fill a missing timestamp.
+The interval grammar and evidence/invalidation rules are in temporal_state_v1.
+
+This changes application/read projection, not generated Proposal schemas,
+planning prompts, scene-grid validation or semantic-review wire formats.
+Actual model facts must omit untrustworthy automatic NEXT_SCENE even when the
+long-form service consumes the default project snapshot; raw canonical hashing
+remains unchanged. An
+unapplied Project-only PLAN snapshot must retain its prior canonical fingerprint.
+Already accepted proposal bodies and old review results are never rewritten.

@@ -834,8 +834,6 @@ def _specs(graph, store, proposal, plan, *, replay=False):
                               "style_profile_id": graph_plan_id(parent_id, "style", "profile")})
                 node("Scene", scene_id, props)
                 relation("HAS_SCENE", chapter_id, scene_id)
-                if last_scene:
-                    relation("NEXT_SCENE", graph_plan_id(parent_id, "scene", last_scene), scene_id)
                 for dependency in scene.causal_dependencies:
                     source = graph_plan_id(parent_id, "scene", dependency)
                     if source not in nodes and source not in graph.nodes:
@@ -845,6 +843,22 @@ def _specs(graph, store, proposal, plan, *, replay=False):
                     for ref in refs:
                         relation(kind, graph_plan_id(parent_id, "foreshadowing", ref), scene_id, {"planning_only": True})
                 last_scene = scene.id
+        from storygraph.services.scene_chronology import automatic_scene_links, PROOF_KEY
+        if replay:
+            # Historical application receipts remain immutable, including old
+            # narrative links. The reliable world view filters their authority.
+            prefix = f"proposal:{proposal.id}:longform:"
+            for event in graph.event_log.list():
+                p = event.payload
+                if event.operation == "create_relation" and event.source_ref.startswith(prefix) and p.get("type") == "NEXT_SCENE":
+                    relations[event.target] = ("NEXT_SCENE", p["source_id"], p["target_id"], p["properties"])
+        else:
+            scene_props = {n.id: n.properties for n in graph.nodes.values() if n.type == "Scene" and n.status == "CANON"
+                           and n.properties.get("project_id") == project_id and n.properties.get("longform_blueprint_id") == parent_id}
+            new_scenes = {ref: props for ref, (kind, props) in nodes.items() if kind == "Scene"}
+            scene_props.update(new_scenes)
+            for source, target, proof in automatic_scene_links(scene_props, target_ids=set(new_scenes)):
+                relation("NEXT_SCENE", source, target, {PROOF_KEY: proof})
     return nodes, relations, project_updates
 
 

@@ -51,6 +51,8 @@ def build_canon_snapshot(
     guard = getattr(graph, "persistence_guard", None)
     with guard() if callable(guard) else nullcontext():
         snapshot = GraphQueryService(graph)._snapshot()
+        chronology_events = [event.model_copy(deep=True) for event in snapshot.event_log.list()] if (
+            scene_id or purpose != "plan" and any(n.type == "Scene" for n in snapshot.nodes.values())) else []
         project = snapshot.nodes.get(project_id)
         if project is None or project.type != "Project" or project.status != "CANON":
             raise ContractError("Review project is unavailable.")
@@ -142,6 +144,8 @@ def build_canon_snapshot(
         frozen = InMemoryGraphStore()
         frozen.nodes = nodes
         frozen.relationships = {relation.id: relation for relation in relations}
+        for event in chronology_events:
+            frozen.event_log.append(event)
         assertion_ids = {n.id for n in nodes.values()
                          if n.properties.get("event_kind") == "temporal_state_assertion_v1"}
         active_ids = set()
@@ -250,6 +254,8 @@ def build_canon_snapshot(
         frozen = InMemoryGraphStore()
         frozen.nodes = nodes
         frozen.relationships = {relation.id: relation for relation in relations}
+        for event in chronology_events:
+            frozen.event_log.append(event)
         if purpose == "scene" and _longform_scene_metadata(nodes[scene_id], project):
             from storygraph.services.context_pack_builder import ContextPackBuilder
 
@@ -277,10 +283,8 @@ def build_canon_snapshot(
                     expected = {f"{kind}_lp_{prefix}_{ref}" for ref in declared if isinstance(ref, str)}
                     if not expected.issubset(actual):
                         missing.append("missing_scene_plan_relation")
-            previous = nodes[scene_id].properties.get("previous_scene_id")
-            if any(r.type == "NEXT_SCENE" and r.target_id == scene_id
-                   and r.source_id != previous for r in relations):
-                missing.append("missing_scene_reference")
+            # Narrative previous_scene_id is a Draft/navigation reference, not
+            # a requirement that the world's predecessor share that slot.
         projections, used_assertions = {}, set()
         entry_knowledge = {
             subject_id: frozen.get_character_knowledge(subject_id, scene_id=scene_id,
@@ -309,6 +313,8 @@ def build_canon_snapshot(
             if not projection.complete:
                 missing.append("temporal_state_unresolved")
         selected_ids = {fact.id for fact in records_for_prompt} | used_assertions
+        from storygraph.services.scene_chronology import reliable_scene_edges
+        world_edges = reliable_scene_edges(frozen, project_id)
         records_for_prompt = []
         for fact in records:
             if fact.id not in selected_ids:
@@ -316,6 +322,8 @@ def build_canon_snapshot(
             node = nodes.get(fact.id) if fact.kind == "node" else None
             if fact.kind == "relation":
                 relation = frozen.relationships[fact.id]
+                if relation.type == "NEXT_SCENE" and relation.target_id not in world_edges.get(relation.source_id, ()):
+                    continue
                 if relation.type in {"KNOWS_SECRET", "BELIEVES_FALSELY", "SUSPECTS", "HIDES_FROM"}:
                     boundary = entry_knowledge.get(relation.source_id)
                     if boundary is not None and relation.id not in boundary.source_refs:
@@ -335,6 +343,21 @@ def build_canon_snapshot(
                 }
                 fact = fact.model_copy(update={"text": canonical_json(payload)})
             records_for_prompt.append(fact)
+    elif purpose != "plan" and any(r.type == "NEXT_SCENE" for r in relations):
+        # PlanningRun's real generation/review paths start from this default
+        # project snapshot. Keep the raw fingerprint/history, but never present
+        # unsafe historical automatic adjacency as canonical model evidence.
+        from storygraph.stores.memory_graph import InMemoryGraphStore
+        from storygraph.services.scene_chronology import reliable_scene_edges
+        world = InMemoryGraphStore()
+        world.nodes = nodes
+        world.relationships = {r.id: r for r in relations}
+        for event in chronology_events:
+            world.event_log.append(event)
+        reliable = reliable_scene_edges(world, project_id)
+        unsafe = {r.id for r in relations if r.type == "NEXT_SCENE"
+                  and r.target_id not in reliable.get(r.source_id, ())}
+        records_for_prompt = [fact for fact in records_for_prompt if fact.id not in unsafe]
     def priority(fact):
         if fact.id in relevant:
             return (0, fact.kind, fact.id)

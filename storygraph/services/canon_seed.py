@@ -105,6 +105,7 @@ class AuthorCanonSeedService:
         node_id: str | None = None,
         properties: dict | None = None,
         previous_scene_id: str | None = None,
+        link_world_previous: bool = True,
         reviewer: str,
         rationale: str,
         source_ref: str,
@@ -147,7 +148,7 @@ class AuthorCanonSeedService:
             reviewer=reviewer,
             rationale=rationale,
         )
-        if effective_previous_scene_id:
+        if effective_previous_scene_id and link_world_previous:
             self.graph_store.seed_canon_relation(
                 relation_id=slug_id(
                     "rel", f"{effective_previous_scene_id}_NEXT_SCENE_{scene.id}"

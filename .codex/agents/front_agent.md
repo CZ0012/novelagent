@@ -225,3 +225,23 @@ Protected editing uses per-request `prose_input_grants`: exact stripped instruct
 Keep existing canonical Scene `must_include` literal checks: protected policy must explicitly authorize those literals in its surface plan/claims or fail before provider construction. Never solve a visibility-policy gap by silently disclosing raw author context or deleting the output constraint. A selected scene summary is not a new literal requirement.
 
 Strict prose provenance must name the visible policy/style origin and mark configured raw presets and author discussion history as not transmitted. Preserve the compact configured `agent_preset` snapshot for compatibility while `agent_preset_role`/`agent_preset_transmitted` state its actual transport role. Legacy/discussion preset transmission remains unchanged.
+
+
+## Reliable world chronology
+
+Narrative list positions, previous_scene_id and planning-only CAUSES are not world
+precedence. Follow temporal_state_v1: automatic edges require deterministic
+accepted interval proofs and exact source/target timeline hashes; overlap, touching
+boundaries, unsupported text or stale source evidence stay unknown/incomparable.
+Manual explicit NEXT_SCENE remains authoritative. Legacy automatic edges need
+actual ID/source/creation-event binding, not prefix heuristics; reads never rewrite
+canon. Preserve scene-grained entry/through semantics and all human-review gates.
+Preserve prompt/schema formats and unapplied Project-only planning inputs and
+fingerprints. Withdrawing proven-unsafe automatic facts from an applied-project
+model view must change its actual PLAN evidence fingerprint and stale old reports.
+
+Preserve chapter/scene directory order and existing editor behavior independently of reliable world chronology. Reuse truthful unresolved-context messaging; do not silently reorder prose, infer dates or claim an overlap is a story contradiction.
+
+Reliable read order must include every eligible strict interval-before pair, even with sparse persisted links. Test ordinary parallel fork/join: a later scene resolves both completed branches, without dense canon edges/model fields or stale mutable-cache reuse. Interval eligibility must still reject time edits that invalidate accepted creation evidence.
+
+Include reviewed project-structure import among automatic sequencing paths. A later approved canonical time-update event can restore interval read authority; unaudited mutations cannot. Preserve the old edge proof/receipt without rewriting it, and do not let subsequent title-only edits discard approved timeline evidence.

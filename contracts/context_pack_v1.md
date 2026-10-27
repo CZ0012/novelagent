@@ -289,3 +289,29 @@ Semantic scene evidence uses the same entry projection from a frozen graph and i
 ## Writer-purpose boundary
 
 The full pack is author-side. `writer_visibility_required` is serialized; the resolved Writer Visibility sidecar is excluded. Required packs missing that sidecar fail closed rather than reverting to legacy. Local positive disclosure projection and reader/source binding follow `writer_visibility_v1.md`; raw author canon remains available for review. No policy is inferred from style POV or approved summary alone.
+
+
+## Reliable story chronology
+
+Entry state and character knowledge use the same reliable world-time relation
+view from temporal_state_v1. A preceding directory Scene or planning CAUSES edge
+does not itself establish an earlier story-time boundary. Overlapping, unparsed or
+stale automatic time evidence cannot turn future assertions into resolved entry
+facts; unknown/ambiguous tracked slots keep the existing critical gap behavior.
+previous_scene_summary remains an exact noncanon Draft reference in narrative
+order, never a character-knowledge or realized-state authority. Writer disclosure
+still requires the independent positive visibility policy.
+
+A later scene after a proven parallel fork/join must receive eligible facts from
+both branches. Sparse persisted sequencing cannot be used to drop a reliably
+earlier branch. Internal complete interval order remains snapshot-local and does
+not add planning/model fields or extra canonical edges.
+
+Scene semantic evidence omits stale/unproven stored automatic NEXT_SCENE from
+model-facing canon facts and its citation registry. Such raw relations remain
+in the full canonical fingerprint and immutable graph/event history for audit.
+The default project model-evidence view likewise omits unreliable automatic
+NEXT_SCENE, including when long-form planning consumes that view. Explicit PLAN
+projection already excludes structural NEXT_SCENE. Unapplied Project-only inputs
+remain byte-for-byte unchanged; affected applied-project PLAN evidence correctly
+changes. The internal full interval closure is never serialized as dense facts.

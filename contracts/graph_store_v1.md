@@ -217,7 +217,7 @@ Neo4j currently rejects append_state before mutation until equivalent slot CAS
 and transactional semantics are implemented.
 
 `resolve_temporal_state` projects typed life/physical/location/ownership state at
-an exact scoped Scene using NEXT_SCENE partial order, not accept time or ID sort.
+an exact scoped Scene using reliable world partial order, not accept time or ID sort.
 Only explicitly authored `properties.initial_state` values are baselines. Missing,
 cyclic or incomparable chronology produces unknown/ambiguous state, never a
 guessed value. `at_scene_start = true` excludes assertions effective during that
@@ -309,3 +309,27 @@ partial or mismatched structure must never be recreated automatically.
 
 Explicit same-language Source span adoption writes only a new Draft and its
 source provenance; it cannot seed graph state or promote story facts.
+
+
+## Reliable chronology versus directory order
+
+NEXT_SCENE used for temporal state/knowledge is world precedence, not automatic
+narrative adjacency. Explicit author-created relations remain authoritative.
+Long-form, book-bundle and composition-derived relations require accepted interval
+proof plus current provenance/timeline fingerprints as in temporal_state_v1.
+Stale or unprovable automatically derived edges remain stored historical evidence
+but cannot supply world reachability. Reads never silently edit canon or convert an
+automatic edge to a manual author assertion. Chapter/scene indexes and
+previous_scene_id keep directory/narrative order independently. No new node label,
+edge label or public planning model field is introduced.
+
+The reliable read order includes every accepted, still-valid strict interval-before
+pair, even when automatic graph links are sparse. Parallel branches that both
+finish before a later Scene must both participate in that Scene's state/knowledge
+resolution. This internal closure is not a dense graph mutation or model payload.
+
+An authorized canonical Scene time edit is an update_node audit event with the
+complete new timeline text and reviewer/rationale/source. Reliable read order may
+recover from that new fact while retaining stale old automatic relation proofs
+for history. Unlogged low-level mutations remain untrusted; ordinary author
+editing must not require a new feature or permanently lose chronology.

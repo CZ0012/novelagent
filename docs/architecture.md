@@ -2012,3 +2012,16 @@ Writer-purpose positive projection is governed by `contracts/writer_visibility_v
 
 
 Protected continuation, whole-scene revision and selection revision use explicit per-request instruction/editing-target grants with saved Draft version/hash/UTF-16 validation. Selection sends only the selected span. The Agent panel can preview the same actual action messages without a model call; an action button authorizes its displayed input without another confirmation. Additional sources/search/history are not implicitly disclosed. Legacy unprotected prose preserves the original full-context behavior and is explicitly marked `legacy_unisolated`.
+
+
+## 叙述目录与可靠世界时序
+
+`temporal_state_v1` 的场景入口状态和角色知识共用可靠世界偏序。Chapter/Scene目录顺序、`previous_scene_id`和规划`CAUSES`不是“前场全部事件已在后场开头发生”的证明。新长篇单批、整书bundle、结构导入及正文篇章composition的应用不再无条件按叙述槽位创建世界`NEXT_SCENE`；只有已接受`timeline_position`的确定区间能证明严格先于时才自动连边。明确并行/倒叙本身是合法小说结构。无法解析的日期、重叠和接触边界不从章号补齐，角色已跟踪事实在不可比时保留unknown/ambiguous缺口。
+
+新的自动边保存确切时间文本hash与来源标记；只读投影验证同项目、应用/创建证据及现有时间一致。旧自动边由实际派生身份、source和创建事件窄识别，时间编辑使旧自动证明失效；不会把旧边当人工授权、删除历史或静默修改canon。作者显式手工NEXT_SCENE保留权威。目录和非正典前Draft摘要仍按叙述次序展示，不能转成人物知情或实际世界状态。正文critic允许不同的可靠世界前驱，不再假定世界前驱必须等于目录上一场。
+
+这仍是场景粒度的偏序，没有引入场景内事件时钟、模型NLP猜测或新提案schema。当前未应用Project-only规划分支的生成/审查输入及canon fingerprint保持原规则；旧小说提案/响应不改造、不自动重审或付费重试。该行为进入CLI、API/Web与源码桌面的共同后端，旧安装器不自动包含修复，需单独重建核验。GitHub不承载小说数据同步。
+
+自动持久化边可以保持稀疏，但内部读取必须合并全部仍有效的明确区间先于关系与人工世界时序，保证两个并行分支都已结束后的汇合场景能读取两边事实。内部偏序可用快照内索引/bitset，不写密集正典边、不加模型消息，也不跨图谱变更复用缓存。时间编辑使旧自动边证明失效后，不得仅靠未经审计的属性改动绕过unknown；作者通过现有场景编辑留下完整新时间及来源/审阅审计事件后，可以据新合法事实重建内部时序，旧边和收据仍不改写，后续只改标题也不抹去已批准时间。
+
+默认项目级模型证据也排除已判定无可靠依据的自动NEXT_SCENE，避免长篇规划服务使用默认项目快照时把历史目录连边当成作者世界真相。已有场景项目的真实可信证据变化应使其旧PLAN证据指纹失效；底层完整canon hash仍含历史，当前未应用Project-only项目的快照/规划输入逐值不变。明确purpose=plan的既有投影本已排除结构NEXT_SCENE，不改其字段、窗口、提示或schema。

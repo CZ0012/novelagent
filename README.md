@@ -548,3 +548,12 @@ The full author Context Pack and the information sent to a prose model are disti
 
 
 Protected continuation, whole-scene revision and selection revision use explicit per-request instruction/editing-target grants with saved Draft version/hash/UTF-16 validation. Selection sends only the selected span. The Agent panel can preview the same actual action messages without a model call; an action button authorizes its displayed input without another confirmation. Additional sources/search/history are not implicitly disclosed. Legacy unprotected prose preserves the original full-context behavior and is explicitly marked `legacy_unisolated`.
+
+
+### 叙述顺序与故事时间
+
+目录中的章场顺序可以包含明确标注的并行或倒叙，不自动证明世界事件先后。新长篇/整书及结构导入应用仅从已接受场景的明确时间区间建立可靠世界时序；无法解析、重叠或边界相同而不能证明先后的场景保持未知/不可比。作者明确建立的手工时序边继续有效。正文入口的人物状态和知识依据可靠世界时序，已跟踪事实无法判定时显示上下文缺口，不能按目录顺序猜测。旧自动派生边只在来源与时间证据仍有效时参与读取，不会静默改写旧正典。
+
+这项修复不新增事件时钟或规划模型字段，不改变正在进行的未应用整书规划请求/报告指纹。CLI、API/Web和源码构建桌面复用同一后端；已生成安装器需重建才包含运行代码修复，GitHub仍只用于软件发布/更新，不同步小说工作区。
+
+作者通过现有场景时间编辑接口保存并留下审阅/来源事件后，可据新时间恢复可靠读取；旧自动边证明和历史收据保留不改，未经审计直接改底层属性则不能获得时序权威。

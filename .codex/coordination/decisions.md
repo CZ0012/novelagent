@@ -230,3 +230,14 @@ Protocol compatibility is explicit: default legacy Chat Completions remains stab
 Plan 500,000-character fiction hierarchically as an accepted world/plot/style blueprint and bounded chapter batches. Persist every phase in versioned Proposal Store; model output never writes canon. Apply requires explicit human acceptance, exact version, scoped references, current canon fingerprint and recoverable provenance.
 
 Semantic continuity review is a distinct, explicitly invoked paid task. Reports cite exact text and scoped canon IDs, record coverage and immutable fingerprints, and become stale when inputs change. Rule-only checks cannot prove semantic consistency. The project StyleProfile is author-approved Agent-designed direction; base-model preferences remain subordinate but absolute independence is not claimed.
+
+
+## Reliable story chronology versus narrative slots
+
+Use deterministic accepted story-time intervals for automatic world precedence; no chapter/index/NLP inference. Strictly completed earlier intervals may precede a later entry, while overlapping/touching/unparsed intervals stay incomparable. Preserve explicit manual NEXT_SCENE, immutable historical application evidence and directory order. New automatic proof metadata binds exact timeline strings; old auto edges are narrowly identified and lose read authority if their original time evidence changes. This changes applied-scene projection only, not ongoing unapplied PLAN payloads/fingerprints, and adds no event-clock framework or public schema.
+
+Parallel convergence coverage: sparse materialized relations do not authorize discarding known world precedence. Internal snapshot-local order includes all accepted/current strict interval-before pairs plus authoritative manual edges; fork/join state and knowledge must resolve both completed branches. No dense graph/payload or event-clock framework is introduced.
+
+Time editing recovery uses the existing author Scene update audit: a new approved complete timeline/source event can reestablish internal interval order without rewriting stale stored edge proofs. Bare mutable changes remain unknown. Reviewed source-structure import is covered alongside long-form, book bundles and composition. No new UI/permission model or novel-state migration is introduced.
+
+Project model-evidence consistency: explicit PLAN projection already omits structural NEXT_SCENE, but long-form uses the default project snapshot. That model-facing view must also exclude unreliable automatic sequencing while raw canon history/hash remains unchanged. Applied-project evidence withdrawal correctly invalidates its old PLAN evidence; unaffected unapplied Project-only inputs remain exact. No system-prompt/schema change or automatic paid recheck is authorized.

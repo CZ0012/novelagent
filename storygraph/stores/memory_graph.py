@@ -566,25 +566,13 @@ class InMemoryGraphStore(GraphStore):
         return self._scene_reachable(current_scene_id, boundary_scene_id)
 
     def _scene_reachable(self, start_scene_id: str, target_scene_id: str) -> bool:
-        if start_scene_id not in self.nodes or target_scene_id not in self.nodes:
-            return False
-        queue: deque[str] = deque([start_scene_id])
-        visited: set[str] = set()
-        while queue:
-            current = queue.popleft()
-            if current in visited:
-                continue
-            visited.add(current)
-            for relation in self.relationships.values():
-                if (
-                    relation.status == "CANON"
-                    and relation.type == "NEXT_SCENE"
-                    and relation.source_id == current
-                ):
-                    if relation.target_id == target_scene_id:
-                        return True
-                    queue.append(relation.target_id)
-        return False
+        from storygraph.services.scene_chronology import reliable_scene_order
+        with self.persistence_guard():
+            if start_scene_id not in self.nodes or target_scene_id not in self.nodes:
+                return False
+            project_id = self.nodes[start_scene_id].properties.get("project_id")
+            order = reliable_scene_order(self, project_id)
+            return not order.cyclic and order.before(start_scene_id, target_scene_id)
 
     def get_unresolved_foreshadowing(self, **filters: str) -> list[GraphNode]:
         items = []

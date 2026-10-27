@@ -81,8 +81,8 @@ typed states and `complete`. Each state has field, status (`resolved`, `unknown`
 `ambiguous`), optional scalar value, assertion refs and a safe reason code.
 
 The resolver takes an immutable read snapshot. For each slot it selects reviewed
-assertions whose effective Scene is at or before the requested Scene by scoped
-CANON NEXT_SCENE reachability, then chooses the unique latest assertion under
+assertions whose effective Scene is at or before the requested Scene by reliable
+world precedence, then chooses the unique latest assertion under
 that partial order. It never sorts by creation time, acceptance order, title,
 numeric-looking ID, prose date or lexical node ID. Out-of-order writing and
 acceptance therefore preserve earlier and later projections.
@@ -164,3 +164,89 @@ truncation flag. It is read-only. It must be exposed only with project read
 permission. The product distinguishes correcting a recorded value from deleting
 an assertion or retracting it to unknown: arbitrary withdrawal/removal remains a
 separate deferred author-only operation, never an automatic model action.
+
+
+## Narrative slots are not world-time proof
+
+World chronology consumes explicit author-created CANON NEXT_SCENE relations and
+all eligible accepted interval proofs, including reliable pairs not materialized
+as graph edges. Explicit manual relations remain authoritative
+without requiring a parseable prose date. Directory ordering, `previous_scene_id`
+and planning-only CAUSES are not chronology inputs. Concurrent and out-of-order
+narration must not inherit later events merely because it appears later in a book.
+
+Automatic application of long-form expansions, book bundles and composition uses
+one conservative deterministic chronology policy. Only explicit bounded story-time
+intervals in the accepted Scene.timeline_position may prove precedence. The
+supported grammar is deliberately limited: anchored day-and-clock ranges with an
+explicit range separator (supported numeric/Chinese day forms or English Day),
+and ISO clock ranges with both dates written explicitly. Bare whole-day anchors
+use a conservative complete-day envelope. A lone clock, partially parsed segment,
+ambiguous Chinese numeral, mixed relative/ISO anchor or mixed ISO timezone style
+is unknown; no NLP, fuzzy date interpretation, chapter-index date inference or
+inferred instant duration. Different anchor systems are incomparable. Ambiguous multi-part
+ranges are unknown unless the complete range has a safely determined envelope.
+Only a provably completed earlier interval may precede the target opening; overlap
+and uncertain shared boundaries stay incomparable.
+
+New derived edges carry `properties.auto_chronology_v1` with
+`origin: accepted_timeline_position`, `source_timeline_sha256` and
+`target_timeline_sha256` (hashes of the exact full timeline strings). A proof is usable only while its same-project
+endpoints, accepted application/source provenance and both timeline fingerprints
+still match. Metadata tampering or timeline edits invalidate the old stored proof instead of
+silently recertifying or mutating it. A new approved canonical time update can
+supply fresh interval authority for the internal read order, as defined below. Missing proof is not
+permission to fall back to narrative adjacency.
+
+Historical automatically generated relations are recognized narrowly from their
+actual deterministic IDs, matching source/application binding and original graph
+creation evidence, never from an ID prefix alone. Their original endpoint timeline
+snapshots must support the same conservative precedence proof and still match the
+current endpoints. Legacy composition edges without such timing evidence do not
+become authoritative manual edges. Explicit unrelated manual edges remain intact.
+Existing graph relations/events are not deleted, reordered or rewritten during
+reads; stale/unprovable automatic evidence is excluded from the reliable world
+view and unresolved tracked state remains unknown/ambiguous.
+
+State and knowledge-boundary consumers share this reliability filter. Scene critics
+must not mistake narrative predecessors for the only possible world predecessors.
+This is still scene-grained state: entry excludes the target Scene's own changes,
+and through-scene includes them. It does not implement within-scene event clocks,
+reader knowledge inference, automatic canon repair or automatic history migration.
+
+
+Persisted automatic links may stay sparse (at most one selected predecessor per
+new link calculation), but the internal read order includes ALL reliable strict
+interval-before pairs plus authoritative manual relations and valid stored proofs.
+Ordinary fork/join therefore resolves facts from both completed parallel branches;
+an implementation must not discard a proven earlier branch merely to reduce
+persisted edge count. Equal endpoints, overlapping intervals themselves and
+unparsed time remain incomparable. A newly accepted earlier-in-story Scene can
+precede an existing later Scene across application batches.
+
+The internal order is snapshot-local, may use bounded indexes/bitsets and is not
+stored as a dense canon graph or appended to model payloads. The shared
+`reliable_scene_order(snapshot, project_id)` supplies `before(source, target)`
+and cycle/invalid-order information to state and knowledge consumers. Every interval-derived pair needs accepted Scene creation/source evidence or a
+subsequent approved canonical update containing the exact current full timeline.
+An update must have matching scoped node/event provenance, reviewer, rationale
+and source; a direct property mutation without such evidence stays unknown.
+Later title-only changes must not erase an already approved time update. Old
+stored-edge fingerprints still remain stale after a time edit: deriving read
+order from a NEW audited time fact does not rewrite those relations or their
+receipts. Rebuilding from unchanged invalid evidence is forbidden. Manual
+explicit author relations also remain authoritative. Snapshot-local caching
+must never leak across subsequent mutable graph changes.
+
+Scene critics receive the same trustworthy projection: stale/unproven stored
+automatic NEXT_SCENE cannot appear as authoritative prompt facts or citation
+evidence. Raw canonical history remains fingerprinted and readable through
+audits. The same exclusion applies to the default project model-evidence view used by
+long-form planning. It changes evidence only where unreliable automatic relations
+were actually present; unapplied Project-only PLAN inputs remain unchanged.
+
+Reviewed project-structure import is another automatic application path. It keeps
+narrative navigation separate from world chronology; its scene interval evidence
+requires exact structure-Proposal/version/source and graph creation binding.
+A custom source_ref alone is not manual chronology authority for imported auto
+links. Historical source-structure receipts are not silently migrated.

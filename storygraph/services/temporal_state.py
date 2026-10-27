@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from collections import deque
 
 from pydantic import ValidationError
 
@@ -214,6 +213,8 @@ def resolve_temporal_state(graph, *, project_id, subject_id, scene_id, fields=No
         local = InMemoryGraphStore()
         local.nodes = {ref: node.model_copy(deep=True) for ref, node in snapshot.nodes.items()}
         local.relationships = {ref: rel.model_copy(deep=True) for ref, rel in snapshot.relationships.items()}
+        for event in snapshot.event_log.list():
+            local.event_log.append(event.model_copy(deep=True))
     _scoped_node(local, project_id, project_id, {"Project"})
     subject = _scoped_node(local, project_id, subject_id)
     _scoped_node(local, project_id, scene_id, {"Scene"})
@@ -223,45 +224,9 @@ def resolve_temporal_state(graph, *, project_id, subject_id, scene_id, fields=No
         raise _error()
     scene_ids = {n.id for n in local.nodes.values() if n.type == "Scene" and n.status == "CANON"
                  and n.properties.get("project_id") == project_id}
-    edges = {ref: set() for ref in scene_ids}
-    invalid_order = False
-    for relation in local.relationships.values():
-        if relation.status != "CANON" or relation.type != "NEXT_SCENE" or relation.properties.get("project_id") != project_id:
-            continue
-        if relation.source_id not in scene_ids or relation.target_id not in scene_ids:
-            invalid_order = True
-        else:
-            edges[relation.source_id].add(relation.target_id)
-    reach_cache = {}
-    def reachable(start, end):
-        if (start, end) in reach_cache:
-            return reach_cache[start, end]
-        seen, todo = set(), list(edges.get(start, ()))
-        while todo:
-            current = todo.pop()
-            if current == end:
-                reach_cache[start, end] = True
-                return True
-            if current not in seen:
-                seen.add(current)
-                todo.extend(edges.get(current, ()))
-        reach_cache[start, end] = False
-        return False
-    # One O(V+E) topology pass, rather than a full reachability walk per Scene.
-    indegree = dict.fromkeys(scene_ids, 0)
-    for targets in edges.values():
-        for target in targets:
-            indegree[target] += 1
-    ready = deque(ref for ref, degree in indegree.items() if degree == 0)
-    visited_count = 0
-    while ready:
-        current = ready.popleft()
-        visited_count += 1
-        for target in edges[current]:
-            indegree[target] -= 1
-            if indegree[target] == 0:
-                ready.append(target)
-    cyclic = invalid_order or visited_count != len(scene_ids)
+    from storygraph.services.scene_chronology import reliable_scene_order
+    order = reliable_scene_order(local, project_id)
+    reachable, cyclic = order.before, order.cyclic
     baseline = subject.properties.get("initial_state", {})
     states = []
     for field in requested:

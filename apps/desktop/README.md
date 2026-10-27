@@ -325,3 +325,12 @@ The desktop context inspector uses the same local Writer Visibility policy API/s
 
 
 Protected continuation, whole-scene revision and selection revision use explicit per-request instruction/editing-target grants with saved Draft version/hash/UTF-16 validation. Selection sends only the selected span. The Agent panel can preview the same actual action messages without a model call; an action button authorizes its displayed input without another confirmation. Additional sources/search/history are not implicitly disclosed. Legacy unprotected prose preserves the original full-context behavior and is explicitly marked `legacy_unisolated`.
+
+
+### 可靠世界时序（源码后端）
+
+目录章场顺序与故事时间独立：并行、倒叙不自动变成已发生事实。长篇/整书、结构导入与篇章composition的应用仅依据已接受的明确时间区间生成可靠世界时序，角色状态/知识遇到不可比或失效的自动时间证据保持缺口；手工明确时序继续有效。旧边和来源历史保留，读取不静默改正典。没有新事件时钟、规划schema、模型调用或自动重审。
+
+桌面继续承载同一API后端；包含修复需重新构建捆绑后端与工作台并核验对应候选包。历史本地安装器、已发布签名更新与源码功能分别记录；GitHub仍只发布软件，不同步工作区。
+
+既有场景时间编辑的完整批准审计可作为新的内部时序依据，普通作者修改不需新增UI；旧自动边不被重写，无审计属性改动仍不可信。

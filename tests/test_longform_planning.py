@@ -163,7 +163,10 @@ def test_500k_plan_recovers_all_batches_without_manuscript_or_unreviewed_canon(s
     chapters = [n for n in graph.nodes.values() if n.type == "Chapter"]
     assert len(chapters) == 100 and len(scenes) == 200
     assert sum(n.properties["target_length"] for n in scenes) == 500000
-    assert len([r for r in graph.relationships.values() if r.type == "NEXT_SCENE"]) == 199
+    # The synthetic dates reset by volume and provide no strict scene intervals;
+    # navigation still has 199 predecessors, but must not become world chronology.
+    assert not [r for r in graph.relationships.values() if r.type == "NEXT_SCENE"]
+    assert sum(bool(n.properties.get("previous_scene_id")) for n in scenes) == 199
     assert len([r for r in graph.relationships.values() if r.type == "SEEDED_IN"]) == 1
     assert len([r for r in graph.relationships.values() if r.type == "PAID_OFF_IN"]) == 1
     assert len(provider.calls) == 21

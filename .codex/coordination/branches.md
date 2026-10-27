@@ -255,3 +255,6 @@ SG-028 publication complete: software 5fb634f/tag v0.1.17 synchronized to main a
 SG-031 2026-10-26 ownership on shared codex/sg-029-longform-collaboration: Citation Protocol owns semantic_review.py, citation regression tests, generation_review_v1 and narrow alias paragraphs in role instructions. Scale Review is read-only. Longform Operator alone owns guarded real acceptance execution and ignored recovery controls, initially held pending protocol verification. Main owns coordination, integration/docs, independent acceptance and eventual package rebuild. No agent branch switching or commits.
 
 SG-032 readiness 2026-10-27：共享 codex/sg-029-longform-collaboration，HEAD f4871ac + 未提交Writer Visibility。Review仅授权修复belief guard/回归及API导入隔离lint，现冻结；文档补充仅acceptance/board/handoffs/branches。Main拥有最终回归、Web确认、提交及新包构建。旧已核验59e2721安装器是历史基线。各owner不切分支、不提交、不操作真实规划或付费调用。
+
+
+Reliable chronology work continues on shared codex/sg-029-longform-collaboration, base a2a6a09 (runtime baseline 6a7d2f6). Creation owns core implementation, Review contracts/docs and independent review. No branch switching or agent commits; Main integrates and rebuilds candidate after validation. Existing novel planning output is not software source and is not modified by this fix.

@@ -550,3 +550,24 @@ model_execution, while an explicit author text edit preserves generation lineage
 same snapshot in Draft provenance. Configuration edits cannot rewrite historical
 records. This records the requested provider model identifier and protocol, not
 verified vendor identity or hidden model reasoning.
+
+
+### Composition sequencing boundary
+
+Reviewed composition keeps directory order and previous_scene_id independently
+from reliable world chronology. It must not use its internal call to manual scene
+seeding as implicit permission to create world NEXT_SCENE from list positions.
+Only interval-proven automatic relations under temporal_state_v1 may be added;
+the current composition schema has no timeline field, so ordinary composition
+alone supplies no such proof. No new model field is added to repair this absence.
+Completed-operation recovery still verifies the actual recorded creation events;
+historical automatic sequencing receipts are retained, while their unprovable
+world-time use is filtered on read. This does not rewrite old graph receipts or
+reinterpret application recovery as authorization to mutate canon.
+
+Reviewed project_structure_draft application follows the same separation: its
+loop-generated previous_scene_id is navigation, not explicit manual NEXT_SCENE.
+Only accepted interval proof may supply automatic world precedence. Existing
+structure nodes/edges remain source-Proposal/version and creation-event bound,
+including when an operator supplied a custom source_ref; they cannot silently
+fall through to manual-authority treatment.

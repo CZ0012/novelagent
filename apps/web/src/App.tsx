@@ -5605,6 +5605,7 @@ function ProjectSidebar({
               }
             />
           </div>
+          <small className="field-help">{uiText.sidebar.previousSceneHelp}</small>
           <input
             list="story-character-options"
             placeholder={uiText.sidebar.povCharacterPlaceholder}
@@ -5637,6 +5638,7 @@ function ProjectSidebar({
               }))
             }
           />
+          <small className="field-help">{uiText.sidebar.timelineHelp}</small>
           <input
             placeholder={uiText.sidebar.sceneGoalPlaceholder}
             value={sceneForm.goal}

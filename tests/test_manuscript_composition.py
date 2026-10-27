@@ -283,7 +283,8 @@ def test_structure_evidence_or_position_damage_rejected(setup, damage):
     first = apply(setup, proposal).json()
     if damage == "relation":
         relation = next(
-            value for value in graph.relationships.values() if value.type == "NEXT_SCENE"
+            value for value in graph.relationships.values()
+            if value.type == "HAS_SCENE" and value.target_id == first["scenes"][0]["id"]
         )
         del graph.relationships[relation.id]
     elif damage == "node_type":

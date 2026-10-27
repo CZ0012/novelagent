@@ -80,8 +80,6 @@ def bundle_specs(graph, proposals, run, *, current=True):
                     "previous_scene_id": previous, "style_profile_id": graph_plan_id(blueprint_id, "style", "profile")}
                 nodes[scene_id] = ("Scene", props)
                 relation("HAS_SCENE", chapter_id, scene_id)
-                if previous:
-                    relation("NEXT_SCENE", previous, scene_id)
                 for dependency in scene.causal_dependencies:
                     if dependency not in all_scene_ids or dependency == scene.id:
                         raise _invalid()
@@ -90,6 +88,17 @@ def bundle_specs(graph, proposals, run, *, current=True):
                     for ref in refs:
                         relation(kind, graph_plan_id(blueprint_id, "foreshadowing", ref), scene_id, {"planning_only": True})
                 previous = scene_id
+    from storygraph.services.scene_chronology import automatic_scene_links, PROOF_KEY
+    if current:
+        scene_props = {ref: props for ref, (kind, props) in nodes.items() if kind == "Scene"}
+        for source, target, proof in automatic_scene_links(scene_props):
+            relation("NEXT_SCENE", source, target, {PROOF_KEY: proof})
+    else:
+        prefix = f"proposal:{run.bundle_proposal_id}:longform-book:"
+        for event in graph.event_log.list():
+            p = event.payload
+            if event.operation == "create_relation" and event.source_ref.startswith(prefix) and p.get("type") == "NEXT_SCENE":
+                relations[event.target] = ("NEXT_SCENE", p["source_id"], p["target_id"], p["properties"])
     if len(all_scene_ids) != config.volume_count*config.chapters_per_volume*config.scenes_per_chapter:
         raise _invalid()
     if sum(props["target_length"] for kind, props in nodes.values() if kind == "Scene") != config.target_length:

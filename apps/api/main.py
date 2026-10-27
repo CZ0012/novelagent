@@ -2171,6 +2171,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                                 "source_structure_proposal_version": proposal.version,
                             },
                             previous_scene_id=previous_scene_id,
+                            link_world_previous=False,
                             reviewer=request.reviewer,
                             rationale=request.rationale,
                             source_ref=source_ref,
@@ -2179,6 +2180,12 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     previous_scene_id = scene_node.id
                     scenes.append(scene_node.model_dump())
             if created_graph_nodes:
+                from storygraph.services.scene_chronology import automatic_scene_links, PROOF_KEY
+                scene_properties = {item["id"]: item["properties"] for item in scenes}
+                for source, target, proof in automatic_scene_links(scene_properties):
+                    canon_seed.add_relation(project_id=project_id, relation_type="NEXT_SCENE",
+                        source_id=source, target_id=target, properties={PROOF_KEY: proof},
+                        reviewer=request.reviewer, rationale=request.rationale, source_ref=source_ref)
                 persist_graph()
             updated_proposal = proposal
             recorded_graph_refs = {
@@ -3651,9 +3658,19 @@ def _validate_project_structure_targets(
             ):
                 raise ContractError("Applied project structure Scene references do not match.")
             validate_relation(chapter_id, "HAS_SCENE", scene_id)
-            if previous_scene_id:
-                validate_relation(previous_scene_id, "NEXT_SCENE", scene_id)
             previous_scene_id = scene_id
+    # Revalidate immutable chronology receipts, rather than requiring narrative
+    # neighbors to have a world edge. Old applications retain their old receipts.
+    for event in graph.event_log.list():
+        payload = event.payload
+        if event.operation != "create_relation" or payload.get("type") != "NEXT_SCENE":
+            continue
+        source, target = payload.get("source_id"), payload.get("target_id")
+        creations = [e for e in graph.event_log.list() if e.operation == "create_node" and e.target == target]
+        if (source in existing_nodes and target in existing_nodes and len(creations) == 1
+                and event.source_ref == creations[0].source_ref
+                and event.target == slug_id("rel", f"{source}_NEXT_SCENE_{target}")):
+            validate_relation(source, "NEXT_SCENE", target)
     recorded_nodes = {ref.ref for ref in proposal.derived_refs if ref.kind == "graph_node"}
     return expected_nodes == existing_nodes == recorded_nodes
 

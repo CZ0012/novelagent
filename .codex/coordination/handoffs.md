@@ -106,3 +106,10 @@ Front fixed Context evidence, dirty Draft omission, source_changed recovery guid
 ## SG-032 readiness handoff — 2026-10-27
 
 Independent Review完成投影、完整作者审查权威、精确编辑授权和checkpoint fail-closed审查；omniscient belief合同偏差经Main授权最小修复，49项定向通过。API测试保留导入前HOME/key隔离且恢复环境，11项及Ruff通过。报告在忽略的 .storygraph/writer-visibility-independent-review-20261027.md。最终全回归、Web确认、新包构建交Main；旧59e2721包不含修改。真实整书50/100章规划，旧Writer v6为局部修正后通过；新隔离只有离线UI/假模型证据，文学目标仍active。未改源计划、未真实调用、未提交。
+
+
+## Reliable chronology integration handoff
+
+Independent synthetic reproduction confirmed automatic narrative NEXT_SCENE can expose a later event at an earlier parallel Scene entry. Main authorized a bounded shared-helper correction; explicit manual chronology remains authoritative, legacy automatic edges require exact creation/source binding, and reads exclude stale proofs without mutating canon. Creation owns implementation/tests; Review owns matching contracts/docs and independent acceptance. Ongoing noncanon planning remains separate; no private prose, credentials or live runtime state belongs here.
+
+Reliable chronology review handoff: contracts/docs/role guidance synchronized with all four automatic application paths and complete internal fork/join order. Independent synthetic checks verify no future-state projection, both-branch state/knowledge convergence, audited time-edit recovery, unaudited mutation rejection and unchanged unapplied Project-only PLAN snapshot. Scene evidence fingerprint already invalidates old reports when unsafe relations leave actual facts. Narrow parser/provenance issues found during review are resolved. Main owns final whole-suite validation and rebuilt local candidate; no paid call or author-workspace mutation in this software review.

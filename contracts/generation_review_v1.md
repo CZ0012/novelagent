@@ -477,3 +477,18 @@ provider protocol and accepted runtime shapes do not change.
 When explicitly provided, `narrative_constraint` is a bounded author-side style source identifying the current local Writer Visibility policy, approved voice source and exact reader bindings. It participates in scene review fingerprints and adoption freshness. Review still receives full canonical authority; a character knowing a fact does not permit its reader disclosure. Expected inference is an intention, not proof readers already saw it. No-policy/default and PLAN fingerprints remain compatible; policy changes never rewrite or recertify old reports. See `writer_visibility_v1.md`.
 
 Review interpretation distinguishes statements, records and declarations from actual events or measured quantities. Where the author explicitly establishes lying, misbelief or falsification, the critic checks the actual physical flow; a false declared value does not itself need to be physically realizable. The critic must not invent an unstated validator that would prevent the deception. Evidenced actual physical limit violations still require normal findings and unchanged grounding.
+
+
+## Reliable chronology evidence freshness
+
+Scene review facts and their citation registry exclude stale/unproven automatic
+NEXT_SCENE assertions under temporal_state_v1. The raw full-canon fingerprint
+continues to include historical relations. Existing canon_evidence_fingerprint
+hashes the complete actual scoped CanonSnapshot, so removing an unsafe relation
+from model-facing facts invalidates an old scene report even without a temporal
+state assertion or a raw graph mutation. Adoption must keep using this actual
+evidence fingerprint; raw canon equality alone is insufficient. No general
+prompt-wording version gate or new report field is introduced. The same actual
+evidence rule applies when an applied project supplied unsafe automatic NEXT to
+long-form PLAN requests: its evidence fingerprint changes and old reports become
+stale, while the raw canon hash and unaffected Project-only PLAN inputs do not.
