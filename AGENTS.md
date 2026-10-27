@@ -12,7 +12,7 @@ The project has moved from instruction and contract setup into MVP implementatio
 
 Application source files are allowed when they are explicitly aligned with `docs/architecture.md` and the versioned contracts under `contracts/`. Keep implementation scoped to the StoryGraph Agent architecture and preserve the canon safety rules below.
 
-Current user-facing runtime status must stay explicit: this MVP can be run through the local CLI, FastAPI + React/Vite, and a source-built Tauri desktop package. `apps/desktop` can produce local Windows executable, updater artifact, and NSIS installer outputs, but those outputs are not checked-in or published release artifacts.
+Current user-facing runtime status must stay explicit: this MVP can be run through the local CLI, FastAPI + React/Vite, a source-built Tauri desktop package, or the published v0.2.0 GitHub Release. Local build outputs remain ignored and separate from published assets. The v0.2.0 release provides the verified NSIS installer, setup.exe.sig and latest.json; an actual 0.1.16-to-0.2.0 in-app update has been verified for desktop and bundled backend. Tauri updater signing remains distinct from Windows Authenticode signing.
 
 The desktop MVP should keep a Chinese-first UI, hide the managed backend console window in packaged Windows builds, use the root `VERSION` as the release version source, expose a signed in-app update check/install path for Tauri builds, and ship reproducible icon assets under `apps/desktop/src-tauri/icons/`.
 

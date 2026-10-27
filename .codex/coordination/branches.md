@@ -261,3 +261,6 @@ Reliable chronology work continues on shared codex/sg-029-longform-collaboration
 
 
 Final 2026-10-27: codex/sg-029-longform-collaboration contains the completed bounded implementation and acceptance documentation. Runtime ab343b8 is frozen, locally packaged and verified; final changes only record evidence and close coordination. Main owns final documentation commit. No branch switching, additional worktree, remote push or release publication occurred during this closing step.
+
+
+Deployment 2026-10-27: codex/sg-029-longform-collaboration and v0.2.0 were pushed under explicit user release authorization. The release tag remains at7a7584b; later documentation only records successful publication/install and does not replace release assets or change runtime source.

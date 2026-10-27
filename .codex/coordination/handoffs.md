@@ -116,3 +116,6 @@ Reliable chronology review handoff: contracts/docs/role guidance synchronized wi
 
 
 Final handoff, 2026-10-27: Creation/Review work for SG-031 and SG-032 is closed under the bounded acceptance criteria. Main completed mechanical source/currentness reconciliation, independent framework and adjacent-prose review, preserved unsuccessful evidence and prepared local delivery. Runtime source remains ab343b8 and the verified0.2.0 installer is unchanged. No agent has pending model dispatch or source changes. See docs/acceptance-0.2.0.md for exact verification and limitations; private fiction artifacts remain ignored, outside coordination.
+
+
+Deployment handoff, 2026-10-27: user explicitly requested GitHub delivery and in-app installation. v0.2.0 is now published and actual native upgrade is verified. Main leaves the application running on an isolated acceptance reading workspace; saved model settings and the original workspace are preserved. Public release status documentation supersedes historical unpublished-candidate notes; no runtime code changed in deployment.

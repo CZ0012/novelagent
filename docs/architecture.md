@@ -55,7 +55,7 @@ StoryGraph Agent 应该帮助作者完成：
 - 草稿事实抽取与人工确认。
 - 多轮修订与版本回滚。
 - 中文优先、可切换 `zh-CN` / `en-US` 且与项目正文语言解耦的本地作者工作台界面。
-- 清晰区分当前可用的 CLI / API + Web 工作台、源码构建桌面包，以及未来签名发布的桌面安装器。
+- 清晰区分当前可用的 CLI / API + Web 工作台、源码构建桌面包，以及已发布的 Tauri updater 签名桌面安装器。
 - 桌面版应让作者不必理解开发环境即可启动本地后端、打开写作工作台、管理本地项目数据，并通过程序内更新通道获得新版。
 
 ### 2.2 工程目标
@@ -69,7 +69,7 @@ StoryGraph Agent 应该帮助作者完成：
 - 所有 canon 变更可追溯来源。
 - 自动生成内容不得直接污染 canon。
 - 支持人工审阅后写入正式设定。
-- 当前 MVP 必须明确标注本地可用入口、源码构建桌面包和未发布签名安装器之间的差异。
+- 当前 MVP 必须明确标注本地可用入口、源码构建桌面包和已发布签名更新通道之间的差异。
 - 可安装桌面版必须复用同一本地 API、工作流引擎、Graph Store、Draft Store 和 ReviewService，不得另建一套 canon 写入逻辑。
 - 应维护单一明确版本号来源，并同步到 Python、Web、Tauri/Rust 和前端显示。
 - 桌面 updater 必须使用签名 artifact 和明确 release endpoint；更新安装不得绕过后端 canon/review 边界。
@@ -97,7 +97,7 @@ MVP 应优先做成一个**本地引擎 + API + CLI + Web UI + 桌面宿主** �
 - CLI 本地工作区，用于持久化 demo、图谱种子、场景流程和待审事实。
 - FastAPI + React/Vite Web 工作台，用于本地浏览器中的写作、Context Pack 检查和人工审阅。
 - Tauri 桌面应用，可从源码构建本地 Windows 可执行文件、NSIS 安装器和 updater artifact；仓库不提交签名 release 二进制。
-- 签名发布通道，未来通过 GitHub Release 提供安装器、updater 签名和 `latest.json`，供程序内更新检查与安装使用。
+- 签名发布通道，已通过 [v0.2.0 GitHub Release](https://github.com/CZ0012/novelagent/releases/tag/v0.2.0) 提供 NSIS 安装器、匹配的 `setup.exe.sig` 与 `latest.json`，供程序内更新检查与安装使用。已实际验证从 0.1.16 在软件内升级至 0.2.0，并核对桌面与捆绑后端版本；源码构建输出与已发布资产仍分别记录。该版本具有 Tauri updater 签名，尚无 Windows Authenticode 代码签名。小说数据与模型连接配置保留在本地，不随 GitHub 发布或更新分发。
 
 其中 GitHub Release 只负责软件 release 资产分发，不承载小说项目数据同步。当前已验证的 Windows updater artifact 命名是 NSIS setup executable 加 `setup.exe.sig`，不是 `nsis.zip`。
 

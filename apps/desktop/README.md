@@ -37,7 +37,7 @@ The desktop hosts the same bilingual author workflow and preset APIs as the brow
 
 The desktop shell is a buildable source-level Tauri project. It includes npm scripts, a Rust crate, Tauri capabilities, a sci-fi Windows icon, hidden backend sidecar packaging, backend process commands, system-tray lifecycle handling, Tauri signed-updater configuration, and NSIS bundle configuration.
 
-It can produce a local Windows executable, updater artifacts, and NSIS installer. The generated `.exe`, backend sidecar, NSIS setup executable, and `setup.exe.sig` Tauri updater signature are local build outputs, not checked-in or published release artifacts.
+It can produce a local Windows executable, updater artifacts, and NSIS installer. Source-built `.exe`, backend sidecar, NSIS setup executable, and `setup.exe.sig` outputs remain separate from published release assets and are not checked into the repository. The [v0.2.0 release](https://github.com/CZ0012/novelagent/releases/tag/v0.2.0) now publishes the installer, matching Tauri updater signature, and `latest.json`. An actual in-app upgrade from 0.1.16 to 0.2.0 has been verified, including desktop and bundled backend versions. This release is Tauri updater signed but is not Windows Authenticode signed; novel data and model connection settings remain local.
 
 ## 中文优先与本地化入口
 
@@ -50,7 +50,7 @@ Use the project through one of these surfaces:
 - CLI workspace for persistent command-line authoring.
 - FastAPI + React/Vite workbench for browser-based local authoring.
 - Tauri desktop app for direct local use after a source build.
-- Signed release channel for future end users after a GitHub Release publishes `latest.json`, installer assets, and updater signatures.
+- Published signed release channel for end users, with the v0.2.0 GitHub Release providing `latest.json`, installer assets, and updater signatures.
 
 GitHub Release is only the software publishing and update-delivery channel. It is not a sync mechanism for local story workspaces, Source Store documents, canon, drafts, project settings, or review state.
 
