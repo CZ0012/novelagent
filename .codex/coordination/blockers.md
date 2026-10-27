@@ -4,7 +4,7 @@ Use this file for blockers that cannot be solved inside the current owner scope.
 
 ## Open Blockers
 
-No open user-authorization blockers. SG-031-BUDGET was explicitly approved; live acceptance is running within its cap.
+No open blockers for the completed bounded acceptance. SG-031-BUDGET was explicitly approved and later raised to a shared total100CNY with no global call cap. Live acceptance is finished within that cap; no paid worker is running. Historical blocker records below are retained.
 
 ## Blocker Template
 
