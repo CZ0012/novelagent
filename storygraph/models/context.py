@@ -9,6 +9,7 @@ from pydantic import Field
 from storygraph.models.common import ContractModel, Severity
 from storygraph.models.project import OutputLanguage
 from storygraph.models.temporal_state import TemporalStateProjection
+from storygraph.models.writer_visibility import ResolvedWriterVisibility
 
 
 DEFAULT_PRIORITY_ORDER = ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7"]
@@ -91,6 +92,8 @@ class ApprovedScenePlan(ContractModel):
 
 class ContextPack(ContractModel):
     contract_version: Literal["context_pack_v1"] = "context_pack_v1"
+    writer_visibility_required: bool = False
+    writer_visibility: ResolvedWriterVisibility | None = Field(default=None, exclude=True, repr=False)
     project_id: str
     output_language: OutputLanguage
     scene_id: str

@@ -28,12 +28,15 @@ def create_llm_provider(settings: StoryGraphSettings) -> OpenAICompatibleProvide
     return provider
 
 
-def create_scene_writer(settings: StoryGraphSettings, draft_store: SQLiteDraftStore):
+def create_scene_writer(settings: StoryGraphSettings, draft_store: SQLiteDraftStore, *, context_pack=None):
     if getattr(settings, "resolved_task", None) is None:
         settings = settings_for_task(settings, "writing")
     if settings.scene_writer == "rule_based":
         return RuleBasedSceneWriter(draft_store)
     if settings.scene_writer == "llm":
+        if context_pack is not None:
+            from storygraph.services.writer_visibility import preflight_writer_context
+            preflight_writer_context(context_pack)
         provider = create_llm_provider(settings)
         return LLMSceneWriter(
             draft_store=draft_store,

@@ -98,6 +98,12 @@ def test_complete_current_summary_stays_p0_under_budget_pressure(graph):
 
 
 def test_real_apply_current_summary_is_projected_without_changing_stored_plan(applied_setup):
+    from storygraph.models.writer_visibility import WriterVisibilityPolicy, WriterVisibilityRecord
+    from storygraph.services.writer_visibility import (
+        resolve_writer_visibility,
+        writer_source_context_sha256,
+    )
+
     graph = applied_setup[0]
     scene_id = applied(applied_setup)[0]
     before = graph_state(graph)
@@ -105,11 +111,26 @@ def test_real_apply_current_summary_is_projected_without_changing_stored_plan(ap
         project_id="project_test", scene_id=scene_id, target_tokens=12000
     )
     assert pack.scene_plan.planned_summary == graph.nodes[scene_id].properties["summary"]
+    # Applied long-form capture needs explicit simulated visibility permission,
+    # not a bypass of the new protected missing-policy gate.
+    spec = WriterVisibilityPolicy(
+        access_mode="pov",
+        surface_plan={"kind": "current_scene_summary"},
+        writer_style={"pov": "第三人称有限视角", "tone": "克制"},
+        characters=[{"character_id": pack.pov_character_id, "public_name": "林舟"}],
+    )
+    record = WriterVisibilityRecord(
+        project_id=pack.project_id,
+        scene_id=scene_id,
+        version=1,
+        spec=spec,
+        source_context_sha256=writer_source_context_sha256(pack),
+        configured_by="synthetic_fixture_loader",
+        configured_at="now",
+    )
+    pack.writer_visibility = resolve_writer_visibility(pack, record)
     provider = Capture()
     LLMSceneWriter(provider=provider, model="offline-fixture").draft(pack)
     sent = json.loads(provider.requests[0].messages[-1].content)
-    assert (
-        sent["context_pack"]["scene_plan"]["planned_summary"]
-        == graph.nodes[scene_id].properties["summary"]
-    )
+    assert sent["writer_view"]["surface_plan"] == graph.nodes[scene_id].properties["summary"]
     assert graph_state(graph) == before

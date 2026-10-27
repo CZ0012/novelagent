@@ -41,6 +41,7 @@ from storygraph.core.agent_config import (
 )
 from storygraph.core.config import StoryGraphSettings
 from storygraph.core.errors import ContractError, GraphStoreError, ModelOutputError
+from storygraph.models.writer_visibility import ProseInputGrants
 from storygraph.core.ids import new_id, slug_id
 from storygraph.core.time import utc_now
 from storygraph.demo import PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
@@ -427,6 +428,7 @@ class AgentDiscussionSourceRequest(BaseModel):
 
 class AgentDiscussionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    prose_input_grants: ProseInputGrants | None = None
     mode: Literal["discuss", "revise_selection", "revise_scene", "continue_scene", "create_scene"] = "discuss"
     instruction: str = Field(..., min_length=1)
     selected_text: str | None = None
@@ -617,7 +619,59 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     style_sample_store = SQLiteStyleSampleStore(
         settings.style_sample_store_path if use_persistent_stores else ":memory:"
     )
-    context_builder = ContextPackBuilder(graph, draft_store, style_sample_store)
+    from storygraph.stores.writer_visibility_store import SQLiteWriterVisibilityStore
+    from storygraph.models.writer_visibility import WriterVisibilityRecord
+    from storygraph.services.writer_visibility import resolve_writer_visibility, preflight_writer_context
+    from storygraph.services.writer_visibility_sources import validate_writer_policy_sources
+    from apps.api.writer_visibility_routes import register_writer_visibility_routes
+
+    visibility_store = SQLiteWriterVisibilityStore(proposal_store)
+    app.state.writer_visibility_store = visibility_store
+
+    def visibility_resolver(pack):
+        record = visibility_store.effective(pack.project_id, pack.scene_id)
+        if record is None:
+            return None
+        pack.writer_visibility_required = True
+        try:
+            validate_writer_policy_sources(graph, draft_store, pack.project_id, WriterVisibilityRecord.model_validate(record).spec)
+            return resolve_writer_visibility(pack, WriterVisibilityRecord.model_validate(record),
+                reader_source_resolver=draft_store.get_draft, character_scope_resolver=graph.get_node)
+        except (ContractError, GraphStoreError):
+            # Keep the complete author inspector usable for repairing stale settings.
+            # Required serialized marker makes a missing sidecar fail closed at drafting.
+            return None
+
+    context_builder = ContextPackBuilder(graph, draft_store, style_sample_store,
+        writer_visibility_resolver=visibility_resolver)
+    app.state.writer_visibility_context_builder = context_builder
+
+    def preflight_scene_writer(pack, runtime):
+        view = preflight_writer_context(pack)
+        if view["isolated"] and runtime.scene_writer == "rule_based":
+            raise ContractError("writer_visibility_rule_based_unsupported")
+        return view
+
+    def isolated_style_provenance(pack, preset):
+        visibility = pack.writer_visibility
+        snapshot = agent_preset_snapshot(preset)
+        return (
+            f" writer_visibility_policy={visibility.policy_fingerprint}; "
+            f"writer_style_origin={visibility.record.spec.writer_style_origin}; "
+            f"configured_agent_preset={snapshot['id'] if snapshot else 'none'}; "
+            "agent_preset_transmitted=false; author_discussion_history_transmitted=false."
+        )
+
+    def isolated_policy_ref(pack):
+        visibility = pack.writer_visibility
+        return ProposalRef(kind="writer_visibility_policy",
+            ref=f"{visibility.record.project_id}:{visibility.record.scene_id or 'project'}:v{visibility.record.version}",
+            source_span={"policy_fingerprint": visibility.policy_fingerprint,
+                         "source_context_sha256": visibility.source_context_sha256,
+                         "writer_style_origin": visibility.record.spec.writer_style_origin,
+                         "agent_preset_transmitted": False},
+            note="Approved visible style was sent; configured preset and author discussion history were not transmitted.")
+
     checker = RuleBasedContinuityChecker()
     extractor = RuleBasedStateExtractor()
     review = ReviewService(candidate_store, graph, draft_store=draft_store)
@@ -1433,6 +1487,10 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             _ensure_project_exists(graph, project_id)
             runtime = settings_for_task(settings, "planning")
             _require_llm_configured(runtime)
+            project = graph.get_node(project_id)
+            if (project.properties.get("require_semantic_review") or project.properties.get("longform_blueprint_id")
+                    or visibility_store.effective(project_id, None)):
+                raise ContractError("writer_visibility_create_scoped_scenes_before_composition")
             return generate_composition(
                 graph=graph, proposal_store=proposal_store, source_store=source_store,
                 draft_store=draft_store, project_id=project_id, request=request,
@@ -1638,15 +1696,18 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             body = request.body
             title = request.title
             generation_preset = None
+            generation_visibility = None
             generation_execution = None
             if body is None:
                 _ensure_proposal_artifact_type(existing, "scene_draft")
                 target_scene_id = _proposal_target_scene_id(existing)
                 context_pack = context_builder.build(project_id=project_id, scene_id=target_scene_id)
                 runtime = settings_for_task(settings, "revision")
+                preflight_scene_writer(context_pack, runtime)
                 writer = create_scene_writer(runtime, draft_store)
                 body = writer.draft(context_pack).text
                 generation_preset = getattr(writer, "agent_preset", None)
+                generation_visibility = context_pack if context_pack.writer_visibility is not None else None
                 generation_execution = getattr(writer, "model_execution", None)
                 current_language = context_pack.output_language
                 if existing.content_language != current_language and title is None:
@@ -1672,8 +1733,14 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 body=body,
                 body_format=request.body_format,
                 target_refs=request.target_refs,
-                source_refs=request.source_refs,
+                source_refs=(
+                    [ref for ref in (request.source_refs if request.source_refs is not None else existing.source_refs)
+                     if ref.kind != "writer_visibility_policy"] + [isolated_policy_ref(generation_visibility)]
+                    if generation_visibility is not None else request.source_refs
+                ),
                 note=(
+                    (request.note or "")[:800] + isolated_style_provenance(generation_visibility, generation_preset)
+                    if generation_visibility is not None else
                     (request.note or "")[:800] + agent_preset_provenance(generation_preset)
                     if generation_preset else request.note
                 ),
@@ -2428,9 +2495,43 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             context_pack = context_builder.build(project_id=project_id, scene_id=scene_id)
             if graph.get_node(project_id).properties.get("require_semantic_review"):
                 raise ContractError("This project requires reviewed scene proposals for generated prose; use the Agent workspace.")
+            preflight_scene_writer(context_pack, settings)
             return create_scene_writer(settings, draft_store).write_and_save(
                 context_pack
             ).model_dump()
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from exc
+
+    @app.post("/projects/{project_id}/scenes/{scene_id}/agent-discussion/preview")
+    def preview_scene_prose(project_id: str, scene_id: str, request: AgentDiscussionRequest) -> dict:
+        """Read-only exact protected prose request, using the generation preflight/builder."""
+        require_permission(AgentPermissionLevel.READ_ONLY)
+        try:
+            graph_query.scene_node(project_id=project_id, scene_id=scene_id)
+            if request.mode == "discuss":
+                raise ContractError("writer_visibility_preview_requires_prose_action")
+            if not request.include_context_pack:
+                raise ContractError("writer_visibility_context_required")
+            latest = (_get_scoped_scene_draft(draft_store, project_id=project_id, scene_id=scene_id,
+                      draft_id=request.included_draft_id) if request.include_latest_draft and request.included_draft_id
+                      else draft_store.latest_for_scene(project_id, scene_id) if request.include_latest_draft else None)
+            if request.mode == "create_scene":
+                current = draft_store.latest_for_scene(project_id, scene_id)
+                if current is not None and current.text.strip():
+                    raise ContractError("create_scene requires an empty scene; revise the saved Draft instead.")
+            pack = context_builder.build(project_id=project_id, scene_id=scene_id)
+            from storygraph.services.writer_visibility import preflight_agent_prose
+            view = preflight_agent_prose(pack, mode=request.mode, instruction=request.instruction,
+                prose_input_grants=request.prose_input_grants, selected_start=request.selected_start,
+                selected_end=request.selected_end, has_additional_sources=bool(request.source_document_ids or request.local_sources),
+                allow_web_search=request.allow_web_search, base_text=request.base_text,
+                selected_text=request.selected_text, latest_draft=latest)
+            if not view or not view.get("isolated"):
+                raise ContractError("writer_visibility_edit_preview_requires_isolated_policy")
+            messages = AgentDiscussionService._isolated_messages(view, request.mode,
+                resolve_project_output_language(graph, project_id))
+            return {"mode": "isolated", "writer_view": view,
+                    "messages": [{"role": m.role, "content": m.content} for m in messages]}
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
 
@@ -2468,6 +2569,18 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 if request.include_context_pack
                 else None
             )
+            if request.mode in {"create_scene", "continue_scene", "revise_scene", "revise_selection"}:
+                project = graph.get_node(project_id)
+                protected = bool(project.properties.get("require_semantic_review") or project.properties.get("longform_blueprint_id")
+                                 or visibility_store.effective(project_id, scene_id))
+                if context_pack is None and protected:
+                    raise ContractError("writer_visibility_context_required")
+                from storygraph.services.writer_visibility import preflight_agent_prose
+                preflight_agent_prose(context_pack, mode=request.mode, instruction=request.instruction,
+                    prose_input_grants=request.prose_input_grants, selected_start=request.selected_start, selected_end=request.selected_end,
+                    has_additional_sources=bool(request.source_document_ids or request.local_sources),
+                    allow_web_search=request.allow_web_search, base_text=request.base_text,
+                    selected_text=request.selected_text, latest_draft=latest)
             service = AgentDiscussionService(
                 provider=create_llm_provider(runtime),
                 model=runtime.llm_model,
@@ -2483,6 +2596,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 project_id=project_id,
                 scene_id=scene_id,
                 instruction=request.instruction,
+                prose_input_grants=request.prose_input_grants,
                 mode=request.mode,
                 output_language=output_language,
                 cross_language_policy=request.cross_language_policy,
@@ -2504,6 +2618,9 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     kind="scene_draft_baseline", ref=scene_id,
                     source_span={"draft_id": current.id if current else None, "empty": True},
                 ))
+            isolated_prose = request.mode != "discuss" and context_pack is not None and context_pack.writer_visibility is not None
+            result_source_refs = ([ref for ref in result.source_refs if ref.kind != "writer_visibility_policy"]
+                                  + [isolated_policy_ref(context_pack)] if isolated_prose else result.source_refs)
             now = utc_now()
             proposal = ProposalArtifact(
                 id=new_id("proposal"),
@@ -2515,7 +2632,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 body=result.proposal_body,
                 body_format=result.body_format,
                 target_refs=result.target_refs,
-                source_refs=result.source_refs,
+                source_refs=result_source_refs,
                 provenance=ProposalProvenance(
                     created_by="agent",
                     created_via="llm",
@@ -2532,7 +2649,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                             "author-selected context; "
                             f"cross_language_policy={request.cross_language_policy}."
                         ),
-                    ) + agent_preset_provenance(service.agent_preset),
+                    ) + (isolated_style_provenance(context_pack, service.agent_preset) if isolated_prose
+                         else agent_preset_provenance(service.agent_preset)),
                 ),
                 version=1,
                 created_at=now,
@@ -2553,7 +2671,10 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 ],
                 "truncated_sources": result.truncated_sources,
                 "replacement_applied": result.replacement_applied,
+                # Preserve the existing compact configured-preset snapshot; expose its actual transport role.
                 "agent_preset": agent_preset_snapshot(service.agent_preset),
+                "agent_preset_role": ("configured_only" if isolated_prose else "transmitted") if service.agent_preset else "none",
+                "agent_preset_transmitted": bool(service.agent_preset) and not isolated_prose,
                 "output_language": output_language,
                 "cross_language_policy": request.cross_language_policy,
             }
@@ -2792,6 +2913,11 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     ) -> dict:
         require_permission(AgentPermissionLevel.READ_GENERATE)
         request = request or SceneGenerationRunRequest()
+        try:
+            initial_pack = context_builder.build(project_id=project_id, scene_id=scene_id)
+            preflight_scene_writer(initial_pack, settings)
+        except (ContractError, GraphStoreError) as exc:
+            raise _contract_http_exception(exc) from None
         workflow = SceneGenerationWorkflow(
             context_builder=context_builder,
             writer=create_scene_writer(settings, draft_store),
@@ -2934,6 +3060,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         persist_snapshot=lambda snapshot: save_json_graph(snapshot, settings.graph_path)
         if use_persistent_stores else None,
     )
+    register_writer_visibility_routes(app, graph=graph, store=visibility_store, drafts=draft_store,
+        context_builder=context_builder, require_permission=require_permission)
     return app
 
 
@@ -3575,6 +3703,12 @@ def _require_llm_configured(settings: StoryGraphSettings) -> None:
 
 
 def _contract_http_exception(exc: ContractError | GraphStoreError) -> HTTPException:
+    if str(exc) == "writer_visibility_rule_based_unsupported":
+        return HTTPException(status_code=409, detail={
+            "category": "writer_visibility_rule_based_unsupported",
+            "message": "当前场景已启用正文信息隔离；本地规则模板不支持此范围。请在 Agent 设置中选择 LLM 正文写作器，并先检查正文模型可见范围，再从当前场景写作入口生成。",
+            "next_action": "configure_llm_writer_and_preview_scene_visibility",
+        })
     if isinstance(exc, ModelOutputError):
         return HTTPException(status_code=409, detail={"category": "model_output_invalid", "message": "The model returned an invalid content format; no generated Draft was saved."})
     if isinstance(exc, GraphStoreError):

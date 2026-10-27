@@ -318,3 +318,10 @@ is preserved. The brief participates in currentness checks, so earlier plan
 reports may need explicit fresh review. Existing failed responses are unchanged;
 no review is retried automatically. Rebuild the desktop backend to include this
 source change in a local candidate.
+
+### Local disclosure settings
+
+The desktop context inspector uses the same local Writer Visibility policy API/store as API + Web and CLI. Protected scenes require explicit surface/claim/name/voice approval; preview shows actual prose-model messages. Missing/stale policy blocks generation, and policies never mutate Graph canon. Legacy unisolated mode is labelled. See `contracts/writer_visibility_v1.md`; local settings and novel content are not synchronized through GitHub Releases or the updater.
+
+
+Protected continuation, whole-scene revision and selection revision use explicit per-request instruction/editing-target grants with saved Draft version/hash/UTF-16 validation. Selection sends only the selected span. The Agent panel can preview the same actual action messages without a model call; an action button authorizes its displayed input without another confirmation. Additional sources/search/history are not implicitly disclosed. Legacy unprotected prose preserves the original full-context behavior and is explicitly marked `legacy_unisolated`.

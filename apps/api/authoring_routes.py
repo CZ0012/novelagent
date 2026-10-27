@@ -179,6 +179,12 @@ def register_authoring_routes(
                     project_id=target.project_id, proposal=proposal, plan=plan)
                 kwargs["author_brief"] = (plan.request.instruction if plan.phase == "blueprint"
                     else _parent(proposal_store, target.project_id, plan.request)[1].request.instruction)
+        if target.purpose == "scene" and target.scene_id:
+            from storygraph.services.writer_visibility import scene_review_constraint
+            # Full author canon/style stay in the critic. Only prose transmission is projected.
+            constraint = scene_review_constraint(pack)
+            if constraint is not None:
+                kwargs["narrative_constraint"] = constraint
         return canon, kwargs, runtime, gaps
 
     def error_response(exc):

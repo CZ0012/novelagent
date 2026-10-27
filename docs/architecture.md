@@ -2005,3 +2005,10 @@ is preserved. The brief participates in currentness checks, so earlier plan
 reports may need explicit fresh review. Existing failed responses are unchanged;
 no review is retried automatically. Rebuild the desktop backend to include this
 source change in a local candidate.
+
+## Local Writer Visibility v1 boundary
+
+Writer-purpose positive projection is governed by `contracts/writer_visibility_v1.md`. Policies are CAS-versioned local Proposal SQLite records with project defaults and scene overrides, separate from Graph/canon and PLAN fingerprints. The full author Context Pack remains available for canon review; protected prose consumes only approved surface plans, positive claims, explicit public names and a source-labelled style capsule. Serialized protection survives loss of the runtime resolver sidecar by failing closed. Exact same-project Draft/version/hash/UTF-16 reader references and private expected inference are review constraints, not automatic reader facts or editing grants. Scene semantic-review freshness/adoption includes the current disclosure constraint; canonical style remains authoritative. API/Writer both preflight before provider calls, and Web preview displays actual transmitted messages. Legacy unisolated mode is explicit. This does not implement an inferred Reader Store.
+
+
+Protected continuation, whole-scene revision and selection revision use explicit per-request instruction/editing-target grants with saved Draft version/hash/UTF-16 validation. Selection sends only the selected span. The Agent panel can preview the same actual action messages without a model call; an action button authorizes its displayed input without another confirmation. Additional sources/search/history are not implicitly disclosed. Legacy unprotected prose preserves the original full-context behavior and is explicitly marked `legacy_unisolated`.

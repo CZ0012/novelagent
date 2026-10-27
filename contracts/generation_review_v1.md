@@ -471,3 +471,9 @@ never embeds the current nonce. This ordering permits stable-prefix reuse but
 does not guarantee provider cache hits or compliance. Canonical hashing remains
 on the unchanged sorted canonical_json path; report fingerprints, freshness,
 provider protocol and accepted runtime shapes do not change.
+
+## Scene narrative disclosure constraint
+
+When explicitly provided, `narrative_constraint` is a bounded author-side style source identifying the current local Writer Visibility policy, approved voice source and exact reader bindings. It participates in scene review fingerprints and adoption freshness. Review still receives full canonical authority; a character knowing a fact does not permit its reader disclosure. Expected inference is an intention, not proof readers already saw it. No-policy/default and PLAN fingerprints remain compatible; policy changes never rewrite or recertify old reports. See `writer_visibility_v1.md`.
+
+Review interpretation distinguishes statements, records and declarations from actual events or measured quantities. Where the author explicitly establishes lying, misbelief or falsification, the critic checks the actual physical flow; a false declared value does not itself need to be physically realizable. The critic must not invent an unstated validator that would prevent the deception. Evidenced actual physical limit violations still require normal findings and unchanged grounding.

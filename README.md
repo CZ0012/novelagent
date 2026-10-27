@@ -541,3 +541,10 @@ is preserved. The brief participates in currentness checks, so earlier plan
 reports may need explicit fresh review. Existing failed responses are unchanged;
 no review is retried automatically. Rebuild the desktop backend to include this
 source change in a local candidate.
+
+## Writer-visible disclosure policy
+
+The full author Context Pack and the information sent to a prose model are distinct. Protected long-form scenes require a local versioned [Writer Visibility policy](contracts/writer_visibility_v1.md). In the context inspector, choose a project default or scene override, explicitly approve a surface plan, public character names, claims and a voice capsule, then preview the actual model messages. The current-scene-summary template requires an explicit author choice. Saving policy never writes canon or grants character knowledge. Reader-presented Draft spans and expected inference stay author-side; they are not automatically disclosures. Missing/stale policy blocks before a paid call. Legacy projects remain explicitly unisolated. API, Web and CLI share the same local policy store; the desktop shell hosts this same workflow.
+
+
+Protected continuation, whole-scene revision and selection revision use explicit per-request instruction/editing-target grants with saved Draft version/hash/UTF-16 validation. Selection sends only the selected span. The Agent panel can preview the same actual action messages without a model call; an action button authorizes its displayed input without another confirmation. Additional sources/search/history are not implicitly disclosed. Legacy unprotected prose preserves the original full-context behavior and is explicitly marked `legacy_unisolated`.

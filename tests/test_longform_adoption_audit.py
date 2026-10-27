@@ -85,6 +85,13 @@ def test_scene_style_overrides_are_used_by_semantic_review(audit_setup):
     client, provider = audit_setup
     draft = client.post(f"/projects/{PROJECT_ID}/scenes/{SCENE_ID}/draft",
                         json={"text": "林烬站在门边，打量门上的锁。"}).json()
+    pack = client.post(f"/projects/{PROJECT_ID}/scenes/{SCENE_ID}/context-pack", json={}).json()
+    saved = client.put(f"/projects/{PROJECT_ID}/writer-visibility", json={"expected_version":0, "spec":{
+        "access_mode":"surface", "surface_plan":{"kind":"literal", "text":"林烬观察门上的锁。"},
+        "writer_style":{}, "characters":[{"character_id":pack["pov_character_id"], "public_name":"林烬"}],
+        "visible_claims":[{"text":text,"presentation":"observation","phase":"during_scene"} for text in pack["must_include"]],
+    }})
+    assert saved.status_code == 200, saved.text
     response = client.post(f"/projects/{PROJECT_ID}/generation-reviews", json={
         "target_type": "draft", "target_id": draft["id"], "expected_version": draft["version"], "scene_id": SCENE_ID,
     })

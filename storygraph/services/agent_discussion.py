@@ -153,6 +153,7 @@ class AgentDiscussionService:
         local_sources: list[DiscussionSource] | None = None,
         allow_web_search: bool = False,
         web_search_query: str | None = None,
+        prose_input_grants=None,
     ) -> AgentDiscussionDraft:
         instruction = instruction.strip()
         if not instruction:
@@ -167,6 +168,13 @@ class AgentDiscussionService:
             raise ContractError(
                 "Context Pack scope or output_language does not match the Agent request."
             )
+        from storygraph.services.writer_visibility import preflight_agent_prose
+
+        writer_view = preflight_agent_prose(context_pack, mode=mode, instruction=instruction,
+            has_additional_sources=bool(local_sources), allow_web_search=allow_web_search,
+            base_text=base_text, selected_text=selected_text, latest_draft=latest_draft,
+            local_sources=local_sources, selected_start=selected_start, selected_end=selected_end,
+            prose_input_grants=prose_input_grants)
         if latest_draft is not None and (
             latest_draft.project_id != project_id
             or latest_draft.scene_id != scene_id
@@ -209,22 +217,32 @@ class AgentDiscussionService:
             if allow_web_search
             else []
         )
-        payload, truncated_sources = self._payload(
-            project_id=project_id,
-            scene_id=scene_id,
-            instruction=instruction,
-            mode=mode,
-            output_language=output_language,
-            cross_language_policy=cross_language_policy,
-            selected_text=selected_text,
-            base_text=base_text,
-            context_pack=context_pack,
-            latest_draft=latest_draft,
-            local_sources=local_sources or [],
-            web_results=web_results,
-        )
-        preset_message = agent_preset_system_message(self.agent_preset)
-        style_message = project_style_message(self.project_style)
+        isolated = writer_view is not None and writer_view["isolated"]
+        if isolated:
+            default = Path(__file__).parents[1] / "prompts" / "agent_discussion.md"
+            if self.prompt_path.resolve() != default.resolve():
+                raise ContractError("writer_visibility_custom_prompt_unsupported")
+            truncated_sources = []
+            messages = self._isolated_messages(writer_view, mode, output_language)
+        else:
+            payload, truncated_sources = self._payload(
+                project_id=project_id, scene_id=scene_id, instruction=instruction,
+                mode=mode, output_language=output_language, cross_language_policy=cross_language_policy,
+                selected_text=selected_text, base_text=base_text,
+                context_pack=context_pack,
+                latest_draft=latest_draft, local_sources=local_sources or [], web_results=web_results)
+            prompt = self.prompt_path.read_text(encoding="utf-8")
+            if writer_view is not None:
+                payload["writer_mode"] = "legacy_unisolated"
+                if "writing_task" in writer_view:
+                    task = writer_view["writing_task"]
+                    payload["instruction"] = task["instruction"]
+                    payload["base_text"] = task.get("target_text", "") if mode != "revise_selection" else ""
+                    payload["selected_text"] = task.get("target_text", "") if mode == "revise_selection" else ""
+                    payload["base_text_truncated"] = False
+                    truncated_sources = [s for s in truncated_sources if s != "base_text"]
+        preset_message = None if isolated else agent_preset_system_message(self.agent_preset)
+        style_message = None if isolated else project_style_message(self.project_style)
         response = self.provider.generate(
             LLMRequest(
                 model=self.model,
@@ -232,8 +250,8 @@ class AgentDiscussionService:
                 max_tokens=completion_budget(self.provider, (
                     planned_completion_budget(context_pack, baseline=4096)
                     if mode in {"create_scene", "revise_scene"} else 4096)),
-                messages=[
-                    LLMMessage(role="system", content=self.prompt_path.read_text(encoding="utf-8")),
+                messages=messages if isolated else [
+                    LLMMessage(role="system", content=prompt),
                     *([LLMMessage(role="system", content=preset_message)] if preset_message else []),
                     *([LLMMessage(role="system", content=style_message)] if style_message else []),
                     LLMMessage(
@@ -260,8 +278,25 @@ class AgentDiscussionService:
             context_pack=context_pack, local_sources=local_sources or [],
             web_results=web_results, instruction=instruction,
         )
+        if isolated:
+            visibility = context_pack.writer_visibility
+            source_refs = [ProposalRef(kind="writer_visibility_policy",
+                ref=f"{visibility.record.project_id}:{visibility.record.scene_id or 'project'}:v{visibility.record.version}",
+                source_span={"policy_fingerprint": visibility.policy_fingerprint,
+                             "source_context_sha256": visibility.source_context_sha256},
+                note="Only the approved writer view was sent; full author context and private sources were withheld.")]
+            source_refs.append(ProposalRef(kind="author_instruction", ref="explicit_current_request",
+                source_span={"text_sha256": hashlib.sha256(instruction.encode()).hexdigest(),
+                             "input_grant": prose_input_grants is not None},
+                note="Current-request instruction was authorized; this is not reader disclosure permission or canon."))
+            if latest_draft is not None and writer_view.get("writing_task", {}).get("target_text") is not None:
+                source_refs.append(ProposalRef(kind="draft", ref=latest_draft.id, source_span={
+                    "version": latest_draft.version, "text_sha256": hashlib.sha256(latest_draft.text.encode()).hexdigest(),
+                    "draft_text_sha256": hashlib.sha256(latest_draft.text.encode()).hexdigest(),
+                    "offset_unit": "utf16", "start": selected_start, "end": selected_end},
+                    note="Explicit current-request editing target; only the selected span is sent for selection revision."))
         if exact_span is not None and latest_draft is not None:
-            source_refs = [ref.model_copy(update={"source_span": {
+            source_refs = [ref.model_copy(update={"source_span": {**(ref.source_span or {}),
                 "start": selected_start, "end": selected_end, "offset_unit": "utf16",
                 "text_sha256": hashlib.sha256(selected_text.encode()).hexdigest(),
             }}) if ref.kind == "draft" and ref.ref == latest_draft.id else ref for ref in source_refs]
@@ -272,6 +307,19 @@ class AgentDiscussionService:
             web_results=web_results,
             truncated_sources=truncated_sources,
         )
+
+    @staticmethod
+    def _isolated_messages(view, mode, output_language):
+        """Shared preview/send path. No author history, dossier, preset or source dump."""
+        field = {"continue_scene": "continuation_text", "revise_selection": "replacement_text",
+                 "create_scene": "proposal_body", "revise_scene": "proposal_body"}.get(mode)
+        if field is None:
+            raise ContractError("writer_visibility_unknown_prose_action")
+        prompt = (Path(__file__).parents[1] / "prompts" / "writer_visible_scene.md").read_text(encoding="utf-8")
+        prompt += f"\nFor this prose action return strict JSON reply, proposal_title and {field}, instead of text/summary/self_check. Authorized instruction/editing input is not canon, reader permission or entry knowledge."
+        return [LLMMessage(role="system", content=prompt),
+            LLMMessage(role="system", content=authoritative_language_message(output_language)),
+            LLMMessage(role="user", content=json.dumps({"action": mode, "writer_view": view}, ensure_ascii=False, indent=2))]
 
     def _payload(
         self,

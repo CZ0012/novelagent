@@ -17,6 +17,7 @@ export type ApprovedScenePlan = {
   foreshadowing_actions: Array<{ id: string; relation_id: string; action: "seed" | "payoff"; clue_text: string | null; planned_payoff: string | null; seed_scene_ids: string[]; do_not_reveal_payoff: boolean }>;
 };
 export type ContextPack = {
+  writer_visibility_required?: boolean;
   contract_version: "context_pack_v1";
   project_id: string;
   output_language: OutputLanguage;
@@ -262,7 +263,10 @@ export type AgentDiscussionSource = {
   note?: string | null;
 };
 
+export type ProseInputGrants = { instruction: boolean; instruction_sha256: string; target: "none" | "draft" | "selection"; draft_id?: string; version?: number; text_sha256?: string; start?: number; end?: number; expected_text?: string; offset_unit?: "utf16" };
+
 export type AgentDiscussionRequest = {
+  prose_input_grants?: ProseInputGrants;
   mode: AgentDiscussionMode;
   instruction: string;
   selected_text?: string | null;
@@ -280,6 +284,8 @@ export type AgentDiscussionRequest = {
 };
 
 export type AgentDiscussionResult = {
+  agent_preset_role?: "configured_only" | "transmitted" | "none";
+  agent_preset_transmitted?: boolean;
   model_execution?: ModelExecution;
   proposal: ProposalArtifact;
   reply: string;

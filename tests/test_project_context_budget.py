@@ -11,6 +11,10 @@ from apps.cli import main as cli
 from storygraph.core.config import StoryGraphSettings
 from storygraph.core.errors import ContractError
 from storygraph.models.context import ContextPack
+from storygraph.models.writer_visibility import WriterVisibilityPolicy, WriterVisibilityRecord
+from storygraph.services.writer_visibility import resolve_writer_visibility
+from storygraph.stores.proposal_store import SQLiteProposalStore
+from storygraph.stores.writer_visibility_store import SQLiteWriterVisibilityStore
 from storygraph.services.context_pack_builder import ContextPackBuilder
 from storygraph.services.llm_provider import LLMResponse
 from storygraph.services.scene_writer import LLMSceneWriter
@@ -55,6 +59,23 @@ def rich_graph():
     return graph
 
 
+def approved_policy():
+    return WriterVisibilityPolicy(access_mode="surface", surface_plan={"kind":"literal", "text":"检修员记下表盘读数。"},
+        writer_style={"tone":"克制具体"}, characters=[{"character_id":"hero", "public_name":"检修员"}],
+        visible_claims=[{"text":"检修员记下表盘读数。", "presentation":"observation", "phase":"during_scene"}])
+
+
+def authorize_writer(pack):
+    proposals = SQLiteProposalStore()
+    store = SQLiteWriterVisibilityStore(proposals)
+    value = store.save(project_id=pack.project_id, scene_id=None, expected_version=0,
+        spec=approved_policy().model_dump(mode="json"), source_context_sha256=None,
+        configured_by="fixture_author")
+    pack.writer_visibility = resolve_writer_visibility(pack, WriterVisibilityRecord.model_validate(value))
+    proposals.close()
+    return pack
+
+
 class Capture:
     def __init__(self):
         self.requests = []
@@ -74,9 +95,12 @@ def test_project_default_preserves_rich_protected_context_and_explicit_4000_bloc
         assert getattr(default, field) == getattr(explicit, field)
     capture = Capture()
     writer = LLMSceneWriter(provider=capture, model="offline-capture")
-    writer.draft(default)
+    writer.draft(authorize_writer(default))
     assert len(capture.requests) == 1
-    assert json.loads(capture.requests[0].messages[-1].content)["context_pack"] == default.model_dump(mode="json")
+    sent = json.loads(capture.requests[0].messages[-1].content)
+    assert "context_pack" not in sent and sent["writer_view"]["isolated"]
+    assert sent["writer_view"]["claims"][0]["text"] == approved_policy().visible_claims[0].text
+    assert "校验常数被错误录入" not in json.dumps(sent, ensure_ascii=False)
     with pytest.raises(ContractError, match="critical missing context"):
         writer.draft(explicit)
     assert len(capture.requests) == 1
@@ -86,6 +110,7 @@ def test_api_omitted_empty_null_and_explicit_context_budgets_and_default_workflo
     graph = rich_graph()
     settings = StoryGraphSettings(tmp_path)
     settings.graph_backend, settings.graph_backend_explicit = "json", True
+    settings.scene_writer = "llm"
     save_json_graph(graph, settings.graph_path)
     capture = Capture()
     monkeypatch.setattr(main, "create_scene_writer", lambda _settings, drafts: LLMSceneWriter(provider=capture, model="offline-capture", draft_store=drafts))
@@ -101,12 +126,19 @@ def test_api_omitted_empty_null_and_explicit_context_budgets_and_default_workflo
     assert not capture.requests
     for value in (True, False, 0, -1, 4000.5):
         assert client.post(path, json={"target_tokens": value}).status_code == 422
+    saved = client.put("/projects/p/writer-visibility", json={"expected_version":0,
+        "spec":approved_policy().model_dump(mode="json")})
+    assert saved.status_code == 200, saved.text
     response = client.post("/projects/p/scenes/scene/runs/scene-generation", json={"output_target": "proposal_workspace"})
     assert response.status_code == 200, response.text
     assert len(capture.requests) == 1 and response.json()["draft"] is None
-    sent = json.loads(capture.requests[0].messages[-1].content)["context_pack"]
-    assert sent["budget"]["target_tokens"] == 8000 and sent["scene_plan"]["target_length"] == 2500
-    assert len(sent["style_constraints"]["rubric"]) == 8 and sent["knowledge_boundaries"][0]["knows"] == ["secret"]
+    author_pack = response.json()["context_pack"]
+    assert author_pack["budget"]["target_tokens"] == 8000 and author_pack["scene_plan"]["target_length"] == 2500
+    assert len(author_pack["style_constraints"]["rubric"]) == 8 and author_pack["knowledge_boundaries"][0]["knows"] == ["secret"]
+    sent = json.loads(capture.requests[0].messages[-1].content)
+    assert "context_pack" not in sent and sent["writer_view"]["target_length"] == 2500
+    assert sent["writer_view"]["claims"][0]["text"] == approved_policy().visible_claims[0].text
+    assert "校验常数被错误录入" not in json.dumps(sent, ensure_ascii=False)
 
 
 def test_legacy_default_and_cli_explicit_budget_remain_distinct(tmp_path, monkeypatch, capsys):
@@ -162,7 +194,7 @@ def test_omitted_protected_budget_grows_in_bounded_steps_without_changing_fields
         assert getattr(auto, field) == getattr(explicit_8k, field)
     capture = Capture()
     writer = LLMSceneWriter(provider=capture, model="offline-capture")
-    writer.draft(auto)
+    writer.draft(authorize_writer(auto))
     with pytest.raises(ContractError):
         writer.draft(explicit_8k)
     assert len(capture.requests) == 1

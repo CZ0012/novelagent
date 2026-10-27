@@ -18,6 +18,7 @@ from storygraph.services.project_language import authoritative_language_message
 from storygraph.services.project_language import validate_generated_output_language
 from storygraph.services.project_style import project_style_message
 from storygraph.services.generation_budget import completion_budget, planned_completion_budget
+from storygraph.services.writer_visibility import preflight_writer_context
 from storygraph.stores.draft_store import SQLiteDraftStore
 
 
@@ -36,6 +37,9 @@ class RuleBasedSceneWriter:
 
     def draft(self, context_pack: ContextPack) -> DraftResult:
         _validate_context_pack_for_drafting(context_pack)
+        if context_pack.writer_visibility_required or context_pack.writer_visibility is not None:
+            preflight_writer_context(context_pack)
+            raise ContractError("writer_visibility_rule_based_unsupported")
         _validate_rule_based_context_language(context_pack)
         required_lines = "\n".join(f"- {item}" for item in context_pack.must_include)
         relationship_hint = "; ".join(context_pack.active_relationships[:3]) or localized(
@@ -129,6 +133,7 @@ class LLMSceneWriter:
 
     def draft(self, context_pack: ContextPack) -> DraftResult:
         _validate_context_pack_for_drafting(context_pack)
+        preflight_writer_context(context_pack)
         response = self.provider.generate(
             LLMRequest(
                 model=self.model,
@@ -145,17 +150,31 @@ class LLMSceneWriter:
         if not self.draft_store:
             raise RuntimeError("write_and_save requires a draft store")
         result = self.draft(context_pack)
+        provenance = {"model_execution": self.model_execution} if self.model_execution else {}
+        if context_pack.writer_visibility is not None:
+            provenance["writer_visibility"] = {
+                "policy_fingerprint": context_pack.writer_visibility.policy_fingerprint,
+                "source_context_sha256": context_pack.writer_visibility.source_context_sha256,
+                "preset_transmitted": False,
+            }
         return self.draft_store.create_draft(
             project_id=context_pack.project_id,
             scene_id=context_pack.scene_id,
             content_language=context_pack.output_language,
             text=result.text,
             summary=result.summary,
-            provenance={"model_execution": self.model_execution} if self.model_execution else None,
+            provenance=provenance or None,
         )
 
     def _messages(self, context_pack: ContextPack) -> list[LLMMessage]:
-        prompt_contract = self.prompt_path.read_text(encoding="utf-8")
+        view = preflight_writer_context(context_pack)
+        if view["isolated"]:
+            default = Path(__file__).parents[1] / "prompts" / "scene_writer.md"
+            if self.prompt_path.resolve() != default.resolve():
+                raise ContractError("writer_visibility_custom_prompt_unsupported")
+            prompt_contract = (Path(__file__).parents[1] / "prompts" / "writer_visible_scene.md").read_text(encoding="utf-8")
+        else:
+            prompt_contract = self.prompt_path.read_text(encoding="utf-8")
         response_example = {
             "text": localized(
                 context_pack.output_language, zh="仅填写本场景正文。", en="Scene prose only."
@@ -169,6 +188,12 @@ class LLMSceneWriter:
                 else ["Checked the POV and knowledge boundary.", "Checked canon safety."]
             ),
         }
+        if view["isolated"]:
+            response_example["self_check"] = (
+                ["已保持指定视角。", "已遵循本场可见信息与披露阶段。"]
+                if context_pack.output_language == "zh-CN"
+                else ["Kept the specified viewpoint.", "Followed the visible information and disclosure phases."]
+            )
         example_json = json.dumps(response_example, ensure_ascii=False, indent=2)
         example_marker = "{{scene_writer_response_example}}"
         example_message = None
@@ -184,14 +209,21 @@ class LLMSceneWriter:
             ) + "\n```json\n" + example_json + "\n```"
         user_payload = {
             "instruction": (
-                "Draft the current scene from this context_pack_v1. Return only a JSON object "
+                "Draft the current scene from this writer_visible_context_v1. Return only a JSON object "
                 "with string field `text`, string field `summary`, and array field `self_check`."
             ),
             "output_language": context_pack.output_language,
-            "context_pack": context_pack.model_dump(),
+            "writer_view": view,
         }
-        preset_message = agent_preset_system_message(self.agent_preset)
-        style_message = project_style_message(context_pack.style_constraints.model_dump())
+        if not view["isolated"]:
+            user_payload = {
+                "instruction": "Draft the current scene from this context_pack_v1. Return only a JSON object with string field `text`, string field `summary`, and array field `self_check`.",
+                "output_language": context_pack.output_language,
+                "context_pack": context_pack.model_dump(),
+                "writer_mode": "legacy_unisolated",
+            }
+        preset_message = None if view["isolated"] else agent_preset_system_message(self.agent_preset)
+        style_message = None if view["isolated"] else project_style_message(context_pack.style_constraints.model_dump())
         return [
             LLMMessage(role="system", content=prompt_contract),
             *([LLMMessage(role="system", content=example_message)] if example_message else []),

@@ -102,3 +102,7 @@ Full real-provider book acceptance remains open under SG-031-BUDGET. Implementat
 ## 2026-10-25 Front final source and browser follow-up
 
 Front fixed Context evidence, dirty Draft omission, source_changed recovery guidance, explicit Context build/refresh, and large-project inspector layout. Complete frontend259tests passed before the final button/layout additions; latest14focusedchecks/build passed. Main verified the isolated100chapter/200scene UI in Edge: Context action populates approvedplan/budget/seed protection, graph collapsed and expanded keep Context readable. Evidence remains in ignored UI-fixture folder; no real novel quality claim, paid model call, or author workspace mutation from UI test. Role rules mirrored by Main because Front could not write protected coordination files.
+
+## SG-032 readiness handoff — 2026-10-27
+
+Independent Review完成投影、完整作者审查权威、精确编辑授权和checkpoint fail-closed审查；omniscient belief合同偏差经Main授权最小修复，49项定向通过。API测试保留导入前HOME/key隔离且恢复环境，11项及Ruff通过。报告在忽略的 .storygraph/writer-visibility-independent-review-20261027.md。最终全回归、Web确认、新包构建交Main；旧59e2721包不含修改。真实整书50/100章规划，旧Writer v6为局部修正后通过；新隔离只有离线UI/假模型证据，文学目标仍active。未改源计划、未真实调用、未提交。

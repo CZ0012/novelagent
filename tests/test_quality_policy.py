@@ -12,7 +12,11 @@ from storygraph.models.proposal import ProposalArtifact, ProposalProvenance, Pro
 from storygraph.services.context_pack_builder import ContextPackBuilder
 from storygraph.services.continuity_checker import RuleBasedContinuityChecker
 from storygraph.services.manuscript_composition import CompositionApplyRequest, apply_composition
-from storygraph.services.scene_writer import RuleBasedSceneWriter
+from storygraph.services.scene_writer import LLMSceneWriter
+from storygraph.services.llm_provider import LLMResponse
+from storygraph.models.writer_visibility import WriterVisibilityRecord
+from storygraph.services.writer_visibility import resolve_writer_visibility
+from storygraph.stores.writer_visibility_store import SQLiteWriterVisibilityStore
 from storygraph.services.state_extraction import RuleBasedStateExtractor
 from storygraph.stores.draft_store import SQLiteDraftStore
 from storygraph.stores.json_graph import save_json_graph
@@ -31,16 +35,31 @@ def opt_in(graph):
 def test_workflow_blocks_direct_draft_before_writer_but_allows_isolated_proposal(kind):
     if kind == "langgraph":
         pytest.importorskip("langgraph")
-    graph = build_fantasy_demo_graph()
+    graph = build_fantasy_demo_graph("zh-CN")
     opt_in(graph)
     drafts, proposals = SQLiteDraftStore(), SQLiteProposalStore()
-    class Writer(RuleBasedSceneWriter):
+    policy_store = SQLiteWriterVisibilityStore(proposals)
+    scene = graph.nodes[SCENE_ID]
+    required = scene.properties.get("must_include", [])
+    policy = {"access_mode":"surface", "surface_plan":{"kind":"literal", "text":"仅观察门前的封蜡。"},
+        "writer_style":{"tone":"克制"}, "characters":[{"character_id":scene.properties["pov_character_id"], "public_name":"林烬"}],
+        "visible_claims":[{"text":text,"presentation":"observation","phase":"during_scene"} for text in required]}
+    policy_store.save(project_id=PROJECT_ID, scene_id=None, expected_version=0, spec=policy, source_context_sha256=None)
+    def resolver(pack):
+        return resolve_writer_visibility(pack, WriterVisibilityRecord.model_validate(policy_store.effective(PROJECT_ID, SCENE_ID)))
+    class Provider:
+        def __init__(self): self.requests = []
+        def generate(self, request):
+            self.requests.append(request)
+            return LLMResponse(json.dumps({"text":"林烬核对门前的封蜡。"+"；".join(required), "summary":"他只观察封蜡。", "self_check":[]},ensure_ascii=False))
+    provider = Provider()
+    class Writer(LLMSceneWriter):
         calls = 0
         def draft(self, context):
             self.calls += 1
             return super().draft(context)
-    writer = Writer(drafts)
-    workflow = SceneGenerationWorkflow(context_builder=ContextPackBuilder(graph, drafts), writer=writer,
+    writer = Writer(provider=provider, model="offline-quality-fixture", draft_store=drafts)
+    workflow = SceneGenerationWorkflow(context_builder=ContextPackBuilder(graph, drafts, writer_visibility_resolver=resolver), writer=writer,
         checker=RuleBasedContinuityChecker(), extractor=RuleBasedStateExtractor(),
         proposal_store=proposals, runtime_kind=kind)
     try:
@@ -55,6 +74,11 @@ def test_workflow_blocks_direct_draft_before_writer_but_allows_isolated_proposal
         assert result.continuity_report is None and result.candidates == []
         assert drafts.latest_for_scene(PROJECT_ID, SCENE_ID) is None
         assert len(proposals.list()) == 1 and writer.calls == 1
+        assert len(provider.requests) == 1
+        wire = json.loads(provider.requests[0].messages[-1].content)
+        assert wire["writer_view"]["isolated"] is True and "context_pack" not in wire
+        assert [claim["text"] for claim in wire["writer_view"]["claims"]] == required
+        assert scene.properties["pov_character_id"] not in json.dumps(wire, ensure_ascii=False)
         assert graph.event_log.list() == events
     finally:
         workflow.close()
@@ -120,11 +144,9 @@ def test_cli_direct_generation_and_workflow_cannot_bypass_but_manual_save_works(
     with pytest.raises(GraphStoreError) as error:
         write_scene_command(workspace=tmp_path, project_id=PROJECT_ID, scene_id=SCENE_ID)
     assert error.value.category == "generation_review_required" and not called
-    # Workflow guard is in the shared runtime; its constructor may create a
-    # writer, but .run rejects before that writer generates any prose.
-    monkeypatch.undo()
+    # The CLI direct-Draft quality guard runs before visibility and factory work.
     with pytest.raises(GraphStoreError) as error:
         run_scene_command(workspace=tmp_path, project_id=PROJECT_ID, scene_id=SCENE_ID)
-    assert error.value.category == "generation_review_required"
+    assert error.value.category == "generation_review_required" and not called
     manual = write_scene_command(workspace=tmp_path, project_id=PROJECT_ID, scene_id=SCENE_ID, text="作者保存的文字。")
     assert manual["text"] == "作者保存的文字。"

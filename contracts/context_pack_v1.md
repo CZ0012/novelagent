@@ -285,3 +285,7 @@ Token estimation counts Han characters conservatively instead of applying the En
 ContextPack adds temporal_states projections for explicitly tracked Character/Item slots. `at_scene_start=true` excludes assertions made during the current scene. Resolved typed values override baseline/descriptive arc text; unknown/ambiguous tracked slots are critical context gaps. Legacy entities with no explicit baseline or assertion history do not acquire guessed state slots. Item retrieval uses explicit scene references/names or ownership resolved at scene entry; future ownership alone must not reveal the item. A guarded local graph read keeps each context build internally consistent.
 
 Semantic scene evidence uses the same entry projection from a frozen graph and includes only the used prior assertion references, excluding future/superseded raw assertion text. Plan review excludes explicitly superseded state records while retaining all history in the canon fingerprint. Explicit history routes keep the old audit evidence available.
+
+## Writer-purpose boundary
+
+The full pack is author-side. `writer_visibility_required` is serialized; the resolved Writer Visibility sidecar is excluded. Required packs missing that sidecar fail closed rather than reverting to legacy. Local positive disclosure projection and reader/source binding follow `writer_visibility_v1.md`; raw author canon remains available for review. No policy is inferred from style POV or approved summary alone.

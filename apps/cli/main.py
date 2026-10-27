@@ -15,7 +15,7 @@ from typing import Any
 
 from storygraph.core.config import StoryGraphSettings
 from storygraph.core.agent_config import apply_agent_config, load_agent_config
-from storygraph.core.errors import ContractError
+from storygraph.core.errors import ContractError, GraphStoreError
 from storygraph.core.ids import new_id, slug_id
 from storygraph.core.time import utc_now
 from storygraph.demo import ITEM_ID, LOCATION_ID, PROJECT_ID, SCENE_ID, build_fantasy_demo_graph
@@ -43,6 +43,11 @@ from storygraph.stores.graph_factory import (
 from storygraph.stores.json_graph import load_json_graph, save_json_graph
 from storygraph.stores.memory_graph import InMemoryGraphStore
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
+from storygraph.stores.proposal_store import SQLiteProposalStore
+from storygraph.stores.writer_visibility_store import SQLiteWriterVisibilityStore
+from storygraph.models.writer_visibility import WriterVisibilityRecord
+from storygraph.services.writer_visibility import resolve_writer_visibility, preflight_writer_context
+from storygraph.services.writer_visibility_sources import validate_writer_policy_sources
 from storygraph.workflows import SceneGenerationWorkflow
 from storygraph.services.quality_policy import require_direct_generation_allowed
 
@@ -57,6 +62,7 @@ class CliRuntime:
     workflow_store: SQLiteWorkflowStore
     style_sample_store: SQLiteStyleSampleStore
     review: ReviewService
+    proposal_store: SQLiteProposalStore
 
     def close(self) -> None:
         for store in [
@@ -64,6 +70,7 @@ class CliRuntime:
             self.candidate_store,
             self.workflow_store,
             self.style_sample_store,
+            self.proposal_store,
         ]:
             with suppress(Exception):
                 store.close()
@@ -82,6 +89,7 @@ def _runtime(workspace: str | Path | None = None) -> CliRuntime:
     candidate_store = SQLiteCandidateStore(settings.candidate_store_path)
     workflow_store = SQLiteWorkflowStore(settings.workflow_store_path)
     style_sample_store = SQLiteStyleSampleStore(settings.style_sample_store_path)
+    proposal_store = SQLiteProposalStore(settings.proposal_store_path)
     review = ReviewService(candidate_store, configured_graph.graph, draft_store=draft_store)
     return CliRuntime(
         settings=settings,
@@ -92,7 +100,25 @@ def _runtime(workspace: str | Path | None = None) -> CliRuntime:
         workflow_store=workflow_store,
         style_sample_store=style_sample_store,
         review=review,
+        proposal_store=proposal_store,
     )
+
+
+def _context_builder(runtime):
+    store = SQLiteWriterVisibilityStore(runtime.proposal_store)
+    def resolve(pack):
+        record = store.effective(pack.project_id, pack.scene_id)
+        if record is None:
+            return None
+        pack.writer_visibility_required = True
+        try:
+            validate_writer_policy_sources(runtime.graph, runtime.draft_store, pack.project_id, WriterVisibilityRecord.model_validate(record).spec)
+            return resolve_writer_visibility(pack, WriterVisibilityRecord.model_validate(record),
+                reader_source_resolver=runtime.draft_store.get_draft, character_scope_resolver=runtime.graph.get_node)
+        except (ContractError, GraphStoreError):
+            return None
+    return ContextPackBuilder(runtime.graph, runtime.draft_store, runtime.style_sample_store,
+        writer_visibility_resolver=resolve)
 
 
 def _save_runtime_graph(runtime: CliRuntime) -> None:
@@ -378,11 +404,7 @@ def build_context_command(
 ) -> dict:
     runtime = _runtime(workspace)
     try:
-        pack = ContextPackBuilder(
-            runtime.graph,
-            runtime.draft_store,
-            runtime.style_sample_store,
-        ).build(
+        pack = _context_builder(runtime).build(
             project_id=project_id,
             scene_id=scene_id,
             target_tokens=target_tokens,
@@ -424,14 +446,11 @@ def write_scene_command(
             )
             return draft.model_dump()
         require_direct_generation_allowed(runtime.graph, project_id)
-        context_pack = ContextPackBuilder(
-            runtime.graph,
-            runtime.draft_store,
-            runtime.style_sample_store,
-        ).build(
+        context_pack = _context_builder(runtime).build(
             project_id=project_id,
             scene_id=scene_id,
         )
+        preflight_writer_context(context_pack)
         return create_scene_writer(runtime.settings, runtime.draft_store).write_and_save(
             context_pack
         ).model_dump()
@@ -450,11 +469,7 @@ def check_continuity_command(
         draft = runtime.draft_store.latest_for_scene(project_id, scene_id)
         if draft is None:
             raise ContractError(f"No draft found for scene: {scene_id}")
-        context_pack = ContextPackBuilder(
-            runtime.graph,
-            runtime.draft_store,
-            runtime.style_sample_store,
-        ).build(
+        context_pack = _context_builder(runtime).build(
             project_id=project_id,
             scene_id=scene_id,
         )
@@ -489,12 +504,12 @@ def run_scene_command(
 ) -> dict:
     runtime = _runtime(workspace)
     try:
+        # This command writes a Draft directly; review-first policy takes precedence
+        # over visibility configuration and must stop before constructing a writer.
+        require_direct_generation_allowed(runtime.graph, project_id)
+        preflight_writer_context(_context_builder(runtime).build(project_id=project_id, scene_id=scene_id))
         workflow = SceneGenerationWorkflow(
-            context_builder=ContextPackBuilder(
-                runtime.graph,
-                runtime.draft_store,
-                runtime.style_sample_store,
-            ),
+            context_builder=_context_builder(runtime),
             writer=create_scene_writer(runtime.settings, runtime.draft_store),
             checker=RuleBasedContinuityChecker(),
             extractor=RuleBasedStateExtractor(),

@@ -36,10 +36,12 @@ class ContextPackBuilder:
         graph_store: GraphStore,
         draft_store: SQLiteDraftStore | None = None,
         style_sample_store: StyleSampleStore | None = None,
+        writer_visibility_resolver=None,
     ) -> None:
         self.graph_store = graph_store
         self.draft_store = draft_store
         self.style_sample_store = style_sample_store
+        self.writer_visibility_resolver = writer_visibility_resolver
 
     def build(
         self,
@@ -61,10 +63,18 @@ class ContextPackBuilder:
                 target_tokens = 8000 if auto_expand_budget else 4000
             if type(target_tokens) is not int or target_tokens < 1:
                 raise ContractError("Context target_tokens must be a positive integer or omitted.")
-            return self._build(project_id=project_id, scene_id=scene_id,
+            pack = self._build(project_id=project_id, scene_id=scene_id,
                                target_tokens=target_tokens,
                                auto_expand_budget=auto_expand_budget,
                                author_instruction_refs=author_instruction_refs)
+            project = self.graph_store.get_node(project_id)
+            pack.writer_visibility_required = bool(project.properties.get("require_semantic_review")
+                                                    or project.properties.get("longform_blueprint_id"))
+            if self.writer_visibility_resolver is not None:
+                pack.writer_visibility = self.writer_visibility_resolver(pack)
+                if pack.writer_visibility is not None:
+                    pack.writer_visibility_required = True
+            return pack
 
     def _build(
         self,

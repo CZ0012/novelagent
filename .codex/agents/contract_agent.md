@@ -206,3 +206,13 @@ ordinary resume/reopen and automatic repair, and enforce it again when applying
 changes. Critic suggestions never widen the fence. None retains legacy behavior;
 FULL/recheck cannot carry it. Explicit restart chooses a new scope and records it.
 Do not treat natural-language "only these fields" as a structural scope guarantee.
+
+## Writer Visibility v1
+
+Follow `contracts/writer_visibility_v1.md`: local versioned disclosure policy is separate from Graph/canon and PLAN. Protected prose must use the positive approved Writer view and preflight before provider construction; missing/stale policy or lost sidecar blocks, never falls back. Preserve explicit legacy unisolated behavior. Reader Draft/version/hash/UTF-16 spans and expected inference do not automatically become disclosed facts or edit permission. Public names/claims/voice must be explicitly authorized, while scene critics keep full canonical authority plus the current disclosure constraint in freshness/adoption. Preview must show actual model messages, and policy/API/UI changes need source-binding, scope and no-canon-write regressions.
+
+Protected editing uses per-request `prose_input_grants`: exact stripped instruction hash plus a same-project saved Draft/version/hash target, or UTF-16 selection with expected text. Selection discloses only the span; continuation/full revision disclose only the bounded target. ReaderPresented never grants editing. Preview and actual prose reuse the same messages; concrete prose buttons authorize these inputs without another confirmation. Do not silently truncate, add sources/search/history/presets, or permanently prohibit protected editing. Project cast templates project only scene actors unless an offstage public name is explicitly allowed and scope-validated. Preserve complete old message behavior for `legacy_unisolated`.
+
+Keep existing canonical Scene `must_include` literal checks: protected policy must explicitly authorize those literals in its surface plan/claims or fail before provider construction. Never solve a visibility-policy gap by silently disclosing raw author context or deleting the output constraint. A selected scene summary is not a new literal requirement.
+
+Strict prose provenance must name the visible policy/style origin and mark configured raw presets and author discussion history as not transmitted. Preserve the compact configured `agent_preset` snapshot for compatibility while `agent_preset_role`/`agent_preset_transmitted` state its actual transport role. Legacy/discussion preset transmission remains unchanged.

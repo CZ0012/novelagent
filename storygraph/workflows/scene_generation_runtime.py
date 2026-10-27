@@ -30,6 +30,10 @@ from storygraph.services.review_service import ReviewService
 from storygraph.services.quality_policy import require_workflow_output_allowed
 from storygraph.services.scene_writer import RuleBasedSceneWriter
 from storygraph.services.state_extraction import RuleBasedStateExtractor
+from storygraph.services.writer_visibility import (
+    preflight_writer_context,
+    writer_source_context_sha256,
+)
 from storygraph.stores.proposal_store import SQLiteProposalStore
 from storygraph.stores.workflow_store import SQLiteWorkflowStore
 from storygraph.workflows.types import SceneRunResult
@@ -59,14 +63,11 @@ class SceneGenerationRuntime(Protocol):
         project_id: str,
         scene_id: str,
         output_target: SceneGenerationOutputTarget = "draft_store",
-    ) -> SceneRunResult:
-        ...
+    ) -> SceneRunResult: ...
 
-    def resume_review(self, run_id: str) -> WorkflowRun:
-        ...
+    def resume_review(self, run_id: str) -> WorkflowRun: ...
 
-    def close(self) -> None:
-        ...
+    def close(self) -> None: ...
 
 
 class LocalSceneGenerationRuntime:
@@ -111,6 +112,7 @@ class LocalSceneGenerationRuntime:
                 run,
                 "write_draft",
                 artifact_refs={"proposal_id": proposal.id, "proposal_version": proposal.version},
+                context_pack=context_pack,
             )
             run = self._finish_proposal_output(run)
             return SceneRunResult(
@@ -127,7 +129,7 @@ class LocalSceneGenerationRuntime:
         except Exception as exc:
             self._fail_run(run, current_step="write_draft", exc=exc)
             raise
-        run = self._complete_step(run, "write_draft", artifact_refs={"draft_id": draft.id})
+        run = self._complete_step(run, "write_draft", artifact_refs={"draft_id": draft.id}, context_pack=context_pack)
         try:
             report = self.checker.check(context_pack=context_pack, draft=draft)
         except Exception as exc:
@@ -258,6 +260,11 @@ class LocalSceneGenerationRuntime:
             raise RuntimeError("proposal_workspace output requires a proposal store")
         result = self.writer.draft(context_pack)
         now = utc_now()
+        visibility = context_pack.writer_visibility
+        actual_style_note = (
+            " Approved isolated writer style used; configured Agent preset was not transmitted."
+            if visibility else agent_preset_provenance(getattr(self.writer, "agent_preset", None))
+        )
         proposal = ProposalArtifact(
             id=new_id("proposal"),
             project_id=context_pack.project_id,
@@ -285,7 +292,8 @@ class LocalSceneGenerationRuntime:
                     context_pack.output_language,
                     zh="场景生成结果已写入提案工作区，而非草稿库。",
                     en="Scene generation wrote to Proposal Workspace instead of Draft Store.",
-                ) + agent_preset_provenance(getattr(self.writer, "agent_preset", None)),
+                )
+                + actual_style_note,
             ),
             version=1,
             created_at=now,
@@ -299,12 +307,21 @@ class LocalSceneGenerationRuntime:
         name: str,
         *,
         artifact_refs: dict | None = None,
+        context_pack: ContextPack | None = None,
     ) -> WorkflowRun:
         if name == "write_draft":
             execution = getattr(self.writer, "model_execution", None)
             if execution:
-                artifact_refs = {**(artifact_refs or {}), **{f"model_{k}": v for k, v in execution.items()}}
-            snapshot = agent_preset_snapshot(getattr(self.writer, "agent_preset", None))
+                artifact_refs = {
+                    **(artifact_refs or {}),
+                    **{f"model_{k}": v for k, v in execution.items()},
+                }
+            visibility = context_pack.writer_visibility if context_pack else None
+            if visibility:
+                artifact_refs = {**(artifact_refs or {}), "writer_policy_fingerprint": visibility.policy_fingerprint,
+                                 "writer_source_context_sha256": visibility.source_context_sha256,
+                                 "agent_preset_transmitted": False}
+            snapshot = None if visibility else agent_preset_snapshot(getattr(self.writer, "agent_preset", None))
             if snapshot:
                 artifact_refs = {
                     **(artifact_refs or {}),
@@ -451,9 +468,7 @@ class LocalSceneGenerationRuntime:
     @staticmethod
     def _require_draft_language(*, run: WorkflowRun, draft: Draft) -> None:
         if run.output_language != draft.content_language:
-            raise ContractError(
-                "Draft content_language does not match the WorkflowRun snapshot"
-            )
+            raise ContractError("Draft content_language does not match the WorkflowRun snapshot")
 
     def close(self) -> None:
         return None
@@ -464,6 +479,7 @@ class SceneGenerationState(TypedDict, total=False):
     scene_id: str
     run: dict[str, Any]
     context_pack: dict[str, Any]
+    writer_visibility_checkpoint: dict[str, Any]
     draft: dict[str, Any]
     continuity_report: dict[str, Any]
     candidates: list[dict[str, Any]]
@@ -513,8 +529,7 @@ class LangGraphSceneGenerationRuntime(LocalSceneGenerationRuntime):
             draft=Draft.model_validate(state["draft"]),
             continuity_report=ContinuityReport.model_validate(state["continuity_report"]),
             candidates=[
-                CandidateFact.model_validate(candidate)
-                for candidate in state.get("candidates", [])
+                CandidateFact.model_validate(candidate) for candidate in state.get("candidates", [])
             ],
             workflow_run=WorkflowRun.model_validate(state["run"]),
         )
@@ -623,26 +638,103 @@ class LangGraphSceneGenerationRuntime(LocalSceneGenerationRuntime):
                 scene_id=state["scene_id"],
             )
             self._require_context_language(run=run, context_pack=context_pack)
+            visibility_checkpoint = self._visibility_checkpoint(context_pack)
         except Exception as exc:
             self._fail_run(run, current_step="build_context", exc=exc)
             raise
+        artifacts = {"context_pack_id": f"context_{state['scene_id']}"}
+        if visibility_checkpoint["required"]:
+            artifacts.update(
+                writer_visibility_required=True,
+                writer_policy_fingerprint=visibility_checkpoint["policy_fingerprint"],
+            )
         run = self._complete_step(
             run,
             "build_context",
-            artifact_refs={"context_pack_id": f"context_{state['scene_id']}"},
+            artifact_refs=artifacts,
         )
-        return {"run": run.model_dump(), "context_pack": context_pack.model_dump()}
+        return {
+            "run": run.model_dump(),
+            "context_pack": context_pack.model_dump(),
+            "writer_visibility_checkpoint": visibility_checkpoint,
+        }
+
+    @staticmethod
+    def _visibility_checkpoint(pack):
+        preflight_writer_context(pack)
+        return {
+            "version": 1,
+            "source_context_sha256": writer_source_context_sha256(pack),
+            "required": pack.writer_visibility_required,
+            "policy_fingerprint": pack.writer_visibility.policy_fingerprint
+            if pack.writer_visibility
+            else None,
+        }
+
+    def _restore_writer_visibility(self, state):
+        raw = state["context_pack"]
+        saved = ContextPack.model_validate(raw)
+        if saved.project_id != state["project_id"] or saved.scene_id != state["scene_id"]:
+            raise ContractError("writer_visibility_checkpoint_scope_invalid")
+        current = self.context_builder.build(
+            project_id=saved.project_id,
+            scene_id=saved.scene_id,
+            target_tokens=saved.budget.target_tokens,
+            author_instruction_refs=saved.provenance.author_instruction_refs,
+        )
+        marker = state.get("writer_visibility_checkpoint")
+        if marker is None:
+            # Historical legacy checkpoints predate both markers. New-format
+            # checkpoints may not lose their isolation marker and downgrade.
+            saved_run = WorkflowRun.model_validate(state["run"])
+            build_step = next(
+                (step for step in saved_run.steps if step.name == "build_context"), None
+            )
+            was_required = bool(
+                build_step and build_step.artifact_refs.get("writer_visibility_required")
+            )
+            if (
+                "writer_visibility_required" in raw
+                or was_required
+                or current.writer_visibility_required
+                or current.writer_visibility is not None
+            ):
+                raise ContractError("writer_visibility_checkpoint_marker_missing")
+            if writer_source_context_sha256(saved) != writer_source_context_sha256(current):
+                raise ContractError("writer_visibility_checkpoint_source_stale")
+            return saved
+        if (
+            not isinstance(marker, dict)
+            or set(marker) != {"version", "source_context_sha256", "required", "policy_fingerprint"}
+            or type(marker["version"]) is not int
+            or marker["version"] != 1
+            or type(marker["required"]) is not bool
+            or type(raw.get("writer_visibility_required")) is not bool
+            or marker["required"] != saved.writer_visibility_required
+            or marker["source_context_sha256"] != writer_source_context_sha256(saved)
+            or (marker["required"] and not marker["policy_fingerprint"])
+        ):
+            raise ContractError("writer_visibility_checkpoint_invalid")
+        expected = self._visibility_checkpoint(current)
+        if marker != expected:
+            raise ContractError("writer_visibility_checkpoint_stale")
+        return saved.model_copy(
+            update={
+                "writer_visibility": current.writer_visibility,
+                "writer_visibility_required": current.writer_visibility_required,
+            }
+        )
 
     def _lg_write_draft(self, state: SceneGenerationState) -> SceneGenerationState:
         run = WorkflowRun.model_validate(state["run"])
-        context_pack = ContextPack.model_validate(state["context_pack"])
         try:
+            context_pack = self._restore_writer_visibility(state)
             draft = self.writer.write_and_save(context_pack)
             self._require_draft_language(run=run, draft=draft)
         except Exception as exc:
             self._fail_run(run, current_step="write_draft", exc=exc)
             raise
-        run = self._complete_step(run, "write_draft", artifact_refs={"draft_id": draft.id})
+        run = self._complete_step(run, "write_draft", artifact_refs={"draft_id": draft.id}, context_pack=context_pack)
         return {"run": run.model_dump(), "draft": draft.model_dump()}
 
     def _lg_check_continuity(self, state: SceneGenerationState) -> SceneGenerationState:
@@ -699,8 +791,7 @@ class LangGraphSceneGenerationRuntime(LocalSceneGenerationRuntime):
 
     def _lg_finish_after_extraction(self, state: SceneGenerationState) -> SceneGenerationState:
         candidates = [
-            CandidateFact.model_validate(candidate)
-            for candidate in state.get("candidates", [])
+            CandidateFact.model_validate(candidate) for candidate in state.get("candidates", [])
         ]
         run = self._finish_after_extraction(
             WorkflowRun.model_validate(state["run"]),

@@ -155,6 +155,8 @@ import { GenerationReviewPanel, reviewAllowsAdoption, reviewAllowsPlanApplicatio
 import { ProjectStyleSummary } from "./ProjectStyleSummary";
 import { InspectorGraphDisclosure } from "./InspectorGraphDisclosure";
 import { ContextBuildAction, ContextEvidence } from "./ContextEvidence";
+import { WriterVisibilityPanel, VisibilityActualPreview, type VisibilityPreview } from "./WriterVisibilityPanel";
+import { proseInputGrants } from "./proseInputGrants";
 import { TemporalHistoryPanel } from "./TemporalHistoryPanel";
 import type { TemporalCorrectionOptions } from "./temporalCorrection";
 import { TemporalCandidateNotice, TemporalContext, TemporalProposalPreviews, type EntityLabels } from "./TemporalStateView";
@@ -1951,7 +1953,16 @@ export default function App() {
     setAgentDiscussionForm((current) => ({ ...current, mode: draft?.text.trim() ? "revise_scene" : "create_scene", includeLatestDraft: Boolean(draft?.text.trim()), includeContextPack: true, selectedText: "", selectedStart: undefined, selectedEnd: undefined, selectedDraftId: undefined }));
   }, [draft]);
 
-  const requestAgentDiscussion = useCallback(async () => {
+  const [prosePreview, setProsePreview] = useState<VisibilityPreview | null>(null);
+  const prosePreviewRevisionRef = useRef(0);
+  useEffect(() => { prosePreviewRevisionRef.current += 1; setProsePreview(null); }, [agentDiscussionForm, draft, draftDirty, contextPack, projectId, sceneId, apiBase, selectedAgentSourceIds, crossLanguagePolicy]);
+  useEffect(() => {
+    const invalidate = () => { prosePreviewRevisionRef.current += 1; setProsePreview(null); };
+    window.addEventListener("storygraph-writer-visibility-changed", invalidate);
+    return () => window.removeEventListener("storygraph-writer-visibility-changed", invalidate);
+  }, []);
+  const requestAgentDiscussion = useCallback(async (previewOnly = false) => {
+    const previewRevision = prosePreviewRevisionRef.current;
     if (draftDirtyRef.current) throw new Error(uiText.errors.agentIncludedDraftMustBeSaved);
     if (!endpoint || !projectId) throw new Error(uiText.errors.selectScene);
     const instruction = agentDiscussionForm.instruction.trim();
@@ -2012,8 +2023,17 @@ export default function App() {
       web_search_query: agentDiscussionForm.webSearchQuery.trim() || null,
       cross_language_policy: crossLanguagePolicy
     };
+    if (payload.mode !== "discuss") {
+      const visibility = await apiGet<{ required: boolean; effective_policy: { spec: unknown } | null }>(apiBase, `${endpoint}/writer-visibility`);
+      if (visibility.required || visibility.effective_policy?.spec) payload.prose_input_grants = await proseInputGrants(payload, draft);
+    }
     const target = { apiBase, projectId, sceneId };
     const currentScope = () => activeApiBaseRef.current === target.apiBase && activeProjectIdRef.current === target.projectId && activeSceneIdRef.current === target.sceneId;
+    if (previewOnly) {
+      const preview = await apiPost<VisibilityPreview>(apiBase, `${endpoint}/agent-discussion/preview`, payload);
+      if (currentScope() && previewRevision === prosePreviewRevisionRef.current) setProsePreview(preview);
+      return;
+    }
     const result = await apiPost<AgentDiscussionResult>(
       apiBase,
       `${endpoint}/agent-discussion`,
@@ -3822,6 +3842,7 @@ export default function App() {
           {activeTab === "agent" && (
           <div className="agent-workspace agent-dock">
           <div className="active-style-summary"><strong>{uiText.collaboration.style}</strong><span>{agentSettings?.agent_presets?.find((p) => p.id === agentSettings.selected_preset_id) ? presetDisplay(agentSettings.agent_presets.find((p) => p.id === agentSettings.selected_preset_id)!).name : uiText.common.notSet}</span></div>
+          {agentDiscussionForm.mode !== "discuss" && (requiresSemanticReview || Boolean(selectedProject?.properties.longform_blueprint_id) || (contextPack?.project_id === projectId && contextPack?.scene_id === sceneId && contextPack?.writer_visibility_required)) && <p>{uiText.collaboration.isolatedStyleHelp}</p>}
           <ProjectStyleSummary apiBase={apiBase} projectId={projectId} revision={proposals.map((p) => `${p.id}:${p.version}`).join("|")} />
           <details className="agent-preset-options"><summary>{uiText.authorWorkspace.presetOptions}</summary>
           <AgentPresets compact apiBase={apiBase} settings={agentSettings} busy={busy !== null} onChange={setAgentSettings} onManage={() => setActiveTab("settings")} />
@@ -3855,7 +3876,9 @@ export default function App() {
             }}
             onSaveDraft={() => runAction("save", saveDraft)}
             onPolicyChange={changeCrossLanguagePolicy}
-            onSubmit={() => runAction("agent-discussion", requestAgentDiscussion)}
+            onSubmit={() => runAction("agent-discussion", () => requestAgentDiscussion())}
+            onPreview={() => runAction("prose-preview", () => requestAgentDiscussion(true))}
+            prosePreview={prosePreview}
             onRestoreDraft={restoreSavedDraft}
             onToggleSource={toggleAgentSource}
             onUseDraftSelection={useDraftSelectionForAgent}
@@ -3872,7 +3895,7 @@ export default function App() {
           </div>
           )}
 
-          {activeTab === "context" && <ContextInspector key={`${apiBase}:${projectId}`} canBuildContext={hasScene && busy === null} onBuildContext={() => { void runAction("context", buildContext); }} apiBase={apiBase} pack={contextPack} labels={graphPreview?.project_id === projectId ? Object.fromEntries(graphPreview.nodes.map((node) => [node.id, node.label])) : {}} temporalOptions={{
+          {activeTab === "context" && <ContextInspector key={`${apiBase}:${projectId}`} canBuildContext={hasScene && busy === null} canEditPolicy={canGenerate && busy === null} canStartPolicyScene={!draft?.text.trim() && !draftDirty} onUseWritingPlan={(text) => { setSelectedAgentSourceIds(new Set()); setAgentTarget("scene"); setWorkspaceTab("write"); setActiveTab("agent"); setAgentDiscussionForm({ ...defaultAgentDiscussionForm, mode: "create_scene", instruction: text, includeLatestDraft: false }); }} onBuildContext={() => { void runAction("context", buildContext); }} apiBase={apiBase} pack={contextPack} labels={graphPreview?.project_id === projectId ? Object.fromEntries(graphPreview.nodes.map((node) => [node.id, node.label])) : {}} temporalOptions={{
             draft: !draftLoading && draftEditorScopeRef.current && draftScopesMatch(draftEditorScopeRef.current, { apiBase, projectId, sceneId }) ? draft : null, draftDirty: draftDirty || draftLoading, sceneId, selection: draftSelectionRange, busy: busy !== null, canPropose: canGenerate,
             references: graphPreview?.project_id === projectId ? graphPreview.nodes.map((node) => ({ id: node.id, label: node.label, type: node.type })) : [], execute: runAction,
             canOpenSourceScene: (id) => Boolean(findScene(projects, projectId, id)),
@@ -4003,6 +4026,8 @@ function AgentDiscussionPanel({
   onPolicyChange,
   onRestoreDraft,
   onSubmit,
+  onPreview,
+  prosePreview,
   onToggleSource,
   onUseDraftSelection,
   result,
@@ -4031,6 +4056,8 @@ function AgentDiscussionPanel({
   onPolicyChange: (policy: CrossLanguagePolicy) => void;
   onRestoreDraft: () => void;
   onSubmit: () => void;
+  onPreview: () => void;
+  prosePreview: VisibilityPreview | null;
   onToggleSource: (sourceId: string) => void;
   onUseDraftSelection: () => void;
   result: AgentDiscussionResult | null;
@@ -4063,8 +4090,8 @@ function AgentDiscussionPanel({
       crossLanguagePolicy
     ) !== "eligible";
   });
-  const canSubmit =
-    canDiscuss &&
+  const canPreview =
+    hasScene &&
     !draftDirty &&
     busy === null &&
     blockedSourceIds.length === 0 &&
@@ -4072,6 +4099,7 @@ function AgentDiscussionPanel({
     (!form.includeLatestDraft || includedDraft.status === "ready") &&
     (!draftRequired || form.includeLatestDraft) &&
     (!selectedRequired || form.selectedText.trim().length > 0);
+  const canSubmit = canDiscuss && canPreview;
   const savedDraftManifest = includedDraft.status === "excluded"
     ? uiText.agentDiscussion.manifestExcluded
     : draft
@@ -4160,7 +4188,10 @@ function AgentDiscussionPanel({
             placeholder={uiText.agentDiscussion.selectionPlaceholder}
           />
         </label>}
+        <p>{uiText.writerVisibility.editGrant}</p>
+        {prosePreview && <VisibilityActualPreview preview={prosePreview} />}
         <div className="agent-actions">
+          {form.mode !== "discuss" && <button type="button" disabled={!canPreview} onClick={onPreview}>{uiText.writerVisibility.preview}</button>}
           <button type="button" className="primary" onClick={onSubmit} disabled={!canSubmit}>
             <Wand2 size={15} /> {uiText.agentDiscussion.submit}
           </button>
@@ -6573,7 +6604,7 @@ function AgentSettingsInspector({
   );
 }
 
-function ContextInspector({ pack, labels, apiBase, temporalOptions, canBuildContext, onBuildContext }: { pack: ContextPack | null; labels: EntityLabels; apiBase: string; temporalOptions: TemporalCorrectionOptions; canBuildContext: boolean; onBuildContext: () => void }) {
+function ContextInspector({ pack, labels, apiBase, temporalOptions, canBuildContext, onBuildContext, canEditPolicy, canStartPolicyScene, onUseWritingPlan }: { pack: ContextPack | null; labels: EntityLabels; apiBase: string; temporalOptions: TemporalCorrectionOptions; canBuildContext: boolean; onBuildContext: () => void; canEditPolicy: boolean; canStartPolicyScene: boolean; onUseWritingPlan: (text: string) => void }) {
   const [historySubject, setHistorySubject] = useState<string | null>(null);
   if (!pack) {
     return <div className="inspector-body"><ContextBuildAction hasPack={false} disabled={!canBuildContext} onBuild={onBuildContext} /><EmptyState icon={<SplitSquareVertical />} title={uiText.inspector.noContextTitle} text={uiText.inspector.noContextText} /></div>;
@@ -6587,6 +6618,7 @@ function ContextInspector({ pack, labels, apiBase, temporalOptions, canBuildCont
         value={formatArtifactLanguage(pack.output_language, false)}
       />
       <MetricRow label={uiText.inspector.graphQueries} value={String(pack.provenance.graph_query_ids.length)} />
+      <WriterVisibilityPanel key={`${pack.project_id}:${pack.scene_id}`} apiBase={apiBase} pack={pack} canEdit={canEditPolicy} canStart={canStartPolicyScene} onUsePlan={onUseWritingPlan} />
       <ContextEvidence pack={pack} labels={labels} />
       <TemporalContext projections={pack.temporal_states ?? []} projectId={pack.project_id} sceneId={pack.scene_id} labels={labels} onOpenHistory={setHistorySubject} />
       {historySubject && <TemporalHistoryPanel key={`${pack.project_id}:${historySubject}`} apiBase={apiBase} projectId={pack.project_id} subjectId={historySubject} labels={labels} options={temporalOptions} />}

@@ -21,9 +21,9 @@ def test_scene_reminder_covers_concrete_assertions_without_invented_identity_cer
     assert "姓名栏" not in prompt
 
 
-def test_plan_prompt_has_only_the_explicitly_approved_plan_proof_revision():
+def test_plan_prompt_has_the_approved_proof_and_shared_claim_distinction():
     prompt = _system_prompt("zh-CN", "plan")
-    assert content_hash(prompt) == "5dc7d9f558656ec12ac145bb674b2177869a0ae2af6fd43dc31475a04e5855a2"
+    assert content_hash(prompt) == "5ef32ffbf3cdc984890b64b3c1f4bb73344bfba3ab3a8fec37baa7051dd79076"
     assert "counts, times, durations and quantities" not in prompt
     assert "counts, times, durations and quantities" not in _system_prompt("zh-CN", "unknown")
 
