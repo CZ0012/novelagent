@@ -647,3 +647,20 @@ def test_canonical_literal_requires_explicit_visible_authorization_before_provid
     # The original local postcheck is intentionally still present.
     with pytest.raises(ContractError, match="omitted must_include"):
         LLMSceneWriter(provider=Capture(), model="fixture").draft(pack)
+
+
+def test_scene_writer_retains_its_own_output_contract_after_shared_prompt_cleanup(graph):
+    pack = attach(pack_with_hidden(graph))
+    provider = Capture()
+    result = LLMSceneWriter(provider=provider,model='fixture').draft(pack)
+    payload = json.loads(provider.requests[0].messages[-1].content)
+    assert all('`' + field + '`' in payload['instruction'] for field in ('text','summary','self_check'))
+    assert result.text and result.summary and result.self_check
+    assert 'proposal_title' not in provider.requests[0].messages[0].content
+
+
+def test_protected_prose_missing_reply_still_fails_without_fabricated_default():
+    service = AgentDiscussionService(provider=Capture(),model='fixture')
+    with pytest.raises(ContractError,match='reply'):
+        service._draft_from_response(mode='create_scene',output_language='zh-CN',instruction='写本场',scene_id='s1',
+                                     base_text='',selected_text='',parsed={'proposal_title':'提案','proposal_body':'已有正文。'})

@@ -59,7 +59,8 @@ class ContextPackBuilder:
                 if project.type != "Project":
                     raise ContractError("Context budget requires a canon Project.")
                 auto_expand_budget = bool(project.properties.get("require_semantic_review")
-                    or project.properties.get("longform_blueprint_id"))
+                    or project.properties.get("longform_blueprint_id")
+                    or self.graph_store.get_node(scene_id).properties.get("require_semantic_review"))
                 target_tokens = 8000 if auto_expand_budget else 4000
             if type(target_tokens) is not int or target_tokens < 1:
                 raise ContractError("Context target_tokens must be a positive integer or omitted.")
@@ -69,7 +70,8 @@ class ContextPackBuilder:
                                author_instruction_refs=author_instruction_refs)
             project = self.graph_store.get_node(project_id)
             pack.writer_visibility_required = bool(project.properties.get("require_semantic_review")
-                                                    or project.properties.get("longform_blueprint_id"))
+                                                    or project.properties.get("longform_blueprint_id")
+                                                    or self.graph_store.get_node(scene_id).properties.get("require_semantic_review"))
             if self.writer_visibility_resolver is not None:
                 pack.writer_visibility = self.writer_visibility_resolver(pack)
                 if pack.writer_visibility is not None:

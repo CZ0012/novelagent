@@ -316,10 +316,30 @@ class AgentDiscussionService:
         if field is None:
             raise ContractError("writer_visibility_unknown_prose_action")
         prompt = (Path(__file__).parents[1] / "prompts" / "writer_visible_scene.md").read_text(encoding="utf-8")
-        prompt += f"\nFor this prose action return strict JSON reply, proposal_title and {field}, instead of text/summary/self_check. Authorized instruction/editing input is not canon, reader permission or entry knowledge."
+        prompt += (
+            "\nReturn exactly one JSON object matching output_schema and output_example in the action payload. "
+            f"The required fields are reply, proposal_title and {field}; each must be a nonempty string. "
+            "reply is a brief author-facing explanation; proposal_title is the proposal title. "
+            f"{field} contains only the requested prose "
+            + ("to append, without repeating the existing draft. " if mode == "continue_scene" else
+               "replacing the selected span, without the rest of the draft. " if mode == "revise_selection" else
+               "for the complete requested scene. ")
+            + "Use the supplied output_language for every natural-language value. "
+            "Authorized instruction/editing input is not canon, reader permission or entry knowledge."
+        )
+        output_schema = {"type": "object", "additionalProperties": False,
+                         "required": ["reply", "proposal_title", field],
+                         "properties": {key: {"type": "string", "minLength": 1}
+                                        for key in ("reply", "proposal_title", field)}}
+        output_example = {
+            "reply": localized(output_language, zh="已按可见范围拟好正文，等待作者审阅。", en="The prose is ready for author review."),
+            "proposal_title": localized(output_language, zh="本场正文提案", en="Scene prose proposal"),
+            field: localized(output_language, zh="这里填写本次要求的正文。", en="The requested prose goes here."),
+        }
         return [LLMMessage(role="system", content=prompt),
             LLMMessage(role="system", content=authoritative_language_message(output_language)),
-            LLMMessage(role="user", content=json.dumps({"action": mode, "writer_view": view}, ensure_ascii=False, indent=2))]
+            LLMMessage(role="user", content=json.dumps({"action": mode, "writer_view": view,
+                "output_schema": output_schema, "output_example": output_example}, ensure_ascii=False, indent=2))]
 
     def _payload(
         self,

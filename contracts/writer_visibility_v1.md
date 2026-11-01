@@ -38,3 +38,13 @@ Existing Scene `must_include` values are literal generation constraints, not aut
 LangGraph checkpoints never serialize live policy/source resolver callbacks. Build checkpoints persist the author-source SHA-256, required marker and policy fingerprint (plus a public build-step isolation marker). Before prose generation, the current Builder re-resolves that exact scene, frozen budget and author refs; only matching source hash, required marker and policy fingerprint permit reattaching a fresh runtime sidecar. Changed/revoked policy, changed source, invalid or missing new-format markers fail closed before generation. Historical unconfigured checkpoints retain legacy behavior only while the current scene remains unconfigured and its author source is unchanged. Review-to-END resume does not generate prose.
 
 API compatibility: `agent-discussion` retains its compact `agent_preset` snapshot as configured metadata. `agent_preset_role` (`configured_only`, `transmitted`, `none`) and `agent_preset_transmitted` distinguish actual transport. Strict prose proposal notes and `writer_visibility_policy` source refs identify the policy fingerprint and approved style origin and explicitly state that the configured preset and author discussion history were not transmitted. Legacy/discussion preset transmission and its original provenance remain unchanged.
+
+## Protected prose output contracts
+
+The shared writer-visible prompt defines disclosure and writing rules without
+naming an output shape. SceneWriter supplies its own text/summary/self_check
+contract. Protected Agent discussion supplies exactly one mode-specific JSON
+schema and example: nonempty reply and proposal_title plus proposal_body for
+create_scene/revise_scene, continuation_text for continue_scene, or replacement_text
+for revise_selection. Preview and actual dispatch use the same messages. Missing
+reply is still an invalid output; no parser fallback or invented reply is added.

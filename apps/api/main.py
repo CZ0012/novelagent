@@ -558,7 +558,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             if cleanup is not None:
                 cleanup()
 
-    app = FastAPI(title="StoryGraph Agent", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="StoryGraph Agent", version="0.3.0", lifespan=lifespan)
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -629,10 +629,16 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     app.state.writer_visibility_store = visibility_store
 
     def visibility_resolver(pack):
+        enrolled = getattr(app.state, "authoring_scene_requires_review", None)
+        if callable(enrolled) and enrolled(pack.project_id, pack.scene_id):
+            pack.writer_visibility_required = True
         record = visibility_store.effective(pack.project_id, pack.scene_id)
         if record is None:
             return None
         pack.writer_visibility_required = True
+        binding_check = getattr(app.state, "authoring_policy_binding_current", None)
+        if callable(binding_check) and not binding_check(record):
+            return None
         try:
             validate_writer_policy_sources(graph, draft_store, pack.project_id, WriterVisibilityRecord.model_validate(record).spec)
             return resolve_writer_visibility(pack, WriterVisibilityRecord.model_validate(record),
@@ -1870,7 +1876,9 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                         "draft": existing_draft.model_dump(),
                     }
                 _ensure_proposal_expected_version(proposal, request.expected_version)
-                quality_required = bool(graph.get_node(project_id).properties.get("require_semantic_review"))
+                quality_required = bool(graph.get_node(project_id).properties.get("require_semantic_review")
+                    or graph.get_node(request.scene_id).properties.get("require_semantic_review")
+                    or app.state.authoring_scene_requires_review(project_id, request.scene_id))
                 if request.review_id or quality_required:
                     app.state.require_generation_review(project_id, proposal_id, request.review_id)
                 current = draft_store.latest_for_scene(project_id, request.scene_id)
@@ -2500,7 +2508,9 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                     summary=request.summary,
                 ).model_dump()
             context_pack = context_builder.build(project_id=project_id, scene_id=scene_id)
-            if graph.get_node(project_id).properties.get("require_semantic_review"):
+            if (graph.get_node(project_id).properties.get("require_semantic_review")
+                    or graph.get_node(scene_id).properties.get("require_semantic_review")
+                    or app.state.authoring_scene_requires_review(project_id, scene_id)):
                 raise ContractError("This project requires reviewed scene proposals for generated prose; use the Agent workspace.")
             preflight_scene_writer(context_pack, settings)
             return create_scene_writer(settings, draft_store).write_and_save(
@@ -2579,6 +2589,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             if request.mode in {"create_scene", "continue_scene", "revise_scene", "revise_selection"}:
                 project = graph.get_node(project_id)
                 protected = bool(project.properties.get("require_semantic_review") or project.properties.get("longform_blueprint_id")
+                                 or graph.get_node(scene_id).properties.get("require_semantic_review")
+                                 or app.state.authoring_scene_requires_review(project_id, scene_id)
                                  or visibility_store.effective(project_id, scene_id))
                 if context_pack is None and protected:
                     raise ContractError("writer_visibility_context_required")
@@ -3069,6 +3081,16 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     )
     register_writer_visibility_routes(app, graph=graph, store=visibility_store, drafts=draft_store,
         context_builder=context_builder, require_permission=require_permission)
+    from apps.api.authoring_session_routes import register_authoring_session_routes
+
+    register_authoring_session_routes(
+        app, graph=graph, settings=settings, proposals=proposal_store, drafts=draft_store,
+        sources=source_store, visibility=visibility_store, context_builder=context_builder,
+        require_permission=require_permission, require_llm=_require_llm_configured,
+        provider_factory=lambda runtime: create_llm_provider(runtime),
+        persist_snapshot=lambda snapshot: save_json_graph(snapshot, settings.graph_path)
+        if use_persistent_stores else None,
+    )
     return app
 
 

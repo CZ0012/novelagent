@@ -35,6 +35,29 @@ The desktop hosts the same bilingual author workflow and preset APIs as the brow
 
 ## Current Status
 
+当前源码版本 **0.3.0 是本地开发候选**；已发布版本及现有安装基线仍为
+**v0.2.0**。下述创作协作能力需运行当前 API/Web 或重新构建源码桌面的
+Web 与捆绑后端，不表示已发布或安装 0.3.0。有限的真实作者协作闭环已通过：
+两张场景卡、一份 659 字符已保存正文、精确引文回查及认知变更后的重新复核。
+范围、限制和本地证据见 [0.3.0 验收记录](../../docs/acceptance-0.3.0.md)。
+
+“创作策划”中可从灵感开始，或明确选入项目素材、已有大纲的固定版本。
+主 Agent 负责创作判断，框架工具辅助查证、比较方案、影响分析与人物有限
+视角推演；未定、候选和作者决定分开保存，设计决定不会自动成为正典。
+先查看并明确采用设计提案，再预览并人工应用最小场景结构；已绑定场景的
+计划修改也需单独预览、审阅应用。完整作者计划与正文 Writer 可见的表面
+计划分别保存，不能把全知讨论直接交给正文模型。
+
+场景卡须独立预览、编译 Writer 边界后再进入原有 Agent 写作流程；正文生成
+仍须审阅和明确采用。写后反查绑定已保存 Draft 的精确版本、全文哈希及
+UTF-16 原文引文，只提出有证据的读者呈现/人物获知待审记录；计划不等于
+已经发生，事实进入正典仍走原有独立人工审阅。改设计或重选素材会让受影响
+旧卡及策略需要复核，不能继续沿用旧编译结果。
+
+会话历史持久保存，可分页检索消息、查看历史提案详情；当前对话窗口不是
+完整历史。素材可在会话内明确重选，旧决定与历史不会被静默覆盖。API/Web
+与源码桌面共用后端及存储边界；CLI 尚无新的 authoring 会话命令。
+
 The desktop shell is a buildable source-level Tauri project. It includes npm scripts, a Rust crate, Tauri capabilities, a sci-fi Windows icon, hidden backend sidecar packaging, backend process commands, system-tray lifecycle handling, Tauri signed-updater configuration, and NSIS bundle configuration.
 
 It can produce a local Windows executable, updater artifacts, and NSIS installer. Source-built `.exe`, backend sidecar, NSIS setup executable, and `setup.exe.sig` outputs remain separate from published release assets and are not checked into the repository. The [v0.2.0 release](https://github.com/CZ0012/novelagent/releases/tag/v0.2.0) now publishes the installer, matching Tauri updater signature, and `latest.json`. An actual in-app upgrade from 0.1.16 to 0.2.0 has been verified, including desktop and bundled backend versions. This release is Tauri updater signed but is not Windows Authenticode signed; novel data and model connection settings remain local.

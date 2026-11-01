@@ -101,6 +101,9 @@ def register_writer_visibility_routes(app, *, graph, store, drafts, context_buil
             pack = context_builder.build(project_id=project_id, scene_id=scene_id)
             record = store.effective(project_id, scene_id)
             if record:
+                binding_check = getattr(app.state, "authoring_policy_binding_current", None)
+                if callable(binding_check) and not binding_check(record):
+                    raise ContractError("writer_visibility_authoring_plan_changed")
                 check_spec(project_id, WriterVisibilityRecord.model_validate(record).spec)
                 pack.writer_visibility_required = True
                 pack.writer_visibility = resolve_writer_visibility(pack, WriterVisibilityRecord.model_validate(record), reader_source_resolver=drafts.get_draft, character_scope_resolver=graph.get_node)

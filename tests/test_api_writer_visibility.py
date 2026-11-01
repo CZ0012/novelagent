@@ -315,3 +315,41 @@ def test_strict_api_provenance_marks_configured_preset_untransmitted_and_legacy_
     assert value["agent_preset_role"] == "transmitted" and value["agent_preset_transmitted"] is True
     assert "agent_preset="+configured.id in value["proposal"]["provenance"]["note"]
     assert configured.system_prompt in json.dumps([m.content for m in provider.requests[-1].messages])
+
+@pytest.mark.parametrize('mode,field', [
+    ('create_scene','proposal_body'), ('revise_scene','proposal_body'),
+    ('continue_scene','continuation_text'), ('revise_selection','replacement_text'),
+])
+def test_protected_action_single_output_schema_matches_preview_and_send(environment, mode, field):
+    client, app, provider = environment
+    pack = client.post(f'/projects/{PROJECT_ID}/scenes/{SCENE_ID}/context-pack',json={}).json()
+    assert save_policy(client,spec(pack)).status_code == 200
+    payload = {'mode':mode,'instruction':'按已批准范围写正文。','include_latest_draft':False,'include_context_pack':True}
+    payload['prose_input_grants'] = {'instruction':True,'instruction_sha256':content_hash(payload['instruction']),'target':'none'}
+    if mode != 'create_scene':
+        draft = client.post(f'/projects/{PROJECT_ID}/scenes/{SCENE_ID}/draft',json={'text':'目标选区'}).json()
+        payload.update(include_latest_draft=True,included_draft_id=draft['id'])
+        grant = {'instruction':True,'instruction_sha256':content_hash(payload['instruction']), 'target':'draft',
+                 'draft_id':draft['id'],'version':draft['version'],'text_sha256':content_hash(draft['text'])}
+        if mode == 'revise_selection':
+            payload.update(selected_start=0,selected_end=4,selected_text='目标选区')
+            grant.update(target='selection',start=0,end=4,expected_text='目标选区',offset_unit='utf16')
+        payload['prose_input_grants'] = grant
+    endpoint = f'/projects/{PROJECT_ID}/scenes/{SCENE_ID}/agent-discussion'
+    before = len(provider.requests)
+    preview = client.post(endpoint+'/preview',json=payload)
+    assert preview.status_code == 200,preview.text
+    assert len(provider.requests) == before
+    response = client.post(endpoint,json=payload)
+    assert response.status_code == 200,response.text
+    wire = [{'role':m.role,'content':m.content} for m in provider.requests[-1].messages]
+    assert wire == preview.json()['messages']
+    sent = json.loads(wire[-1]['content'])
+    schema = sent['output_schema']
+    assert schema['required'] == ['reply','proposal_title',field]
+    assert set(schema['properties']) == {'reply','proposal_title',field}
+    assert schema['additionalProperties'] is False
+    assert set(sent['output_example']) == set(schema['required'])
+    assert all(value['minLength'] == 1 for value in schema['properties'].values())
+    assert 'instead of' not in wire[0]['content']
+    assert 'text, summary and self_check' not in wire[0]['content']

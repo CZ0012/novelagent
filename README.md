@@ -50,6 +50,56 @@ A scene with incomplete planning metadata can still discuss and continue its sav
 
 ## Current MVP Capabilities
 
+### Author collaboration (0.3.0 local development candidate)
+
+The current source version is **0.3.0**, a local development candidate. The
+published release and existing installed baseline remain **v0.2.0**; this section
+does not announce a new release or installed upgrade. A bounded real author
+trial passed: two reviewed scene cards, one 659-character saved prose sample,
+exact-Draft evidence and a subsequent knowledge-design change with renewed review.
+See [the 0.3.0 acceptance record](docs/acceptance-0.3.0.md) for scope and limitations.
+
+In the workbench's author-collaboration view, create a session from an idea or
+explicitly select ready project Sources and an outline Proposal version. A
+complete world, decided true cause and full-book outline are not prerequisites.
+The Main Agent develops the story through conversation; bounded framework tools
+help it inspect selected evidence, compare alternatives, analyze dependencies
+and simulate a character using that character's limited view. Open questions,
+alternatives and author decisions stay separate. An author decision in this
+design workspace is not a canon fact.
+
+1. Discuss the design and inspect the proposed changes. Explicitly adopt a
+   proposal before its scene cards become approved design.
+2. Preview the minimum scene structure and explicitly apply the displayed
+   reviewed plan. For an existing bound Scene, changed plans require a separate
+   reviewed plan update. A complete author summary is distinct from the filtered
+   surface plan permitted to the prose writer.
+3. Preview and compile the approved card's positive Writer boundary, then use
+   the existing Agent writing action. Generated prose still requires its own
+   review and explicit adoption; structure approval does not approve prose.
+4. After saving a Draft, explicitly reconcile its exact version and text hash.
+   Proposed reader presentation and character acquisitions must cite exact
+   UTF-16 text spans. Intended actions and ambiguous causes remain unresolved
+   unless supported by the actual prose; canon fact adoption keeps its existing
+   independent human-review path.
+
+Sessions and the searchable, paginated history of messages and proposal details
+persist locally; the conversation window is not the entire history. You can
+reselect session materials explicitly. Changed sources or upstream design make
+affected approved cards and compiled writing policies require fresh review;
+old source versions and decisions are not silently replaced.
+
+Existing design fields can be changed without rewriting complete cards. Pending
+alternatives retain their original versions, and unchanged affected cards can
+be explicitly submitted for renewed review. Draft reconciliation receives the
+selected current text and uses framework-located quotation handles rather than
+model-counted offsets. One completed-output correction may use the original
+turn's remaining call allowance; uncertain transport outcomes are not retried.
+
+This feature uses the same backend in API/Web and a source-built desktop. The
+CLI retains its existing commands and currently has no authoring-session
+commands. See [the authoring contract](contracts/authoring_session_v1.md).
+
 - Pydantic contract models for graph state, context packs, candidate facts, drafts, workflow runs, review payloads, style samples, and continuity reports.
 - Canon-safe graph stores with explicit provenance and event log entries, including the local JSON graph backend and optional Neo4j backend.
 - SQLite stores for drafts, proposal artifacts, candidate facts, workflow runs, and deterministic local style samples.

@@ -241,3 +241,110 @@ Reproduce a later-narrated earlier-entry Scene after a reviewed later event, and
 Reliable read order must include every eligible strict interval-before pair, even with sparse persisted links. Test ordinary parallel fork/join: a later scene resolves both completed branches, without dense canon edges/model fields or stale mutable-cache reuse. Interval eligibility must still reject time edits that invalidate accepted creation evidence.
 
 Include reviewed project-structure import among automatic sequencing paths. A later approved canonical time-update event can restore interval read authority; unaudited mutations cannot. Preserve the old edge proof/receipt without rewriting it, and do not let subsequent title-only edits discard approved timeline evidence.
+
+## SG-033 author-driven collaboration
+
+Follow `contracts/authoring_session_v1.md` and its strict domain models. The
+persistent project author session and typed patches are noncanon: distinguish
+open questions/alternatives, author decisions, subjective beliefs/claims, goals,
+intended actions, scene entry/acquisition boundaries, withheld information and
+reader inference. A Project plus idea is enough; local design IDs do not require
+a complete graph or full-book plan. Exact selected source, outline and saved
+Draft pins, language policy and session/base-workspace CAS remain mandatory.
+Feedback proposes a reviewable diff and transitive impact; only explicit human
+adoption applies it. Preserve untouched IDs/objects and invalidate affected card
+approval until reviewed. No automatic canon writes.
+
+Main Agent chooses bounded tools and may ask the author without a patch.
+`character_view` is a zero-call read; `simulate_character` uses a separate
+restricted character-only request with a server preset question_kind, never
+Main history, arbitrary Main-authored questions or author truth disguised as
+isolation. Count every child call inside the same turn max_steps and financial
+guards; refuse hidden budget overrun. Writer receives only current approved
+positive visibility, style and existing explicit prose grants, never raw author
+chat/withheld truth. Compile cards only against real same-project reviewed
+Scene/Characters; unbound cards offer the existing reviewed structure-proposal
+path. Reconcile actual exact saved Draft spans into pending evidence-backed
+design/reader updates; intentions/assertions never become truth automatically.
+
+Review idea/dialogue through options/decisions, goals/beliefs/actions, cards, visibility, existing prose and exact-Draft reconciliation. Verify actual role input isolation and financial accounting. A schema/form-only demo is not live creative quality evidence.
+
+SG-033 journal/freshness: session detail is a bounded window, never the whole
+history. Preserve immutable normalized journal records, exact historical
+proposal versions, typed counts/more flags, full-history search and scoped
+proposal detail. Page source pins and reader records explicitly; model-facing
+history/proposal inspection excludes ModelExecution metadata. Freeze language,
+canon and exact input-pin fingerprints for generated proposals; source rebind
+retains history but cannot recertify old pending proposals. Rejection remains
+possible when a pending proposal is stale. Explicit unchanged-card resubmission
+may restore only that reviewed card's approval; untouched cards stay proposed.
+Save responses must bind the exact committed session version. Recovery never
+dispatches a model and cannot bypass an active in-process turn reservation.
+
+On invalid generated commands, preserve only safe local format diagnostics
+(JSON coordinates/known-schema paths; mask unknown keys and omit raw values).
+Static whitelisted hints may explain missing subjective character ownership or
+invalid open-question author_decided status; never echo arbitrary error text.
+Authoring turns allow one known-completed JSON/schema/output-format correction
+shared across Main/child calls within the original max_steps and financial cap.
+Keep safe diagnostics, successful proposals/role results, CAS freshness and the
+actual persistent call count. Failed children return to Main; never repair raw
+text, replay a successful tool or implicitly adopt. No remaining allowance or a
+second format error stops failed. Unknown/network/auth/rate/scope failures stop
+immediately, and no model/protocol switch or budget increase is authorized.
+This narrow authoring-only rule grants no retry authority to other workflows.
+The only additional correctable output-contract codes are
+authoring_patch_dangling_reference and authoring_empty_patch, sharing that same one correction and original
+max_steps. Give a fixed value-free hint, never guess/replace refs. All other
+ContractError/source/canon/CAS/permission/project-scope failures remain hard stops.
+Dependencies use final workspace item/card IDs; canonical Scene binds via
+scene_id. Decided-but-withheld truth is still decided in the full author plan,
+not an open question merely because the Writer must not disclose it.
+Writer style bans/rubrics/negative instructions also expose their text: do not
+name withheld truth inside a prohibition; use positive allowed scope instead.
+
+Pending designs are not adopted references. Validate belief/knowledge refs
+against final items and dependencies against final items/cards. Revise an exact
+pending design with revise_proposal(proposal_id,summary,patch): recheck all frozen
+scope/freshness gates, compose on its virtual workspace, and emit a new pending
+full delta with supersedes_proposal_id. Preserve the original and untouched
+content; reconciliation must still enforce its final evidence-only restrictions.
+For new propose_workspace and revise_proposal existing upserts, preserve actual nested field presence:
+omitted fields survive, dictionaries merge recursively, and explicit lists
+replace. Empty/null are edits subject to final type validation. Do not erase
+complete author/card plans by materializing defaults from a narrow revision.
+Expand new pending patches to full final objects; existing saved patches keep
+their original review meaning without migration. Omission cannot clear adopted
+metadata/evidence. For edited cards, omitted inherited approved status becomes
+server-proposed; explicit model-approved is rejected and versions stay server-owned.
+
+For a small current-workspace edit prefer propose_design_changes(summary,
+changes<=20): exact typed existing target plus nonempty fields only, no fullcard
+copy. Domain-field allowlists and protected identities/card status/version/Scene
+binding must reject misuse; recursively merge then fully validate into a pending
+typed patch through the normal guards. Preserve all omitted metadata/evidence.
+No create/remove, foreign/pending-only targets or reconcile-mode use is allowed.
+Unknown/nested-extra fields, duplicate targets and invalid final values fail
+closed; compact traces reference the proposal, never implicitly adopt it.
+
+For unchanged-card reapproval use propose_card_review(summary,card_ids), with
+1..20 distinct existing current targets. Framework snapshots the full cards,
+changes only review metadata and stores pending; only author adoption approves.
+Reject new entirely empty patches before persistence; discussion uses finish,
+not an empty proposal claiming review in its summary. Historical empty records
+remain readable/rejectable without migration or reinterpretation.
+
+For exact-Draft reconciliation, framework-pre-read the selected current page
+after exact pin/card/CAS/source/canon/language validation; save a real local
+read_source trace initiated_by=framework with no ModelExecution or provider cost.
+Supply its exact pin/hash/text/range/more as initial reconciliation_read context;
+only that Draft satisfies the gate. Other/history reads never substitute. Prefer
+search_draft_quotes → propose_draft_evidence → finish (about three Main calls);
+read_source remains available for later pages. Literal batches (<=12, each<=1000 chars,
+total<=4000) return bounded actual matches and ephemeral turn-local quote_refs;
+ambiguity/more must stay explicit. Main must not calculate offsets or retype the
+card. Framework-only quote registries bind full project/session/turn/Draft pins;
+reject foreign/stale/unknown refs, missing read/card binding or off-card actors.
+Evidence proposals preserve the entire card and existing records, append only
+quoted acquisitions/reader records, remain pending, and spend no extra provider
+calls beyond normal Main commands. Omitted/empty lists do not delete anything.
