@@ -1,6 +1,6 @@
 # StoryGraph Agent
 
-<a href="#readme-zh"><kbd>　简体中文　</kbd></a>　<a href="#readme-en"><kbd>　English　</kbd></a>　·　<a href="https://github.com/CZ0012/novelagent/releases/tag/v0.3.0">Windows v0.3.0</a>
+<a href="#user-content-readme-zh"><kbd>　简体中文　</kbd></a>　<a href="#user-content-readme-en"><kbd>　English　</kbd></a>　·　<a href="https://github.com/CZ0012/novelagent/releases/tag/v0.3.0">Windows v0.3.0</a>
 
 <details name="readme-language" open>
 <summary><strong>中文 · 点击展开 / 切换语言</strong></summary>
@@ -8,7 +8,7 @@
 <a id="readme-zh"></a>
 <a name="中文"></a>
 
-[English ↓](#readme-en)
+[English ↓](#user-content-readme-en)
 
 ## 用一句灵感，开始一部长篇
 
@@ -102,7 +102,7 @@ Graph Store 是正典真相源。生成正文、摘要、导入文档和模型�
 
 <a id="readme-en"></a>
 
-[中文 ↑](#readme-zh)
+[中文 ↑](#user-content-readme-zh)
 
 ## Start a long story with one idea
 

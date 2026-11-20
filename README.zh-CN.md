@@ -1,6 +1,6 @@
 # StoryGraph Agent 中文说明
 
-中文说明已合并到同一份双语首页：[打开中文 README](README.md#readme-zh)。首页顶部提供 **中文 / English** 跳转入口，两种语言均可在同一 README 内展开阅读。
+中文说明已合并到同一份双语首页：[打开中文 README](README.md#user-content-readme-zh)。首页顶部提供 **中文 / English** 跳转入口，两种语言均可在同一 README 内展开阅读。
 
 [Windows v0.3.0 下载](https://github.com/CZ0012/novelagent/releases/tag/v0.3.0) · [桌面使用与构建](apps/desktop/README.md) · [更新恢复](docs/windows-update-recovery.md)
 
