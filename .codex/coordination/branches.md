@@ -271,3 +271,5 @@ SG-033 uses codex/sg-033-author-collaboration from clean9a6789c, shared checkout
 SG-033 closing checkpoint 2026-11-02: codex/sg-033-author-collaboration contains the completed implementation and bounded real trial, with independent full checks and the final source-matched local0.3.0 installer. Children made no commits or branch switches. Main performs the final source/documentation commit; no remote push/tag/release/install in this goal. Published/installedv0.2.0 remains a separately verified baseline.
 SG-034 uses local codex/sg-034-main-workspace from 54edbee. Shared checkout with disjoint App/dock, authoring studio, and runtime/tool ownership; Main owns contracts, docs and integration. Main integrates locally after tests.
 SG-034 local branch codex/sg-034-main-workspace is integrated and verified. All contributors worked in the shared checkout and Main owns its local commit.
+
+SG-035 prepares the v0.3.0 release on codex/sg-034-main-workspace. Fast-forward main from its existing ancestor, publish the version tag, and verify the GitHub release assets and same-page language controls.

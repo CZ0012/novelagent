@@ -35,9 +35,8 @@ The desktop hosts the same bilingual author workflow and preset APIs as the brow
 
 ## Current Status
 
-当前源码版本 **0.3.0 是本地开发候选**；已发布版本及现有安装基线仍为
-**v0.2.0**。下述创作协作能力需运行当前 API/Web 或重新构建源码桌面的
-Web 与捆绑后端，不表示已发布或安装 0.3.0。有限的真实作者协作闭环已通过：
+Windows x64 用户可从应用内检查更新，或下载 [v0.3.0 安装器](https://github.com/CZ0012/novelagent/releases/tag/v0.3.0)。
+此版本包含正文下方的主 Agent、进程内 MCP 和六项内置创作 Skills。早期候选版的真实作者协作试用覆盖了
 两张场景卡、一份 659 字符已保存正文、精确引文回查及认知变更后的重新复核。
 范围、限制和本地证据见 [0.3.0 验收记录](../../docs/acceptance-0.3.0.md)。
 
@@ -60,7 +59,7 @@ UTF-16 原文引文，只提出有证据的读者呈现/人物获知待审记录
 
 The desktop shell is a buildable source-level Tauri project. It includes npm scripts, a Rust crate, Tauri capabilities, a sci-fi Windows icon, hidden backend sidecar packaging, backend process commands, system-tray lifecycle handling, Tauri signed-updater configuration, and NSIS bundle configuration.
 
-It can produce a local Windows executable, updater artifacts, and NSIS installer. Source-built `.exe`, backend sidecar, NSIS setup executable, and `setup.exe.sig` outputs remain separate from published release assets and are not checked into the repository. The [v0.2.0 release](https://github.com/CZ0012/novelagent/releases/tag/v0.2.0) now publishes the installer, matching Tauri updater signature, and `latest.json`. An actual in-app upgrade from 0.1.16 to 0.2.0 has been verified, including desktop and bundled backend versions. This release is Tauri updater signed but is not Windows Authenticode signed; novel data and model connection settings remain local.
+The [v0.3.0 release](https://github.com/CZ0012/novelagent/releases/tag/v0.3.0) distributes the Windows x64 installer, matching Tauri updater signature and `latest.json`. The updater verifies its own signature. Windows Authenticode signing is a separate process. For the previously tested installation and backend upgrade from 0.1.16 to 0.2.0, see the [0.2.0 acceptance record](../../docs/acceptance-0.2.0.md).
 
 ## 中文优先与本地化入口
 
@@ -73,7 +72,7 @@ Use the project through one of these surfaces:
 - CLI workspace for persistent command-line authoring.
 - FastAPI + React/Vite workbench for browser-based local authoring.
 - Tauri desktop app for direct local use after a source build.
-- Published signed release channel for end users, with the v0.2.0 GitHub Release providing `latest.json`, installer assets, and updater signatures.
+- Published signed release channel for end users, with the v0.3.0 GitHub Release providing `latest.json`, the installer and its updater signature.
 
 GitHub Release is only the software publishing and update-delivery channel. It is not a sync mechanism for local story workspaces, Source Store documents, canon, drafts, project settings, or review state.
 

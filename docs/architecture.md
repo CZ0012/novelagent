@@ -97,7 +97,7 @@ MVP 应优先做成一个**本地引擎 + API + CLI + Web UI + 桌面宿主** �
 - CLI 本地工作区，用于持久化 demo、图谱种子、场景流程和待审事实。
 - FastAPI + React/Vite Web 工作台，用于本地浏览器中的写作、Context Pack 检查和人工审阅。
 - Tauri 桌面应用，可从源码构建本地 Windows 可执行文件、NSIS 安装器和 updater artifact；仓库不提交签名 release 二进制。
-- 签名发布通道，已通过 [v0.2.0 GitHub Release](https://github.com/CZ0012/novelagent/releases/tag/v0.2.0) 提供 NSIS 安装器、匹配的 `setup.exe.sig` 与 `latest.json`，供程序内更新检查与安装使用。已实际验证从 0.1.16 在软件内升级至 0.2.0，并核对桌面与捆绑后端版本；源码构建输出与已发布资产仍分别记录。该版本具有 Tauri updater 签名，尚无 Windows Authenticode 代码签名。小说数据与模型连接配置保留在本地，不随 GitHub 发布或更新分发。
+- 签名发布通道，通过 [v0.3.0 GitHub Release](https://github.com/CZ0012/novelagent/releases/tag/v0.3.0) 提供 NSIS 安装器、匹配的 `setup.exe.sig` 与 `latest.json`，供程序内更新检查与安装使用。已实际验证从 0.1.16 在软件内升级至 0.2.0，并核对桌面与捆绑后端版本；源码构建输出与已发布资产仍分别记录。该版本具有 Tauri updater 签名，尚无 Windows Authenticode 代码签名。小说数据与模型连接配置保留在本地，不随 GitHub 发布或更新分发。
 
 其中 GitHub Release 只负责软件 release 资产分发，不承载小说项目数据同步。当前已验证的 Windows updater artifact 命名是 NSIS setup executable 加 `setup.exe.sig`，不是 `nsis.zip`。
 
@@ -2041,7 +2041,7 @@ Protected continuation, whole-scene revision and selection revision use explicit
 
 局部设计修改由框架合并实际提供的字段，并生成完整待审版本；修改待审方案时保留原方案及未改内容。同内容的下游卡复核也必须绑定明确卡片快照，不能用空操作或模型口头声明代替审批。正文核对由框架预读所选精确 Draft，并提供本回合批量引文定位及证据提案工具；模型判断获知与呈现，框架计算范围、填写来源并保留其他设计字段。已完成输出最多使用原回合额度中的一次格式/指定结构修正；来源或版本冲突、不确定调用与网络错误仍立即停止。
 
-当前源码 VERSION 为 0.3.0，本功能属于本地候选。真实作者协作闭环已完成有限验收：两张设计卡、一份 659 字符正文、精确引文回查、跨场影响分析及修改认知后的重新审核。工程测试、实际文学样本与五十万字级既有框架验收分别记录，不能互相替代；详见 [0.3.0 验收记录](acceptance-0.3.0.md)。已发布/安装基线仍为 v0.2.0，未发布或安装 0.3.0。API/Web 和源码桌面共用上述后端，不新增正典写入通道；CLI 保留原有命令，暂无 authoring 会话命令。GitHub 仍仅用于软件发布/更新，不同步小说工作区。
+SG-033 验收时的源码 VERSION 为 0.3.0，当时测试了本地候选。真实作者协作闭环已完成有限验收：两张设计卡、一份 659 字符正文、精确引文回查、跨场影响分析及修改认知后的重新审核。工程测试、实际文学样本与五十万字级既有框架验收分别记录，不能互相替代；详见 [0.3.0 验收记录](acceptance-0.3.0.md)。当时已验证的安装基线为 v0.2.0。后续桌面发行包含下节的主 Agent 工作台。[v0.3.0 发布页](https://github.com/CZ0012/novelagent/releases/tag/v0.3.0)API/Web 和源码桌面共用上述后端，不新增正典写入通道；CLI 保留原有命令，暂无 authoring 会话命令。GitHub 仍仅用于软件发布/更新，不同步小说工作区。
 
 ## SG-034 主 Agent 工作台
 
