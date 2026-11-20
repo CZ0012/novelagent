@@ -352,3 +352,7 @@ reject foreign/stale/unknown refs, missing read/card binding or off-card actors.
 Evidence proposals preserve the entire card and existing records, append only
 quoted acquisitions/reader records, remain pending, and spend no extra provider
 calls beyond normal Main commands. Omitted/empty lists do not delete anything.
+
+## SG-034 Main Agent workbench
+
+Keep one live conversation per connection and project below the working document. Show focus, selected passage and proposal provenance. Preserve unsaved changes, support the resize keyboard controls and route only typed project-scoped workflow links.

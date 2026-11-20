@@ -364,3 +364,7 @@ shared writer-visible prompts contain no output field list. SceneWriter retains
 text/summary/self_check; Agent discussion advertises required reply/title and the
 exact mode prose field with schema/example. Keep preview and dispatch identical;
 never repair missing reply with a default or relax the parser.
+
+## SG-034 Main Agent workbench
+
+Dispatch Main tools through the session-bound internal MCP. Load packaged writing skills and preserve the existing provider adapter, budgets and CAS checks. Restrict each selected-passage grant to its verified UTF-16 span; keep it out of actor and Writer requests.

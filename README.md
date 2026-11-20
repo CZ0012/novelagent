@@ -10,11 +10,11 @@ Windows update preparation: v0.1.15 waits for temporary sharing locks after back
 
 ## Start writing
 
-The writing workspace keeps the **outline on the left, manuscript in the middle, and Agent on the right**. Fold chapters and open scenes as documents. Continue a scene or discuss a selection without leaving the editor; inspect generated changes in **Proposals** before adopting them. Sources and advanced review tools remain separate views, and the right panel can close for focused writing.
+In the source workbench, **write or read above and talk to the Main Agent below**. Drag the divider, or focus it and use the arrow keys. The app remembers the split. The outline opens chapters and scenes, and the conversation stays with the project while you move around.
 
-1. Create a project and choose its story language. Add a chapter/scene, or import a TXT, Markdown, RTF, or DOCX manuscript into Sources and review a proposed structure.
+1. If you already have a model connection, enter an idea in the empty workbench, choose the story language and send it. This creates a local project and starts its conversation. You can also create a project yourself or import a TXT, Markdown, RTF or DOCX manuscript into Sources.
 2. Open **Settings** and save your provider endpoint, key, exact model ID, and explicit protocol (Chat Completions, Responses, or Anthropic Messages). **Refresh available models** checks the provider's own listing. A model label does not establish its vendor or model family; missing/unsupported listing never changes your model automatically.
-3. Choose a writing preset: **Concise Chinese**, **Balanced narrative**, **Precise English**, or create your own System prompt. Presets persist in the local workspace and are shared by CLI, API, and desktop. Built-ins can be duplicated; custom presets can be edited and deleted.
+3. The default chat mode can propose designs for review. Open the conversation's context controls to brainstorm, request a read-only review, or attach a passage from a saved draft. For prose, choose **Concise Chinese**, **Balanced narrative**, **Precise English**, or your own System prompt. Presets persist in the local workspace and are shared by CLI, API and desktop.
 4. Save your scene, choose **Continue story**, describe what should happen, and check the input list. The Agent uses that exact saved version and explicitly selected sources. The server appends only new text to a separate proposal and preserves the original draft.
 5. Read the proposal and its version diff, edit it if needed, then explicitly adopt it as a scene draft. Candidate facts still require their own human review before canon changes. **Export text** downloads the visible draft or proposal without changing stored content.
 

@@ -343,3 +343,7 @@ reject foreign/stale/unknown refs, missing read/card binding or off-card actors.
 Evidence proposals preserve the entire card and existing records, append only
 quoted acquisitions/reader records, remain pending, and spend no extra provider
 calls beyond normal Main commands. Omitted/empty lists do not delete anything.
+
+## SG-034 Main Agent workbench
+
+Maintain the Main Agent workbench section in authoring_session_v1. Keep optional turn focus, collaboration mode, exact passage, the package skill registry and typed navigation consistent across API, Web and desktop. Bind permissions and author review at the existing services.

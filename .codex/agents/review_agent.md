@@ -348,3 +348,7 @@ reject foreign/stale/unknown refs, missing read/card binding or off-card actors.
 Evidence proposals preserve the entire card and existing records, append only
 quoted acquisitions/reader records, remain pending, and spend no extra provider
 calls beyond normal Main commands. Omitted/empty lists do not delete anything.
+
+## SG-034 Main Agent workbench
+
+Review the empty-project and existing-manuscript journeys. Check that a discoverable action actually runs or opens its named destination, and that discussion never claims a review, novel edit or canon update on the basis of a link.

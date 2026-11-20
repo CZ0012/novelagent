@@ -363,8 +363,21 @@ class AuthoringFinishArgs(ContractModel):
     message: str = Field(min_length=1, max_length=30000)
 
 
+class AuthoringNavigationContext(ContractModel):
+    chapter_id: str | None = Field(default=None, min_length=1, max_length=200)
+    scene_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class AuthoringSkillArgs(ContractModel):
+    skill_id: Literal["author-collaboration", "project-navigation", "review-and-revision", "exact-draft-evidence", "writer-and-canon", "character-perspective"]
+
+
+class AuthoringWorkflowArgs(AuthoringNavigationContext):
+    target: Literal["conversation", "design", "checks", "manuscript", "sources", "graph", "settings", "planning", "proposals", "writer", "continuity"]
+
+
 class AuthoringToolAction(ContractModel):
-    tool: Literal["inspect_sources", "read_source", "search_source", "search_draft_quotes", "inspect_canon", "inspect_workspace", "search_history", "inspect_proposal", "character_view", "simulate_character", "impact_analysis", "propose_workspace", "revise_proposal", "propose_draft_evidence", "propose_design_changes", "propose_card_review", "finish"]
+    tool: Literal["inspect_sources", "read_source", "search_source", "search_draft_quotes", "inspect_canon", "inspect_workspace", "search_history", "inspect_proposal", "character_view", "simulate_character", "impact_analysis", "propose_workspace", "revise_proposal", "propose_draft_evidence", "propose_design_changes", "propose_card_review", "discover_capabilities", "read_skill", "inspect_project", "inspect_reviews", "open_workflow", "finish"]
     args: JsonDict = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -386,6 +399,11 @@ class AuthoringToolAction(ContractModel):
             "search_draft_quotes": AuthoringSearchDraftQuotesArgs,
             "propose_design_changes": AuthoringDesignChangesArgs,
             "propose_card_review": AuthoringCardReviewArgs,
+            "discover_capabilities": AuthoringEmptyArgs,
+            "read_skill": AuthoringSkillArgs,
+            "inspect_project": AuthoringPageArgs,
+            "inspect_reviews": AuthoringPageArgs,
+            "open_workflow": AuthoringWorkflowArgs,
             "finish": AuthoringFinishArgs,
         }
         parsed = schemas[self.tool].model_validate(self.args)
@@ -415,6 +433,11 @@ def authoring_tool_schema() -> dict:
         "search_draft_quotes": AuthoringSearchDraftQuotesArgs,
         "propose_design_changes": AuthoringDesignChangesArgs,
         "propose_card_review": AuthoringCardReviewArgs,
+        "discover_capabilities": AuthoringEmptyArgs,
+        "read_skill": AuthoringSkillArgs,
+        "inspect_project": AuthoringPageArgs,
+        "inspect_reviews": AuthoringPageArgs,
+        "open_workflow": AuthoringWorkflowArgs,
         "finish": AuthoringFinishArgs,
     }
     definitions = {}

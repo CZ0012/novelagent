@@ -11,7 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from storygraph.core.agent_config import AgentPermissionLevel, settings_for_task
 from storygraph.core.errors import ContractError, GraphStoreError, ModelOutputError
 from storygraph.models.authoring import AuthoringDraftPin, AuthoringSourcePin
-from storygraph.models.authoring import AuthoringMessage
+from storygraph.models.authoring import AuthoringMessage, AuthoringNavigationContext
+from storygraph.services.authoring_passage import AuthoringSelectedPassage, resolve_selected_passage
 from storygraph.core.ids import new_id
 from storygraph.core.time import utc_now
 from storygraph.models.writer_visibility import WriterVisibilityRecord
@@ -53,6 +54,13 @@ class AuthoringVersionRequest(BaseModel):
 class AuthoringTurnRequest(AuthoringVersionRequest):
     message: str = Field(min_length=1, max_length=12000)
     max_steps: int = Field(default=6, ge=1, le=8, strict=True)
+    navigation_context: AuthoringNavigationContext | None = None
+    collaboration_mode: Literal["collaborate", "discuss", "review"] = "collaborate"
+    selected_passage: AuthoringSelectedPassage | None = None
+
+
+class AuthoringDraftPinsRequest(AuthoringVersionRequest):
+    draft_ids: list[str] = Field(default_factory=list, max_length=2000)
 
 
 class AuthoringSourcesRequest(AuthoringVersionRequest):
@@ -237,6 +245,64 @@ def register_authoring_session_routes(app, *, graph, settings, proposals, drafts
                 for sid in sorted(affected)
                 if (draft := drafts.latest_for_scene(project_id, sid)) is not None]
 
+    def navigation_for(project_id, focus):
+        scope(project_id)
+        chapter_id, scene_id = focus.get("chapter_id"), focus.get("scene_id")
+        if chapter_id:
+            chapter = query.get_node(project_id=project_id, node_id=chapter_id)
+            if chapter.type != "Chapter":
+                raise ContractError("authoring_navigation_chapter_scope")
+        if scene_id:
+            query.scene_node(project_id=project_id, scene_id=scene_id)
+            if chapter_id:
+                outline = query.project_outline(project_id=project_id)
+                chapter = next((c for c in outline["chapters"] if c["id"] == chapter_id), None)
+                if not chapter or not any(v["id"] == scene_id for v in chapter["scenes"]):
+                    raise ContractError("authoring_navigation_scene_chapter_scope")
+
+    def project_for(project_id, args):
+        outline = query.project_outline(project_id=project_id)
+        rows = []
+        for chapter in outline["chapters"]:
+            rows.append({"kind": "chapter", "id": chapter["id"], "title": chapter.get("title"), "scene_count": len(chapter["scenes"])})
+            for scene in chapter["scenes"]:
+                rows.append({"kind": "scene", "chapter_id": chapter["id"], "id": scene["id"], "title": scene.get("title"),
+                             "draft_selected": False})
+        rows = [r for r in rows if args["query"].casefold() in canonical_json(r).casefold()]
+        selected = rows[args["offset"]:args["offset"] + args["limit"]]
+        return {"project_id": project_id, "title": outline["title"], "entries": selected,
+                **AuthoringService._page_metadata(len(rows), args["offset"], len(selected)),
+                "note": "Structure metadata only. Navigation does not select saved prose or grant Writer access."}
+
+    def reviews_for(session, args):
+        artifacts = proposals.list(project_id=session.project_id)
+        items = [{"kind": "proposal", "id": p.id, "version": p.version, "artifact_type": p.artifact_type, "status": p.status,
+                  "summary": p.title} for p in artifacts]
+        reports = getattr(app.state, "generation_review_store", None)
+        # Only explicit pins permit semantic evidence which may quote saved prose.
+        if reports is not None:
+            for pin in session.draft_pins:
+                for report in reports.list(project_id=session.project_id, target_type="draft", target_id=pin.draft_id):
+                    if report.target_version != pin.version or report.target_text_sha256 != pin.text_sha256:
+                        continue
+                    value = report.model_dump(mode="json", exclude={"model_execution", "issues"})
+                    value["freshness"] = "not_revalidated"
+                    items.append({"kind": "semantic_report", **value, "issues_total": len(report.issues)})
+                    for issue in report.issues:
+                        items.append({"kind": "semantic_issue", "report_id": report.id, "target_id": report.target_id,
+                                      "freshness": "not_revalidated", **issue.model_dump(mode="json")})
+        items = [i for i in items if args["query"].casefold() in canonical_json(i).casefold()]
+        selected = AuthoringService._bounded_rows([(None, i) for i in items[args["offset"]:args["offset"] + args["limit"]]])
+        return {"records": [v for _, v in selected], **AuthoringService._page_metadata(len(items), args["offset"], len(selected)),
+                "note": "Report issues/evidence are limited to explicitly selected exact Drafts. Missing reports are not passes. Freshness and gates remain with the existing review workflow."}
+
+    def passage_for(project_id, scene_id, pin):
+        draft = drafts.get_draft(pin.draft_id)
+        if draft.content_language != scope(project_id):
+            raise ContractError("authoring_draft_scope")
+        query.scene_node(project_id=project_id, scene_id=scene_id)
+        return resolve_selected_passage(pin, project_id, scene_id, draft)
+
     def service(paid=False, session_id=None):
         provider, model, execution = None, "", None
         if paid:
@@ -252,7 +318,8 @@ def register_authoring_session_routes(app, *, graph, settings, proposals, drafts
             source_resolver=source_text, draft_resolver=draft_for, canon_resolver=canon_for,
             character_resolver=lambda pid, cid, sid: character_for(pid, cid, sid, session_id),
             impact_resolver=impacts, project_language_resolver=language_scope,
-            canon_query_resolver=canon_query, model_execution=execution)
+            canon_query_resolver=canon_query, model_execution=execution, project_resolver=project_for,
+            reviews_resolver=reviews_for, navigation_validator=navigation_for, passage_resolver=passage_for)
 
     def envelope(session):
         result = session.model_dump(mode="json")
@@ -401,6 +468,41 @@ def register_authoring_session_routes(app, *, graph, settings, proposals, drafts
                        "The author explicitly updated reference versions. Earlier discussion remains historical, not current source evidence. Recheck scene cards; saved Draft references, canon and prose remain unchanged.")
             session.messages.append(AuthoringMessage(id=new_id("amsg"), role="author", content=message, created_at=utc_now()))
             return envelope(service()._save(session))
+        return execute(project_id, AgentPermissionLevel.READ_GENERATE, operation)
+
+    @app.post(base + "/{session_id}/draft-pins")
+    def update_draft_pins(project_id: str, session_id: str, request: AuthoringDraftPinsRequest):
+        def operation():
+            session = writable_session(project_id, session_id)
+            if session.version != request.expected_version:
+                raise ContractError("authoring_stale_version")
+            pins = []
+            for identity in dict.fromkeys(request.draft_ids):
+                draft = drafts.get_draft(identity)
+                pin = AuthoringDraftPin(scene_id=draft.scene_id, draft_id=draft.id,
+                    version=draft.version, text_sha256=content_hash(draft.text))
+                draft_for(project_id, pin)
+                pins.append(pin)
+            if pins == session.draft_pins:
+                return envelope(session)
+            removed = {p.draft_id for p in session.draft_pins} - {p.draft_id for p in pins}
+            if removed:
+                cited = {r.draft_id for r in session.workspace.reader_records}
+                for item in session.workspace.items:
+                    cited.update(e.draft.draft_id for e in item.evidence)
+                for card in session.workspace.scene_cards:
+                    for entry in card.entry_knowledge + card.acquisitions:
+                        cited.update(e.draft.draft_id for e in entry.evidence)
+                if removed & cited:
+                    raise ContractError("authoring_draft_pin_in_use")
+                session.workspace.scene_cards = [
+                    card.model_copy(update={"status": "proposed", "version": card.version + 1})
+                    for card in session.workspace.scene_cards
+                ]
+            session.draft_pins = pins
+            svc = service()
+            svc._validate_pins(session)
+            return envelope(svc._save(session))
         return execute(project_id, AgentPermissionLevel.READ_GENERATE, operation)
 
     @app.post(base + "/{session_id}/turn")

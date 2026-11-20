@@ -17,6 +17,12 @@ installed v0.2.0 baseline. Keep author design, explicit Writer permissions,
 exact-Draft evidence and Graph canon separate. Do not infer universal novel
 consistency or a newly published update from this limited trial.
 
+The source workbench adds a persistent Main Agent below the manuscript, an
+in-process MCP tool registry and packaged writing skills. Its UI and tool
+integration checks are separate from the earlier 0.3.0 candidate's literary
+trial and from the installed desktop release. See the Main Agent workbench
+section of `contracts/authoring_session_v1.md`.
+
 Application source files are allowed when they are explicitly aligned with `docs/architecture.md` and the versioned contracts under `contracts/`. Keep implementation scoped to the StoryGraph Agent architecture and preserve the canon safety rules below.
 
 Current user-facing runtime status must stay explicit: this MVP can be run through the local CLI, FastAPI + React/Vite, a source-built Tauri desktop package, or the published v0.2.0 GitHub Release. Local build outputs remain ignored and separate from published assets. The v0.2.0 release provides the verified NSIS installer, setup.exe.sig and latest.json; an actual 0.1.16-to-0.2.0 in-app update has been verified for desktop and bundled backend. Tauri updater signing remains distinct from Windows Authenticode signing.

@@ -68,3 +68,35 @@ export async function readAuthoringHistory(base: string, project: string, sessio
 }
 export async function readAuthoringProposal(base: string, project: string, sessionId: string, id: string) { return (await apiGet<{ proposal: AuthoringProposal }>(base, authoringPath(project, sessionId) + `/proposals/${encodeURIComponent(id)}`)).proposal; }
 export async function updateAuthoringSources(base: string, project: string, sessionId: string, expectedVersion: number, sourceIds: string[], outlineIds: string[]) { return postAuthoringSession(base, project, sessionId, "/sources", { expected_version: expectedVersion, source_document_ids: sourceIds, outline_proposal_ids: outlineIds }); }
+
+
+export type AuthoringNavigation = { target: "conversation" | "design" | "checks" | "manuscript" | "sources" | "graph" | "settings" | "planning" | "proposals" | "writer" | "continuity"; scene_id?: string; chapter_id?: string };
+export function authoringToolNavigation(content: string): AuthoringNavigation | null {
+  try {
+    const trace = JSON.parse(content);
+    if (trace?.tool !== "open_workflow" || (trace.op !== undefined && trace.op !== "open_workflow") || trace.result?.executed !== false) return null;
+    const value: unknown = trace.result.navigation;
+    if (!value || typeof value !== "object") return null;
+    const target = value as Record<string, unknown>;
+    const requested = trace.args?.target;
+    const openTarget = trace.result.status === "requires_author_action" && requested === target.target;
+    const selectScene = trace.result.status === "requires_scene_selection"
+      && (requested === "writer" || requested === "continuity")
+      && target.target === "manuscript" && target.scene_id === undefined;
+    if (!openTarget && !selectScene) return null;
+    if (!["conversation", "design", "checks", "manuscript", "sources", "graph", "settings", "planning", "proposals", "writer", "continuity"].includes(String(target.target))) return null;
+    if ((target.scene_id !== undefined && typeof target.scene_id !== "string") || (target.chapter_id !== undefined && typeof target.chapter_id !== "string")) return null;
+    return { target: target.target as AuthoringNavigation["target"], ...(target.scene_id ? { scene_id: target.scene_id as string } : {}), ...(target.chapter_id ? { chapter_id: target.chapter_id as string } : {}) };
+  } catch { return null; }
+}
+export function authoringCanPinDraft(projectId: string, sceneId: string | undefined, draft: Draft | null, dirty: boolean) {
+  return !!sceneId && !!draft && !dirty && draft.project_id === projectId && draft.scene_id === sceneId;
+}
+
+export type AuthoringPassageSelection = { draftId: string; start: number; end: number; text: string };
+export function authoringValidPassage(projectId: string, sceneId: string | undefined, draft: Draft | null, dirty: boolean, selection: AuthoringPassageSelection | null | undefined) {
+  if (!sceneId || !authoringCanPinDraft(projectId, sceneId, draft, dirty) || !draft || !selection || selection.draftId !== draft.id) return false;
+  const { start, end, text } = selection;
+  const splitSurrogate = (position: number) => position > 0 && position < draft.text.length && /[\uD800-\uDBFF]/.test(draft.text[position - 1]) && /[\uDC00-\uDFFF]/.test(draft.text[position]);
+  return Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start && end - start <= 8000 && end <= draft.text.length && !!text.trim() && draft.text.slice(start, end) === text && !splitSurrogate(start) && !splitSurrogate(end);
+}

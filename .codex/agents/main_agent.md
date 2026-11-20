@@ -375,3 +375,7 @@ reject foreign/stale/unknown refs, missing read/card binding or off-card actors.
 Evidence proposals preserve the entire card and existing records, append only
 quoted acquisitions/reader records, remain pending, and spend no extra provider
 calls beyond normal Main commands. Omitted/empty lists do not delete anything.
+
+## SG-034 Main Agent workbench
+
+Coordinate the split workbench and the scoped MCP runtime as one author journey. Verify a connected first-time author gets a reply from one submit, and distinguish read-only dialogue, pending design, reviewed prose and canon.

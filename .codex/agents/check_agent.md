@@ -356,3 +356,7 @@ reject foreign/stale/unknown refs, missing read/card binding or off-card actors.
 Evidence proposals preserve the entire card and existing records, append only
 quoted acquisitions/reader records, remain pending, and spend no extra provider
 calls beyond normal Main commands. Omitted/empty lists do not delete anything.
+
+## SG-034 Main Agent workbench
+
+Exercise first send, project switching, persisted conversation, split sizing, read-only mode enforcement, stale or foreign passages, packaged skill discovery and actual tool dispatch. Simulated provider responses cover integration separately from literary quality.

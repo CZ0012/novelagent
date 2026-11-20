@@ -127,13 +127,16 @@ def _message(role, content, tool_name=None, model_execution=None):
 class AuthoringService:
     def __init__(self, *, store, provider=None, model="", source_resolver=None,
                  character_resolver=None, canon_resolver=None, draft_resolver=None,
-                 impact_resolver=None, project_language_resolver=None, canon_query_resolver=None, model_execution=None):
+                 impact_resolver=None, project_language_resolver=None, canon_query_resolver=None, model_execution=None, project_resolver=None, reviews_resolver=None, navigation_validator=None, passage_resolver=None):
         self.store, self.provider, self.model = store, provider, model
         self.source_resolver, self.character_resolver = source_resolver, character_resolver
         self.canon_resolver, self.draft_resolver = canon_resolver, draft_resolver
         self.impact_resolver = impact_resolver
         self.project_language_resolver = project_language_resolver
         self.canon_query_resolver = canon_query_resolver
+        self.project_resolver, self.reviews_resolver = project_resolver, reviews_resolver
+        self.navigation_validator = navigation_validator
+        self.passage_resolver = passage_resolver
         self.model_execution = ModelExecution.model_validate(model_execution).model_copy(deep=True) if model_execution is not None else None
 
     def _generate(self, request):
@@ -508,19 +511,31 @@ class AuthoringService:
         selected = [cards[identity].model_copy(deep=True, update={"status": "proposed"}) for identity in args["card_ids"]]
         return self._propose(session, AuthoringPatch(upsert_scene_cards=selected), args["summary"], canon_sha256=canon_sha256)
 
-    def turn(self, *, project_id, session_id, expected_version, message, max_steps=6, _reconcile_pin=None, _reconcile_card=None):
+    def turn(self, *, project_id, session_id, expected_version, message, max_steps=6, _reconcile_pin=None, _reconcile_card=None, navigation_context=None, collaboration_mode="collaborate", selected_passage=None):
         if not self.provider:
             raise ContractError("authoring_provider_required")
         if not isinstance(max_steps, int) or isinstance(max_steps, bool) or not 1 <= max_steps <= 8:
             raise ContractError("authoring_invalid_step_limit")
         if not message.strip():
             raise ContractError("authoring_message_required")
+        from storygraph.services.authoring_collaboration import allowed_authoring_tools
+        allowed_authoring_tools(collaboration_mode)
+        navigation_context = self._navigation(project_id, navigation_context or {})
+        if selected_passage is not None:
+            from storygraph.services.authoring_passage import AuthoringSelectedPassage
+            selected_passage = AuthoringSelectedPassage.model_validate(selected_passage)
+            if self.passage_resolver is None:
+                raise ContractError("authoring_selected_passage_unavailable")
+            self.passage_resolver(project_id, navigation_context.get("scene_id"), selected_passage)
         session = self._cas(project_id, session_id, expected_version)
         if session.turn_status == "running":
             raise ContractError("authoring_turn_running")
         self._validate_pins(session)
         canon_sha256 = self._canon_digest(project_id)
-        session.messages.append(_message("author", message))
+        first_idea = (session.turn_id is None and len(session.messages) == 1
+            and session.messages[0].role == "author" and session.messages[0].content == message)
+        if not first_idea:
+            session.messages.append(_message("author", message))
         session.turn_status, session.turn_id, session.turn_error_category = "running", new_id("aturn"), None
         session.turn_calls_started, session.turn_max_steps = 0, max_steps
         active_key = (project_id, session_id)
@@ -528,7 +543,7 @@ class AuthoringService:
             session = self._save(session)
             self.store._active_turns[active_key] = session.turn_id
         try:
-            return self._run_turn(session, max_steps, _reconcile_pin, canon_sha256, _reconcile_card)
+            return self._run_turn(session, max_steps, _reconcile_pin, canon_sha256, _reconcile_card, navigation_context, collaboration_mode, selected_passage)
         except Exception as exc:
             latest = self.get(project_id, session_id)
             if latest.turn_id == session.turn_id and latest.turn_status == "running":
@@ -552,11 +567,16 @@ class AuthoringService:
         session.turn_status, session.turn_error_category = "unknown", "interrupted"
         return self._save(session)
 
-    def _run_turn(self, session, max_steps, reconcile_pin=None, canon_sha256=None, reconcile_card=None):
+    def _run_turn(self, session, max_steps, reconcile_pin=None, canon_sha256=None, reconcile_card=None, navigation_context=None, collaboration_mode="collaborate", selected_passage=None):
+        from storygraph.services.authoring_mcp import AuthoringMCPServer, AuthoringMCPClient
+        def validate_turn():
+            self._validate_turn_context(session, canon_sha256)
+            if selected_passage is not None:
+                self.passage_resolver(session.project_id, (navigation_context or {}).get("scene_id"), selected_passage)
         read_draft_ids, quote_registry = set(), {}
         framework_read, framework_read_id = None, None
         if reconcile_pin is not None and reconcile_card is not None:
-            self._validate_turn_context(session, canon_sha256)
+            validate_turn()
             self._reconciliation_card(session, reconcile_pin, *reconcile_card)
             draft = self._draft(session, reconcile_pin)
             if draft.discarded:
@@ -573,7 +593,35 @@ class AuthoringService:
             read_draft_ids.add(reconcile_pin.draft_id)
         prompt = (Path(__file__).parents[1] / "prompts" / "authoring_agent.md").read_text(encoding="utf-8")
         system = prompt + "\n" + authoritative_language_message(session.content_language)
-        system += "\nAllowed tool JSON schema:\n" + canonical_json(authoring_tool_schema())
+        def dispatch(action):
+            nonlocal session, calls, origin
+            if selected_passage is not None and (action.tool in {"search_history", "inspect_reviews"}
+                    or (action.tool in {"read_source", "search_source"} and action.args["kind"] == "draft")):
+                raise ContractError("authoring_selected_passage_full_draft_read_forbidden")
+            if action.tool == "simulate_character":
+                if calls >= max_steps:
+                    return {"status": "budget_exhausted", "note": "No remaining provider call reserved for character simulation."}
+                calls += 1
+                session.turn_calls_started = calls
+                session = self._save(session)
+                origin = "simulate_character"
+                return self._simulate_character(session, action.args, canon_sha256)
+            return self._tool(session, action, reconcile_pin=reconcile_pin, canon_sha256=canon_sha256,
+                reconcile_card=reconcile_card, quote_registry=quote_registry, read_draft_ids=read_draft_ids,
+                navigation_context=navigation_context, mcp=mcp)
+        mcp = AuthoringMCPClient(AuthoringMCPServer(dispatch=dispatch,
+            validate_context=validate_turn, mode=collaboration_mode))
+        mcp.initialize()
+        catalog = mcp.call("tools/list")
+        resources = mcp.call("resources/list")
+        default_skill = mcp.call("resources/read", {"uri": "storygraph://skills/author-collaboration"})
+        allowed = {tool["name"] for tool in catalog["tools"]}
+        schema = authoring_tool_schema()
+        schema["oneOf"] = [v for v in schema["oneOf"] if v["properties"]["tool"]["const"] in allowed]
+        system += "\nAllowed tool JSON schema:\n" + canonical_json(schema)
+        system += "\nBuilt-in executable working methods:\n" + canonical_json(default_skill)
+        system += "\nMCP resources (use read_skill to load):\n" + canonical_json(resources)
+        system += "\nMode: " + collaboration_mode + ". Never claim a tool ran before receiving its real result."
         system += ("\n【本次模型响应的传输规则，必须遵守】\n"
                    "你现在只选择下一步的一次工具调用，不是在编写执行记录。整个响应只能是一个JSON对象，"
                    "顶层只有tool和args，args必须符合所选工具的schema。写完这个对象的最后一个右花括号就立即结束响应。"
@@ -586,14 +634,14 @@ class AuthoringService:
                    "ONE RESPONSE = ONE COMMAND. After its closing brace, stop and wait for the runtime.")
         history_window, history_chars = [], 0
         for message in reversed(session.messages[-30:]):
-            if message.id == framework_read_id:
+            if message.id == framework_read_id or (selected_passage is not None and message.role == "tool"):
                 continue  # The exact current page is supplied once as context data below.
             if history_chars + len(message.content) > 60000:
                 break
             history_window.append(message)
             history_chars += len(message.content)
         history_window.reverse()
-        context = {"workspace_index": {"item_ids": [i.id for i in session.workspace.items],
+        context = {"navigation_context": navigation_context or {}, "collaboration_mode": collaboration_mode, "workspace_index": {"item_ids": [i.id for i in session.workspace.items],
                    "character_ids": [p.character_id for p in session.workspace.character_plans],
                    "card_ids": [c.id for c in session.workspace.scene_cards], "reader_records_count": len(session.workspace.reader_records)},
                    "history_window": {"included_messages": len(history_window), "character_limit": 60000,
@@ -606,6 +654,9 @@ class AuthoringService:
                    "draft_pins_total": len(session.draft_pins), "draft_pins_more": len(session.draft_pins) > 10,
                    "history_counts": session.history_counts.model_dump(),
                    "history_has_more": session.history_has_more.model_dump()}
+        if selected_passage is not None:
+            context["selected_passage"] = self.passage_resolver(session.project_id, (navigation_context or {}).get("scene_id"), selected_passage)
+            context["selected_passage_boundary"] = "Single-turn Main-only selected excerpt. This grants no whole-Draft/tool/Writer/simulation access and is not a reconciliation read or evidence."
         if reconcile_card is not None:
             selected = self._reconciliation_card(session, reconcile_pin, *reconcile_card)
             context["reconciliation_card"] = selected.model_dump(mode="json")
@@ -621,32 +672,21 @@ class AuthoringService:
             # Count dispatch before the socket call: an unknown transport outcome consumes budget.
             if sum(len(m.content) for m in messages) > 180000:
                 raise ContractError("authoring_context_budget_exceeded")
-            self._validate_turn_context(session, canon_sha256)
+            validate_turn()
             calls += 1
             session.turn_calls_started = calls
             session = self._save(session)
             origin = "main"
             try:
                 response = self._generate(LLMRequest(messages=messages, model=self.model, max_tokens=completion_budget(self.provider, 6000)))
-                self._validate_turn_context(session, canon_sha256)
+                validate_turn()
                 if len(response.content) > 120000:
                     raise ValueError("oversized")
                 action = AuthoringToolAction.model_validate(json.loads(unwrap_json_fence(response.content)))
                 if (reconcile_pin is not None and action.tool in {"propose_workspace", "revise_proposal", "propose_draft_evidence"}
                     and reconcile_pin.draft_id not in read_draft_ids):
                     raise ContractError("authoring_reconciliation_read_required")
-                if action.tool == "simulate_character":
-                    if calls >= max_steps:
-                        result = {"status": "budget_exhausted", "note": "No remaining provider call reserved for character simulation."}
-                    else:
-                        calls += 1
-                        session.turn_calls_started = calls
-                        session = self._save(session)
-                        origin = "simulate_character"
-                        result = self._simulate_character(session, action.args, canon_sha256)
-                else:
-                    result = self._tool(session, action, reconcile_pin=reconcile_pin, canon_sha256=canon_sha256, reconcile_card=reconcile_card,
-                                        quote_registry=quote_registry, read_draft_ids=read_draft_ids)
+                result = mcp.execute(action)
                 if action.tool == "read_source" and action.args["kind"] == "draft":
                     read_draft_ids.add(action.args["id"])
             except (ValueError, TypeError, KeyError, ValidationError, ContractError, ProviderError) as exc:
@@ -741,9 +781,46 @@ class AuthoringService:
         validate_generated_output_language(output_language=session.content_language, fields=fields)
         return {"character_id": args["character_id"], "noncanon": True, "simulation": simulation.model_dump(mode="json")}
 
+    def _navigation(self, project_id, navigation):
+        from storygraph.models.authoring import AuthoringNavigationContext
+        value = AuthoringNavigationContext.model_validate(navigation).model_dump(mode="json", exclude_none=True)
+        if value and self.navigation_validator is None:
+            raise ContractError("authoring_navigation_unavailable")
+        if self.navigation_validator is not None:
+            self.navigation_validator(project_id, value)
+        return value
+
     def _tool(self, session, action, *, reconcile_pin=None, canon_sha256=None, reconcile_card=None,
-              quote_registry=None, read_draft_ids=None):
+              quote_registry=None, read_draft_ids=None, navigation_context=None, mcp=None):
         args = action.args
+        if action.tool == "discover_capabilities":
+            return {"tools": [{"name": t["name"], "description": t["description"]} for t in mcp.call("tools/list")["tools"]],
+                "skills": mcp.call("resources/list")["resources"],
+                "limits": ["No automatic canon writes, Draft writes, human adoption or paid workflow starts.",
+                           "Navigation never selects prose. Only exact explicit pins authorize source/Draft reads."]}
+        if action.tool == "read_skill":
+            return mcp.call("resources/read", {"uri": "storygraph://skills/" + args["skill_id"]})
+        if action.tool == "inspect_project":
+            if self.project_resolver is None:
+                return {"available": False, "reason": "project_structure_unavailable", "chapters": []}
+            return self.project_resolver(session.project_id, args)
+        if action.tool == "inspect_reviews":
+            page = self.history(session.project_id, session.id, kind="proposals", query=args["query"], offset=args["offset"], limit=args["limit"])
+            selected = self._bounded_rows([(None, {k: v for k, v in row.items() if k not in {"model_execution", "patch"}}) for row in page.pop("records")])
+            return {"authoring_proposals": [row for _, row in selected], **page,
+                "existing_reviews": self.reviews_resolver(session, args) if self.reviews_resolver else {"available": False},
+                "limits": "Existing records only. No new check, approval or freshness certification was performed."}
+        if action.tool == "open_workflow":
+            explicit_focus = {k: v for k, v in args.items() if k != "target" and v is not None}
+            focus = explicit_focus if explicit_focus else dict(navigation_context or {})
+            target = args["target"]
+            if target in {"writer", "continuity"} and not focus.get("scene_id"):
+                return {"navigation": {"target": "manuscript", **self._navigation(session.project_id, focus)},
+                    "status": "requires_scene_selection", "executed": False,
+                    "note": "Select the exact existing scene before opening its writing or continuity workflow."}
+            navigation = {"target": target, **self._navigation(session.project_id, focus)}
+            return {"navigation": navigation, "status": "requires_author_action", "executed": False,
+                "note": "Open the existing panel and explicitly review/confirm its exact inputs. No writing, adoption, canon commit, settings change or paid workflow was executed."}
         if action.tool == "inspect_sources":
             rows = [("sources", p) for p in session.source_pins] + [("drafts", p) for p in session.draft_pins]
             rows = [(kind, p) for kind, p in rows if args["query"].casefold() in canonical_json(p.model_dump(mode="json")).casefold()]

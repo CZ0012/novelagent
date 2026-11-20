@@ -25,7 +25,7 @@ This directory contains the Tauri v2 desktop package for the StoryGraph Workbenc
 
 The desktop hosts the same bilingual author workflow and preset APIs as the browser. It does not add a separate canon-writing path. Web catalogs load as separate chunks; native labels and errors use separate JSON catalogs embedded for offline builds. The browser's saved local API address preference is distinct from the desktop host's native workspace/backend settings.
 
-作者工作台采用左侧目录、中间正文、右侧 Agent。章节支持真实折叠，场景以文稿叶节点打开；续写和选区讨论保留正文可见，结果仍走现有提案比较与采用流程。工作流和检查复用可关闭的右侧面板。中英文 Web 语言包按需加载；原生窗口、托盘和错误提示分别来自 `src-tauri/localization/zh-CN.json`、`en-US.json`。新增语言步骤见 [本地化说明](../../docs/localization.md)。
+当前源码桌面工作台在正文下方常驻主 Agent，作者可拖动分隔线或用方向键调节高度。空工作台接受一句灵感，已连接模型时直接开始作品对话。场景写作、设置和详细检查仍可从工作台打开。源码桌面与 Web 使用同一套项目会话和后端工具。构建后端时，PyInstaller 会随程序收集 `storygraph.skills` 的内置 Markdown 资源。中英文 Web 语言包按需加载，原生窗口、托盘和错误提示分别来自 `src-tauri/localization/zh-CN.json`、`en-US.json`。[本地化说明](../../docs/localization.md)
 
 历史英文目录可在 **目录工具 → 修复目录语言** 生成逐字段修订，提交审阅并接受后再明确应用。该功能使用项目内容语言和已配置服务商模型，仅修改章节/场景的标题、摘要及规划说明，保留正文、ID 和关系；图谱/时间线同步刷新。更新软件和切换界面语言不会自动改写作品。已知图谱节点与关系标签独立本地化，未知自定义标签保留原样。
 

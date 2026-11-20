@@ -542,3 +542,47 @@ update; completed retries preserve later author graph edits. It is not an atomic
 transaction across graph persistence and SQLite. Preview and conversation still
 perform no canon writes, and the updated plan requires separate visibility
 compilation before prose generation.
+
+## Main Agent workbench and internal MCP
+
+The persistent lower conversation is scoped to an API connection and Project.
+Opening a chapter or scene changes turn focus. The workbench may create a local
+Project and Session from the author's first idea, then start one explicit turn
+using the configured discussion provider. Its failure state and saved idea
+remain available through the existing journal.
+
+Ordinary turn requests accept optional `navigation_context` with Project-scoped
+`chapter_id` and/or `scene_id`, and `collaboration_mode` with default
+`collaborate`. In `discuss` and `review` the tool registry and dispatcher permit
+read-only creative operations, simulation and workflow links. A proposal tool
+issued in either mode must be rejected before it can store a pending proposal.
+The dialogue and tool journal still record the turn.
+
+An author can grant one turn a saved passage with `selected_passage` containing
+`draft_id`, positive `version`, `text_sha256`, and half-open UTF-16 `start` and
+`end` offsets (1–8000 code units). The scene must match the validated navigation
+context, and the version, content hash, language and span must match the saved
+Draft. Only that span is attached to Main's request. This creates no persistent
+whole-Draft pin and grants no input to a character or Writer. Explicit full
+Draft binding and exact-Draft evidence reconciliation remain separate operations.
+
+The Main runtime owns a turn-local MCP server and client. Initialization, tool
+discovery/calls and resource listing/reads run inside the backend process.
+The existing strict provider command envelope remains the adapter. Tools are
+bound to the server-side session, Project, permission, active mode, source pins
+and version checks. The client discovers the built-in skills and loads the
+author-collaboration method by default. Additional methods are read from
+approved package resources under `storygraph://skills/`. A manuscript cannot
+register a tool, import a skill or replace a model connection.
+
+The additional operations are `discover_capabilities`, `read_skill`,
+`inspect_project`, `inspect_reviews` and `open_workflow`. Navigation results
+carry typed workspace targets; following a link is an explicit UI action.
+Opening a workflow never records a completed review, model run, Draft change
+or canon decision. Existing tools continue to use the same reviewed services.
+
+Replacing complete Draft references uses the session version and exact project
+and language checks. Removing a reference used by adopted design evidence or
+reader records requires revising those citations first. A fresh conversation
+can start with a different set of references. Removing other Draft references
+returns scene cards to explicit review. Repeating the same selection is a no-op.

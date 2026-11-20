@@ -41,4 +41,4 @@ include = ["apps*", "storygraph*"]
 exclude = ["contracts*", "docs*", "examples*", "tests*"]
 
 [tool.setuptools.package-data]
-storygraph = ["prompts/*.md", "localization/*.json"]
+storygraph = ["prompts/*.md", "localization/*.json", "skills/*/SKILL.md"]
