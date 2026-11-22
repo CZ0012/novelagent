@@ -10,7 +10,7 @@ This repository is being prepared for the StoryGraph Agent project: a long-form 
 
 The project has moved from instruction and contract setup into MVP implementation.
 
-The current source version is 0.4.0 with Main-Agent author collaboration under
+The current source version is 0.4.1 with Main-Agent author collaboration under
 `contracts/authoring_session_v1.md`. Its bounded real author trial is recorded in
 `docs/acceptance-0.3.0.md`. Preserve the distinction between a tested candidate,
 the published release and an author's installed version. Keep author design, explicit Writer permissions,
@@ -25,7 +25,7 @@ section of `contracts/authoring_session_v1.md`.
 
 Application source files are allowed when they are explicitly aligned with `docs/architecture.md` and the versioned contracts under `contracts/`. Keep implementation scoped to the StoryGraph Agent architecture and preserve the canon safety rules below.
 
-The MVP can run through the local CLI, FastAPI + React/Vite, a source-built Tauri package or the v0.4.0 Windows GitHub Release. Each release ships an NSIS installer, its Tauri updater signature and latest.json. Local build outputs remain ignored. The historical 0.1.16-to-0.2.0 in-app upgrade was verified for both desktop and bundled backend. Report installation checks separately from artifact and download checks.
+The MVP can run through the local CLI, FastAPI + React/Vite, a source-built Tauri package or the v0.4.1 Windows GitHub Release. Each release ships an NSIS installer, its Tauri updater signature and latest.json. Local build outputs remain ignored. The historical 0.1.16-to-0.2.0 in-app upgrade was verified for both desktop and bundled backend. Report installation checks separately from artifact and download checks.
 
 The desktop MVP should keep a Chinese-first UI, hide the managed backend console window in packaged Windows builds, use the root `VERSION` as the release version source, expose a signed in-app update check/install path for Tauri builds, and ship reproducible icon assets under `apps/desktop/src-tauri/icons/`.
 

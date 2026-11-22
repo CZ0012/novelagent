@@ -360,3 +360,7 @@ Verify truthful plan-versus-key attribution, stale selection handling and absenc
 ## 0.4.0 author workbench
 
 Check that tentative notebook entries remain tentative, edits and withdrawals override their source on replay, and concurrent manual naming wins. Verify both one-click model setup options through the actual workbench.
+
+## SG-039 structured Responses
+
+Distinguish HTTP stream admission from terminal success and verify the actual Main Agent tool loop, bounded diagnostics and role isolation.

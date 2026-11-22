@@ -376,3 +376,7 @@ Use the official local OAuth and streaming Responses routes for ChatGPT plan usa
 ## 0.4.0 author workbench
 
 The optional title request uses only the first-message excerpt on a known same-connection model and is independently claimed once. Main can record bounded source-backed local memories as part of its usual turn. The Writer and canon require their own permissions.
+
+## SG-039 structured Responses
+
+JSON-object mode in the Responses adapters requires a JSON marker in the input array. Supply a fixed developer format instruction if needed; never promote author text or tool output into developer content.

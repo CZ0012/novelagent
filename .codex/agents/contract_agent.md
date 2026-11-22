@@ -355,3 +355,7 @@ Preserve legacy API-key profiles and provenance. Follow agent_runtime_v1 and aut
 ## 0.4.0 author workbench
 
 Maintain the targeted connection-save and independent title-preferences interfaces in agent_runtime_v1 and the author-context, notebook, search and title metadata interfaces in authoring_session_v1. Preserve historical records and stable IDs.
+
+## SG-039 structured Responses
+
+Preserve the finite json_mode_input_required category and the independent Responses input requirement in agent_runtime_v1; error handling does not authorize a retry or a billing fallback.

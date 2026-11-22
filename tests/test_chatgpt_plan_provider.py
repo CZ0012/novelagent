@@ -172,3 +172,53 @@ def test_switch_to_plan_does_not_retain_vendor_thinking_options():
     current = changed.connection_profiles[0]
     assert current.thinking_mode == "provider_default" and current.reasoning_effort is None
     assert current.api_key == current.base_url == ""
+
+
+@pytest.mark.parametrize("detail,category", [
+    ({"code": None, "type": "invalid_request_error", "param": "input",
+      "message": "Response input messages must contain the word 'json' in some form to use 'text.format' of type 'json_object'."}, "json_mode_input_required"),
+    ({"code": "subscription_sharing_usage_limit_exceeded", "type": "invalid_request_error"}, "plan_usage_limit"),
+    ({"type": "chatpass_v2_scope_not_authorized"}, "plan_permission_required"),
+    ({"code": None, "type": "invalid_request_error", "message": "private synthetic-oauth-secret"}, "invalid_request"),
+    ({"type": "server_error"}, "provider_unavailable"),
+    ({"code": "unknown", "type": "unknown", "message": "private synthetic-oauth-secret"}, "request_failed"),
+    ({"code": ["invalid_request_error"], "type": {"private": True}}, "request_failed"),
+])
+def test_stream_error_finite_safe_diagnostics(detail, category):
+    calls = []
+    with pytest.raises(ProviderError) as caught:
+        fixture_provider(event("error", error=detail), calls).generate(payload())
+    assert len(calls) == 1
+    assert caught.value.category == category and caught.value.outcome_known
+    assert caught.value.allow_format_retry is False
+    assert "private" not in str(caught.value) and "synthetic-oauth-secret" not in str(caught.value)
+
+
+def test_http400_unknown_error_remains_invalid_request():
+    from storygraph.services.chatgpt_plan_provider import _plan_error
+    exc = _plan_error({"error": {"code": "unknown", "message": "private"}}, status=400)
+    assert exc.category == "invalid_request" and exc.status == 400
+    assert "private" not in str(exc)
+
+
+@pytest.mark.parametrize("overrides,category", [
+    ({"param": "other"}, "invalid_request"),
+    ({"message": "private synthetic-oauth-secret json text.format"}, "invalid_request"),
+    ({"code": "subscription_sharing_usage_limit_exceeded"}, "plan_usage_limit"),
+    ({"code": "chatpass_v2_scope_not_authorized"}, "plan_permission_required"),
+])
+def test_json_input_diagnostic_is_exact_and_never_overrides_plan_admission(overrides, category):
+    from storygraph.services.chatgpt_plan_provider import _plan_error
+    detail = {"code": None, "type": "invalid_request_error", "param": "input",
+              "message": "Response input messages must contain the word 'json' in some form to use 'text.format' of type 'json_object'."}
+    detail.update(overrides)
+    exc = _plan_error({"error": detail})
+    assert exc.category == category
+    assert "synthetic-oauth-secret" not in str(exc)
+
+@pytest.mark.parametrize(("status", "expected"), [(401, "invalid_credentials"), (429, "rate_limit"), (503, "provider_unavailable")])
+def test_http_status_has_priority_over_generic_error_type(status, expected):
+    from storygraph.services.chatgpt_plan_provider import _plan_error
+
+    classified = _plan_error({"error": {"type":"invalid_request_error"}}, status=status)
+    assert classified.category == expected and classified.status == status

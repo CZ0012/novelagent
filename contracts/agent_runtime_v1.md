@@ -406,3 +406,18 @@ catalog scoped to the connection's payer and protocol. New-session naming
 receives only a short opening excerpt and the project language. Without an
 eligible model, the placeholder stays. Naming cannot fall through to another
 provider or to an unselected expensive model.
+
+## 0.4.1 Responses JSON-mode admission
+
+For Responses requests that explicitly use JSON-object mode, OpenAI checks
+the actual `input` messages for the word JSON. Top-level `instructions` is a
+separate field. If the input lacks the marker, the plan and API-key Responses
+adapters include one application-owned developer message requesting a JSON
+object. Caller messages and their roles remain intact. Plain text (including
+automatic conversation titles) keeps its existing inputs.
+
+A terminal SSE rejection can follow HTTP 200. The specific, confirmed JSON
+input validation error maps to the finite category `json_mode_input_required`.
+Only safe classified diagnostics are exposed to the workbench. Restored failed
+turns display their saved category. Historical generic errors keep their original
+classification. No new retry or fall-through is introduced.

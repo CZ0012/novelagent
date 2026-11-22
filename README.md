@@ -1,6 +1,6 @@
 # StoryGraph Agent
 
-<a href="#user-content-readme-zh"><kbd>　简体中文　</kbd></a>　<a href="#user-content-readme-en"><kbd>　English　</kbd></a>　·　<a href="https://github.com/CZ0012/novelagent/releases/tag/v0.4.0">Windows v0.4.0</a>
+<a href="#user-content-readme-zh"><kbd>　简体中文　</kbd></a>　<a href="#user-content-readme-en"><kbd>　English　</kbd></a>　·　<a href="https://github.com/CZ0012/novelagent/releases/tag/v0.4.1">Windows v0.4.1</a>
 
 <details name="readme-language" open>
 <summary><strong>中文 · 点击展开 / 切换语言</strong></summary>
@@ -14,7 +14,9 @@
 
 StoryGraph Agent 是中文优先的本地小说写作工作台：**上方读写作品，下方与常驻主 Agent 对话**。主 Agent 把灵感、素材和反馈组织成待审设计，再协助规划、写作、修订与连续性检查。结构化图谱保存正典，草稿和推测保持隔离，作者决定什么进入作品与正典。
 
-**Windows v0.4.0**：[下载与发布说明](https://github.com/CZ0012/novelagent/releases/tag/v0.4.0) · [最新发布](https://github.com/CZ0012/novelagent/releases/latest)。桌面版在 **设置 → 版本与更新** 检查和安装签名更新；浏览器版提供安装器下载入口。安装器、`setup.exe.sig` 和 `latest.json` 构成 Windows updater 通道。Tauri 更新签名与 Windows Authenticode 签名不同；本项目尚未提供后者。更新困难时参阅[Windows 更新恢复](docs/windows-update-recovery.md)。
+**Windows v0.4.1**：[下载与发布说明](https://github.com/CZ0012/novelagent/releases/tag/v0.4.1) · [最新发布](https://github.com/CZ0012/novelagent/releases/latest)。桌面版在 **设置 → 版本与更新** 检查和安装签名更新；浏览器版提供安装器下载入口。安装器、`setup.exe.sig` 和 `latest.json` 构成 Windows updater 通道。Tauri 更新签名与 Windows Authenticode 签名不同；本项目尚未提供后者。更新困难时参阅[Windows 更新恢复](docs/windows-update-recovery.md)。
+
+0.4.1 修复了 ChatGPT 套餐主 Agent 在第一句触发 JSON 格式校验失败的问题。[验收记录](docs/acceptance-0.4.1.md)
 
 ### 回到写作现场
 
@@ -114,7 +116,9 @@ Graph Store 是正典真相源。生成正文、摘要、导入文档和模型�
 
 StoryGraph Agent is a Chinese-first local fiction workbench: **read and write above, talk to the persistent Main Agent below**. The Main Agent turns ideas, selected materials and feedback into reviewable designs, then helps with planning, prose, revision and continuity checks. A structured graph holds canon; drafts and hypotheses stay separate, and the author decides what enters the manuscript and canon.
 
-**Windows v0.4.0**: [Downloads and release notes](https://github.com/CZ0012/novelagent/releases/tag/v0.4.0) · [Latest release](https://github.com/CZ0012/novelagent/releases/latest). In the desktop app, use **Settings → Version & Updates** to check and install signed updates; browsers offer an installer download. The installer, `setup.exe.sig` and `latest.json` form the Windows updater channel. Tauri updater signing is separate from Windows Authenticode signing; the latter is not provided. See [Windows update recovery](docs/windows-update-recovery.md) if an update fails.
+**Windows v0.4.1**: [Downloads and release notes](https://github.com/CZ0012/novelagent/releases/tag/v0.4.1) · [Latest release](https://github.com/CZ0012/novelagent/releases/latest). In the desktop app, use **Settings → Version & Updates** to check and install signed updates; browsers offer an installer download. The installer, `setup.exe.sig` and `latest.json` form the Windows updater channel. Tauri updater signing is separate from Windows Authenticode signing; the latter is not provided. See [Windows update recovery](docs/windows-update-recovery.md) if an update fails.
+
+Version 0.4.1 fixes a Responses JSON-mode input error that could stop the Main Agent on the first message. [Verification](docs/acceptance-0.4.1.md)
 
 ### Resume your writing desk
 

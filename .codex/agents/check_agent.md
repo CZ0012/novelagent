@@ -368,3 +368,7 @@ Exercise scoped OAuth callback and identity checks, protected local credentials,
 ## 0.4.0 author workbench
 
 Use synthetic backend/project/account scopes for startup, title-model discovery, cross-session search, withdrawal, CAS and unsaved-editor tests. Smoke the packaged backend on a free loopback port without interrupting an installed app.
+
+## SG-039 structured Responses
+
+Exercise JSON-mode admission before output parsing, including Main tool history and a plain-text control; verify a failed stream stays single-dispatch and diagnostics exclude provider text.

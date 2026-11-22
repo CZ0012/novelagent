@@ -855,6 +855,7 @@ export const zhCN = {
       invalidModelOutput: "模型返回的内容格式无效，未写入草稿。请调整要求后重试；不会自动重试或更换模型。",
       modelIncompleteResponse: "模型没有返回完整内容，未采用这次输出。请检查服务状态或缩小请求范围后重试。",
       modelUnsupportedOutput: "服务商返回了当前不支持的输出类型。请使用支持完整文本输出的模型与协议；不会自动更换模型。",
+      modelJsonInputRequired: "服务商因 JSON 输出要求拒绝了本次输入：输入消息中必须明确要求 JSON 格式。请更新应用后重试；本次请求未完成，系统不会自动重试。",
       modelRequestFailed: "服务商未能完成请求。请检查本次任务的连接、模型和服务状态后重试。",
       modelMissingConfig: "本次任务指定的连接尚未配置完整。请在设置中补全地址、模型和密钥后重试；不会改用其他连接。",
       technicalDetails: "技术详情",

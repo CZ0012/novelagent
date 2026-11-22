@@ -569,7 +569,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             if cleanup is not None:
                 cleanup()
 
-    app = FastAPI(title="StoryGraph Agent", version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title="StoryGraph Agent", version="0.4.1", lifespan=lifespan)
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(

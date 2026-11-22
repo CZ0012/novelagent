@@ -5,7 +5,7 @@ const failureKeys = {
   endpoint_not_found: "outlineLanguageProviderEndpoint", invalid_request: "outlineLanguageProviderInvalidRequest",
   provider_unavailable: "outlineLanguageProviderUnavailable", connection_error: "outlineLanguageProviderConnection",
   invalid_response: "outlineLanguageProviderResponse", incomplete_response: "modelIncompleteResponse",
-  unsupported_output: "modelUnsupportedOutput", request_failed: "modelRequestFailed", failed: "modelRequestFailed", llm_not_configured: "modelMissingConfig"
+  unsupported_output: "modelUnsupportedOutput", json_mode_input_required: "modelJsonInputRequired", request_failed: "modelRequestFailed", failed: "modelRequestFailed", llm_not_configured: "modelMissingConfig"
 } as const;
 /** Classify only backend-owned finite diagnostics; never display provider bodies. */
 export function modelProviderFailureKey(error: unknown): typeof failureKeys[keyof typeof failureKeys] | null {
@@ -16,4 +16,7 @@ export function modelProviderFailureKey(error: unknown): typeof failureKeys[keyo
 }
 
 export function isPlanProviderFailure(error: unknown): boolean { const key = modelProviderFailureKey(error); return Boolean(key?.startsWith("modelPlan")); }
+export function storedProviderFailureKey(category: string | null | undefined): typeof failureKeys[keyof typeof failureKeys] | null {
+  return category && Object.prototype.hasOwnProperty.call(failureKeys, category) ? failureKeys[category as keyof typeof failureKeys] : null;
+}
 export function storedPlanFailureKey(category: string | null | undefined): "modelPlanUsageLimit" | "modelPlanPermission" | "modelPlanEligibility" | "modelPlanUnavailable" | null { return category === "plan_usage_limit" ? "modelPlanUsageLimit" : category === "plan_permission_required" ? "modelPlanPermission" : category === "plan_not_eligible" ? "modelPlanEligibility" : category === "plan_usage_unavailable" ? "modelPlanUnavailable" : null; }

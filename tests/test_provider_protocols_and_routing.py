@@ -370,3 +370,21 @@ def test_explicit_unconfigured_planning_profile_never_silently_uses_rules(tmp_pa
     assert legacy.status_code == 200, legacy.text
     assert legacy.json()['model_execution'] is None
     assert calls == []
+
+def test_key_responses_json_marker_is_in_input_and_never_promotes_user_text(monkeypatch):
+    captured = []
+    def reply(req, timeout):
+        captured.append(json.loads(req.data))
+        return FakeResponse({"status":"completed","output":[{
+            "type":"message","role":"assistant","status":"completed",
+            "content":[{"type":"output_text","text":"{}"}],
+        }]})
+    monkeypatch.setattr(request, "urlopen", reply)
+    user_text = "请讨论文件 myjsonfile 的名字。"
+    req = LLMRequest(model="sample",messages=[LLMMessage("system","JSON schema"),LLMMessage("user",user_text)])
+    assert provider(ResponsesProvider).generate(req).content == "{}"
+    assert captured[0]["input"] == [
+        {"role":"developer","content":"Return the requested JSON object."},
+        {"role":"user","content":user_text},
+    ]
+    assert user_text not in captured[0]["instructions"]

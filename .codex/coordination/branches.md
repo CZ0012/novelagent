@@ -275,3 +275,4 @@ SG-034 local branch codex/sg-034-main-workspace is integrated and verified. All 
 SG-035 prepares the v0.3.0 release on codex/sg-034-main-workspace. Fast-forward main from its existing ancestor, publish the version tag, and verify the GitHub release assets and same-page language controls.
 SG-036 uses codex/sg-036-chatgpt-plan from 2c25345. Shared checkout and disjoint scopes; Main owns local commits, version tags and the authorized v0.3.1 GitHub Release.
 SG-038 uses codex/sg-038-author-workbench based on efe7a1e, carrying forward SG-037 changes. Shared disjoint scopes, Main integrates and releases 0.4.0 after tests. No separate 0.3.2 release.
+SG-039 uses codex/sg-039-main-json-input from cbd1fec. Main integrates the wire correction and release docs; independent reviewers own synthetic tests and minimal safe error mapping. No novel or login artifacts in Git.

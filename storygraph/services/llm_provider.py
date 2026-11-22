@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from http.client import HTTPException
 import json
+import re
 from typing import Any, Protocol
 from urllib import error, request
 from urllib.parse import urlsplit
@@ -45,7 +46,7 @@ class ProviderError(RuntimeError):
     def __init__(self, category: str, *, outcome_known: bool, status: int | None = None):
         categories = {"invalid_response", "incomplete_response", "unsupported_output", "connection_error",
             "plan_not_eligible", "plan_usage_limit", "plan_usage_unavailable", "plan_permission_required",
-            "invalid_credentials", "rate_limit", "endpoint_not_found", "invalid_request", "provider_unavailable", "request_failed"}
+            "invalid_credentials", "rate_limit", "endpoint_not_found", "invalid_request", "json_mode_input_required", "provider_unavailable", "request_failed"}
         self.category = category if category in categories else "request_failed"
         self.outcome_known = outcome_known is True
         self.allow_format_retry = True
@@ -240,6 +241,13 @@ def _safe_response_metadata(parsed: dict, secret: str) -> dict:
     return {"model": model} if isinstance(model, str) and len(model) <= 200 and secret not in model else {}
 
 
+def _enable_responses_json_object(payload):
+    # Responses validates the input array separately from top-level instructions.
+    if not any(re.search(r"\bjson\b", item["content"], re.IGNORECASE) for item in payload["input"]):
+        payload["input"].insert(0, {"role": "developer", "content": "Return the requested JSON object."})
+    payload["text"] = {"format": {"type": "json_object"}}
+
+
 class ResponsesProvider(OpenAICompatibleProvider):
     """Responses text transport. No implicit tools, history storage, polling or retries."""
 
@@ -258,7 +266,7 @@ class ResponsesProvider(OpenAICompatibleProvider):
         if request_payload.max_tokens is not None:
             payload["max_output_tokens"] = request_payload.max_tokens
         if self.json_mode and request_payload.response_format == "json_object":
-            payload["text"] = {"format": {"type": "json_object"}}
+            _enable_responses_json_object(payload)
         http_request = request.Request(f"{_protocol_base(self.base_url)}/responses",
             data=json.dumps(payload).encode("utf-8"),
             headers={**self._auth_headers(), "Content-Type": "application/json"}, method="POST")

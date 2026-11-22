@@ -364,3 +364,7 @@ Show billing mode, the active registration and a Manage usage link. Carry the ac
 ## 0.4.0 author workbench
 
 Use one manuscript view and one chat composer. Restore location by connection and project, support exact message navigation, and retain dirty editor and settings input. Keep basic connections directly actionable and advanced settings discoverable.
+
+## SG-039 structured Responses
+
+Display saved finite provider error categories when reopening a failed authoring turn. Keep plan usage actions scoped to relevant plan errors and historical generic failures generic.

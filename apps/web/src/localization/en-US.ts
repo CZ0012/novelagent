@@ -849,6 +849,7 @@ export const enUS = {
       invalidModelOutput: "The model returned an invalid content format. No draft was saved. Adjust the request and try again; retries and model changes are never automatic.",
       modelIncompleteResponse: "The model did not return complete content. This output was not adopted. Check the service or reduce the request scope before retrying.",
       modelUnsupportedOutput: "The provider returned an unsupported output type. Use a model and protocol that return complete text; the model will not change automatically.",
+      modelJsonInputRequired: "The provider rejected this input because JSON output requires an explicit JSON instruction in the input messages. Update the app, then try again; this request did not complete and will not retry automatically.",
       modelRequestFailed: "The provider could not complete the request. Check this task’s connection, model, and service status before retrying.",
       modelMissingConfig: "This task’s assigned connection is incomplete. Set its address, model, and API key in Settings before retrying; another connection will not be used.",
       technicalDetails: "Technical details",

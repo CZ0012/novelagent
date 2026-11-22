@@ -6,7 +6,7 @@ from http.client import HTTPException
 from urllib import error, request
 
 from storygraph.services.llm_provider import (
-    LLMRequest, LLMResponse, ProviderError, _http_error_guidance, _reject_extra,
+    LLMRequest, LLMResponse, ProviderError, _enable_responses_json_object, _http_error_guidance, _reject_extra,
 )
 
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -37,9 +37,26 @@ class _NoRedirect(request.HTTPRedirectHandler):
 
 
 def _plan_error(payload, *, status=None):
-    detail = payload.get("error", payload) if isinstance(payload, dict) else None
-    code = detail.get("code") if isinstance(detail, dict) else None
-    category = PLAN_ERROR_CODES.get(code, _http_error_guidance(status)[0] if status else "request_failed")
+    detail = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(detail, dict):
+        detail = payload if isinstance(payload, dict) else {}
+    # Read only finite, known diagnostics. Never retain or display provider text.
+    values = [detail.get("code"), detail.get("type")]
+    category = next((PLAN_ERROR_CODES[value] for value in values
+                     if isinstance(value, str) and value in PLAN_ERROR_CODES), None)
+    if category is None:
+        if ("invalid_request_error" in values and detail.get("param") == "input"
+                and detail.get("message") == "Response input messages must contain the word 'json' in some form to use 'text.format' of type 'json_object'."):
+            category = "json_mode_input_required"
+        elif status is None:
+            # A stream may have no admission status. For an HTTP rejection keep
+            # the authoritative status (e.g. 401 or 429) over a generic error type.
+            generic = {"invalid_request_error": "invalid_request",
+                       "server_error": "provider_unavailable"}
+            category = next((generic[value] for value in values
+                             if isinstance(value, str) and value in generic), None)
+    if category is None:
+        category = _http_error_guidance(status)[0] if status else "request_failed"
     return ChatGPTPlanError(category, outcome_known=True, status=status)
 
 
@@ -130,7 +147,7 @@ class ChatGPTPlanProvider:
             "store": False, "stream": True,
         }
         if self.json_mode and request_payload.response_format == "json_object":
-            payload["text"] = {"format": {"type": "json_object"}}
+            _enable_responses_json_object(payload)
         token = self._token()
         req = request.Request(self.base_url + "/responses", data=json.dumps(payload).encode(),
             headers={"Authorization": "Bearer " + token, "Content-Type": "application/json",
