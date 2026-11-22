@@ -129,6 +129,8 @@ class AuthoringService:
                  character_resolver=None, canon_resolver=None, draft_resolver=None,
                  impact_resolver=None, project_language_resolver=None, canon_query_resolver=None, model_execution=None, project_resolver=None, reviews_resolver=None, navigation_validator=None, passage_resolver=None, writer_resolver=None):
         self.store, self.provider, self.model = store, provider, model
+        from storygraph.stores.author_context import AuthorContextStore
+        self.author_context = AuthorContextStore(store)
         self.source_resolver, self.character_resolver = source_resolver, character_resolver
         self.canon_resolver, self.draft_resolver = canon_resolver, draft_resolver
         self.impact_resolver = impact_resolver
@@ -643,7 +645,13 @@ class AuthoringService:
             history_window.append(message)
             history_chars += len(message.content)
         history_window.reverse()
-        context = {"navigation_context": navigation_context or {}, "collaboration_mode": collaboration_mode, "workspace_index": {"item_ids": [i.id for i in session.workspace.items],
+        author_context = self.author_context.context(session.project_id)
+        current_text = " ".join(m.content for m in session.messages[-12:] if m.role == "author")[-12000:]
+        memories = self.author_context.relevant(session.project_id,current_text,session.content_language)
+        history_ids = {m.id for m in history_window if m.role == "author"}
+        overrides = self.author_context.history_overrides(session.project_id, session.id, history_ids)
+        context = {"author_only_project_context": {"instructions": author_context["instructions"], "memories": memories,"historical_message_overrides":overrides,
+                   "boundary": "Author instructions and memories are noncanon author-only preferences/design. Never supply to Writer or character simulation. Tentative ideas are not decisions. Withdrawn or manually edited memories override earlier conversation; never recreate from old text. finish may record up to six memories from exact author-message evidence, without an extra model call. For explicit author correction or rejection, use operation withdraw or replace with the previous memory_id and quote the NEW correcting author message. Never modify an author-edited memory. Keep memory text a narrow faithful author-only summary of its exact quoted evidence, never inferred story truth; only explicit author decisions are active decisions; uncertain possibilities remain tentative. Never infer author decisions from assistant/tool/imported/draft statements."}, "navigation_context": navigation_context or {}, "collaboration_mode": collaboration_mode, "workspace_index": {"item_ids": [i.id for i in session.workspace.items],
                    "character_ids": [p.character_id for p in session.workspace.character_plans],
                    "card_ids": [c.id for c in session.workspace.scene_cards], "reader_records_count": len(session.workspace.reader_records)},
                    "history_window": {"included_messages": len(history_window), "character_limit": 60000,
@@ -669,7 +677,14 @@ class AuthoringService:
             context["reconciliation_tool"] = "The framework has freshly read the exact selected Draft page shown here. You may start with search_draft_quotes, then propose_draft_evidence and finish. Other historical text cannot replace this current pin/page. Use read_source for further pages if more=true. Do not rewrite the card or calculate UTF-16 offsets."
         messages = [LLMMessage("system", system), LLMMessage("user", canonical_json(context))]
         # Persisted author messages are evidence, not privileged system instructions.
-        messages += [LLMMessage("user" if m.role == "author" else "assistant", m.content) for m in history_window]
+        override_map = {entry["source_message_id"]:entry for entry in overrides}
+        def projected_history_message(message):
+            override = override_map.get(message.id)
+            if override:
+                replacement = override.get("replacement")
+                return "[author message id=" + message.id + "; superseded notebook source; original retained only in local history] " + (replacement or "Withdrawn. Do not reuse its old instructions, preferences, or tentative design.")
+            return "[author message id=" + message.id + "] " + message.content if message.role == "author" else message.content
+        messages += [LLMMessage("user" if m.role == "author" else "assistant", projected_history_message(m)) for m in history_window]
         calls = 0
         correction_used = False
         while calls < max_steps:
@@ -729,7 +744,15 @@ class AuthoringService:
             if action.tool == "finish":
                 session.messages.append(_message("assistant", result["reply"], model_execution=self.model_execution))
                 session.turn_status = "idle"
-                return self._save_result(session, canon_sha256)
+                if result.get("memory_diagnostics"):
+                    session.messages.append(_message("tool",canonical_json({"memory_diagnostics":result["memory_diagnostics"]}),"author_memory_validation"))
+                saved = self._save_result(session, canon_sha256)
+                for memory in result.get("author_memories", []):
+                    try:
+                        self.author_context.record(session.project_id, session.id, **memory)
+                    except ContractError:
+                        pass  # A concurrent human edit or retraction never invalidates the saved Main response.
+                return saved
             trace_args = {"summary": action.args["summary"], "proposal_id": result["proposal_id"]} if action.tool in {"propose_workspace", "revise_proposal", "propose_draft_evidence", "propose_design_changes", "propose_card_review"} else action.args
             trace = canonical_json({"tool": action.tool, "args": trace_args, "result": result})
             if len(trace) > 30000:
@@ -969,7 +992,24 @@ class AuthoringService:
         if not isinstance(reply, str) or not reply.strip() or len(reply) > 30000:
             raise ValueError("invalid reply")
         validate_generated_output_language(output_language=session.content_language, fields={"reply": reply})
-        return {"reply": reply}
+        accepted, diagnostics = [], []
+        for memory in args.get("author_memories", []):
+            try:
+                from storygraph.models.authoring import AuthoringMemoryRecord
+                memory = AuthoringMemoryRecord.model_validate(memory).model_dump(mode="json")
+                self.author_context.validate_memory(text=memory["text"],kind=memory["kind"],status=memory["status"],evidence=memory["evidence"])
+                author = next((m for m in session.messages if m.id == memory["source_message_id"] and m.role == "author"), None)
+                if author is None or memory["evidence"] not in author.content:
+                    raise ContractError("authoring_memory_evidence")
+                if memory.get("operation", "record") != "record":
+                    row = self.author_context.db.execute("SELECT payload FROM author_memories WHERE project_id=? AND id=?", (session.project_id,memory.get("memory_id"))).fetchone()
+                    if not row:
+                        raise ContractError("authoring_memory_not_found")
+                validate_generated_output_language(output_language=session.content_language, fields={"memory": memory["text"]})
+                accepted.append(memory)
+            except (ContractError,ValueError,KeyError,TypeError):
+                diagnostics.append("authoring_memory_skipped_invalid_or_ambiguous")
+        return {"reply": reply,"author_memories":accepted,"memory_diagnostics":diagnostics}
 
     def _propose_draft_evidence(self, session, args, pin, card_binding, registry, read_draft_ids, canon_sha256):
         if pin is None or card_binding is None or registry is None:

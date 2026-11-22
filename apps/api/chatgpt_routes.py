@@ -101,7 +101,7 @@ def require_local_plan(request, origins):
                             "message": "请从本机的 StoryGraph 桌面版或本地工作台管理和使用 ChatGPT 套餐。"})
 
 
-def register_chatgpt_routes(app, settings, require_permission, origins):
+def register_chatgpt_routes(app, settings, require_permission, origins, *, record_models=None):
     prefix = "/settings/chatgpt"
 
     def local_control(request: Request):
@@ -154,6 +154,9 @@ def register_chatgpt_routes(app, settings, require_permission, origins):
         provider = ChatGPTPlanProvider(model="", account_id=account_id, timeout_seconds=15,
                                       login_service=login_service(settings))
         try:
-            return {"models": provider.list_models(), "status": "ok", "error": None}
+            rows = provider.list_models()
+            if record_models is not None:
+                record_models(account_id, rows)
+            return {"models": rows, "status": "ok", "error": None}
         except ProviderError as exc:
             return {"models": [], "status": "unavailable", "error": exc.category}

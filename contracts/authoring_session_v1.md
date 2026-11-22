@@ -599,3 +599,85 @@ prose action. Discussion-only, review-only and exact evidence reconciliation
 cannot select a Writer. See [agent runtime](agent_runtime_v1.md) for the
 dispatch checks. The existing visibility, proposal and canon review boundaries
 also apply to an explicitly selected Writer.
+
+## Local author notebook, retrieval, and session titles (0.4.0 source)
+
+`author-context` and `author-memories` are project-local author-only records in
+separate Proposal-database tables. They are not Graph canon, character knowledge,
+Writer disclosure, Draft evidence or GitHub synchronization. Main turn context
+includes the versioned project instructions and at most twelve positively matched
+memories in the current project language. Retrieval matches current/recent author
+text using word/CJK-bigram overlap; it does not inject the whole notebook on a
+vague continuation. Summaries remain noncanon and do not prove universal
+continuity. No extra model inference creates memories.
+
+A normal bounded `finish` may include up to six `author_memories` operations:
+`operation: record|withdraw|replace` (default `record`), optional `memory_id`
+(required for withdraw/replace), `text`, `kind: preference|decision|tentative`,
+`status: active|tentative`, `source_message_id`, and an exact nonempty `evidence`
+substring of an author-role message in the current session. Summaries may
+faithfully paraphrase that quote, while original provenance stays retrievable.
+Assistant/tool messages, imported prose and Draft records cannot substitute for
+that author-message evidence. Uncertainty markers reject active status;
+active decisions require an explicit author decision marker. Ambiguous or
+malformed optional notebook operations are skipped with safe journal diagnostics
+without rejecting a valid Main reply or spending a correction inference.
+
+New explicit author corrections may withdraw/replace an existing Main-authored
+memory using the old memory ID and the new author's exact correcting quote,
+including across sessions in the same project. Withdrawals retain original
+source provenance and new correction provenance. Human edits and withdrawal
+tombstones survive restart: Main cannot overwrite a human-edited record or
+recreate memories by replaying its old source message/evidence. The author may
+explicitly edit or reactivate a record with version comparison. Manual notebook
+mutations never increment session turn versions.
+
+HTTP boundaries (all scoped to `/projects/{project_id}` and normal permissions):
+
+- `GET /author-context` returns `{project_id,version,instructions}`; absent means
+  version 0 and empty instructions. `PUT` accepts `{expected_version,instructions}`.
+- `GET /author-memories?query=&include_withdrawn=false&offset=0&limit=30` returns
+  `{records,total_matches,offset,more,next_offset}`. Each memory has `id`,
+  `project_id`, `version`, `text`, `kind`, `status`, `source_session_id`,
+  `source_message_id`, `evidence`, `content_language`, `created_at`, `edited_by`;
+  withdrawn corrections also have `withdrawal` provenance. `PATCH
+  /author-memories/{memory_id}` accepts `{expected_version,text,status}` where
+  status includes `withdrawn`, returning `{memory}`. There is no destructive
+  tombstone deletion route.
+- `GET /authoring-sessions?query=&offset=0&limit=100` returns
+  `{sessions,total_matches,offset,more,next_offset}`, filtering effective title.
+  Summary listing reads metadata without hydrating full journals/workspaces.
+- `GET /authoring-search?query=&offset=0&limit=40&session_id=` searches only durable
+  author/assistant message content in this project, returning the same page
+  metadata and records `{session_id,message_id,role,content,position}`. It never
+  scans provider settings, tool traces, canon secrets or other projects.
+- `GET /authoring-sessions/{session_id}/messages/{message_id}` returns
+  `{message,session_id,position}` for the exact durable author/assistant message,
+  even when it has aged out of the active window. The index retains original
+  journal position, so filtered-page position is not a message destination.
+  Legacy message journals are locally indexed on first search/access; subsequent
+  reads use the index without loading the whole session or private tool records.
+
+Titles use independent per-session metadata `{version,title,origin,state,
+content_language}` exposed as `title_metadata` in session envelopes/list rows.
+The effective title overlays the immutable session journal title. Manual rename
+`POST /authoring-sessions/{session_id}/title` accepts `{expected_version,title}`
+where expected_version is the title metadata version (0 for legacy absent
+metadata), and returns `{title_metadata}`. Renaming does not interrupt or stale
+an active author turn; its separate CAS prevents concurrent title overwrite.
+A manual form opened at placeholder title version N may still save after the
+single automatic completion produces N+1 (`origin=automatic,state=done`): only
+that exact one-version automatic transition is rebased onto the latest CAS.
+Competing manual edits and any other stale versions still conflict.
+
+New-session creation still persists/returns the immediate caller-provided
+first-message-prefix title and makes no Main generation call. `auto_title:true`
+requests an optional short background title job only for that new session.
+The API's injected `prepare_title_generator(project_id)` resolves a closure
+`(first_message,content_language)->str|None` or None. Runtime settings/permissions
+and same-connection eligibility govern that closure; no model discovery occurs
+in session creation. The title store claims `pending` to `started` durably before
+calling it, checks project language before/after, and commits only if title
+version/state still match. Manual rename always wins. Failure, ambiguous result,
+interrupted started jobs, opt-out and restart never trigger paid retries or bulk
+renaming old sessions. A title failure cannot discard the already-created session.

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost, type ConnectionProfileUpdate, type AgentSettings } from "./api";
+import { connectionText } from "./connectionText";
 import { uiText } from "./localization";
 
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";
@@ -22,17 +23,36 @@ export function withPlanReadiness(settings: AgentSettings | null, status: ChatGP
 }
 export function ChatGPTUsage({ active }: { active: boolean }) { return active ? <span className="chatgpt-usage">{uiText.chatgpt.using} · <a href={CHATGPT_USAGE_URL} target="_blank" rel="noreferrer">{uiText.chatgpt.usage}</a></span> : null; }
 
-export function ChatGPTPlanSettings({ apiBase, busy, onAdd, onStatus }: { apiBase: string; busy: boolean; onAdd: (profile: ConnectionProfileUpdate) => void; onStatus: (status: ChatGPTStatus) => void }) {
+export function ChatGPTPlanSettings({ apiBase, busy, onAdd, onStatus, backendReady = true, backendReadGeneration = 0, active = true, canAdd = true, onSave }: { backendReady?: boolean; backendReadGeneration?: number; active?: boolean; canAdd?: boolean; onSave?: (profile: ConnectionProfileUpdate, useForMain: boolean) => Promise<void>; apiBase: string; busy: boolean; onAdd: (profile: ConnectionProfileUpdate) => void; onStatus: (status: ChatGPTStatus) => void }) {
   const t = uiText.chatgpt;
   const [status, setStatus] = useState<ChatGPTStatus | null>(null), [attempt, setAttempt] = useState<ChatGPTAttempt | null>(null);
   const [accountId, setAccountId] = useState(""), [models, setModels] = useState<Array<{ id: string; display_name?: string }>>([]), [model, setModel] = useState("");
   const [working, setWorking] = useState(false), [error, setError] = useState(false), [discovered, setDiscovered] = useState(false);
   const generation = useRef(0), selected = useRef(accountId); selected.current = accountId;
   const statusHandler = useRef(onStatus); statusHandler.current = onStatus;
-  const locked = busy || working;
+  const locked = busy || working || !backendReady;
+  const wasActive = useRef(false);
+  const saveIdentity = useRef({ key: "", id: "" });
   function accept(next: ChatGPTStatus) { setStatus(next); statusHandler.current(next); setAccountId(current => next.accounts.some(a => a.account_id === current) ? current : next.active_account_id ?? next.accounts[0]?.account_id ?? ""); }
-  async function refresh() { const seq = generation.current; const next = await apiGet<ChatGPTStatus>(apiBase, "/settings/chatgpt"); if (seq === generation.current) accept(next); }
-  useEffect(() => { let alive = true; const seq = ++generation.current; setStatus(null); setAttempt(null); setModels([]); setModel(""); setAccountId(""); setWorking(false); setDiscovered(false); setError(false); apiGet<ChatGPTStatus>(apiBase, "/settings/chatgpt").then(next => { if (alive && seq === generation.current) accept(next); }).catch(() => { if (alive) setError(true); }); return () => { alive = false; generation.current++; }; }, [apiBase]);
+  async function refresh() { const seq = generation.current; const next = await apiGet<ChatGPTStatus>(apiBase, "/settings/chatgpt"); if (seq === generation.current) { accept(next); setError(false); } }
+  useEffect(() => { generation.current++; setStatus(null); setAttempt(null); setModels([]); setModel(""); setAccountId(""); setWorking(false); setDiscovered(false); setError(false); return () => { generation.current++; }; }, [apiBase]);
+  useEffect(() => {
+    if (!backendReady) return;
+    let alive = true; const seq = generation.current;
+    apiGet<ChatGPTStatus>(apiBase, "/settings/chatgpt").then(next => { if (alive && seq === generation.current) { accept(next); setError(false); } }).catch(() => { if (alive && seq === generation.current) setError(true); });
+    return () => { alive = false; };
+  }, [apiBase, backendReady, backendReadGeneration]);
+  useEffect(() => { const opening = active && !wasActive.current; wasActive.current = active; if (opening && backendReady && error) void refresh().then(() => setError(false)).catch(() => setError(true)); }, [active, backendReady]);
+  async function save(useForMain: boolean) {
+    if (locked || !canAdd || !model) return;
+    const key = JSON.stringify([apiBase, accountId, model]);
+    if (saveIdentity.current.key !== key) saveIdentity.current = { key, id: crypto.randomUUID() };
+    const profile: ConnectionProfileUpdate = { id: saveIdentity.current.id, name: `${t.plan} · ${model}`, auth_mode: "chatgpt_plan", chatgpt_account_id: accountId, protocol: "responses", base_url: "", model, json_mode: true, thinking_mode: "provider_default", reasoning_effort: null };
+    if (!onSave) { onAdd(profile); setModel(""); return; }
+    setWorking(true); setError(false); const seq = generation.current;
+    try { await onSave(profile, useForMain); } catch { if (seq === generation.current) setError(true); } finally { if (seq === generation.current) setWorking(false); }
+  }
+
   useEffect(() => {
     if (attempt?.status !== "pending") return;
     let stopped = false; const seq = generation.current; let timer: ReturnType<typeof setTimeout>;
@@ -62,7 +82,8 @@ export function ChatGPTPlanSettings({ apiBase, busy, onAdd, onStatus }: { apiBas
     <button type="button" disabled={locked || !eligibleChatGPTAccount(status, accountId)} onClick={() => { void discover(); }}>{t.discover}</button>
     <label><span>{t.model}</span><select disabled={locked || !models.length} value={model} onChange={e => setModel(e.target.value)}><option value="">{t.choose}</option>{models.map(m => <option key={m.id} value={m.id}>{m.display_name || m.id}</option>)}</select></label>
     {discovered && !models.length && <p>{t.modelsEmpty}</p>}
-    <button type="button" disabled={locked || !model || !models.some(m => m.id === model) || !eligibleChatGPTAccount(status, accountId)} onClick={() => { onAdd({ id: crypto.randomUUID(), name: `${t.plan} · ${model}`, auth_mode: "chatgpt_plan", chatgpt_account_id: accountId, protocol: "responses", base_url: "", model, json_mode: true, thinking_mode: "provider_default", reasoning_effort: null }); setModel(""); }}>{t.add}</button><small>{t.save}</small>
+    <div className="settings-actions"><button type="button" className="primary" disabled={locked || !canAdd || !model || !models.some(m => m.id === model) || !eligibleChatGPTAccount(status, accountId)} onClick={() => { void save(true); }}>{connectionText().saveUse}</button><button type="button" disabled={locked || !canAdd || !model || !eligibleChatGPTAccount(status, accountId)} onClick={() => { void save(false); }}>{connectionText().saveOnly}</button></div>
+
     {error && <p className="preset-error" role="alert">{t.error} <a href={CHATGPT_USAGE_URL} target="_blank" rel="noreferrer">{t.usage}</a></p>}
   </section>;
 }

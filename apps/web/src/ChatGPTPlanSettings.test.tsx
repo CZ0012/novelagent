@@ -46,7 +46,7 @@ describe("ChatGPT plan safety", () => {
 
 it("resets pending UI locks and discovery state when the backend scope changes", () => {
   const source = readFileSync(new URL("./ChatGPTPlanSettings.tsx", import.meta.url), "utf8");
-  const reset = source.slice(source.indexOf("useEffect(() => { let alive"), source.indexOf("}, [apiBase]);") + "}, [apiBase]);".length);
+  const reset = source.slice(source.indexOf("useEffect(() => { generation.current++"), source.indexOf("}, [apiBase]);") + "}, [apiBase]);".length);
   expect(reset).toContain("setWorking(false)");
   expect(reset).toContain("setDiscovered(false)");
   expect(reset).toContain('setAccountId("")');

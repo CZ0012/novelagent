@@ -360,3 +360,7 @@ Keep one live conversation per connection and project below the working document
 ## SG-036 ChatGPT plan and Writer selection
 
 Show billing mode, the active registration and a Manage usage link. Carry the active session Writer into ordinary writing as well as scene handoff, preserve explicit overrides and never transmit a Writer selection as extra story context.
+
+## 0.4.0 author workbench
+
+Use one manuscript view and one chat composer. Restore location by connection and project, support exact message navigation, and retain dirty editor and settings input. Keep basic connections directly actionable and advanced settings discoverable.

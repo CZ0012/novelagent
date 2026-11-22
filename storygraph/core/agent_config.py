@@ -199,6 +199,8 @@ class ModelExecution(BaseModel):
 
 
 class AgentRuntimeConfig(BaseModel):
+    auto_title_enabled: bool = True
+    auto_title_model: str | None = Field(default=None, min_length=1, max_length=200)
     scene_writer: str = "rule_based"
     provider_label: str = "OpenAI-compatible"
     llm_base_url: str = ""

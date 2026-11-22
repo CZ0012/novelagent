@@ -356,3 +356,7 @@ Review the empty-project and existing-manuscript journeys. Check that a discover
 ## SG-036 ChatGPT plan and Writer selection
 
 Verify truthful plan-versus-key attribution, stale selection handling and absence of automatic Writer invocation or paid fallback. Separate offline synthetic checks, user-authorized real calls, packaged smoke and remote release verification.
+
+## 0.4.0 author workbench
+
+Check that tentative notebook entries remain tentative, edits and withdrawals override their source on replay, and concurrent manual naming wins. Verify both one-click model setup options through the actual workbench.

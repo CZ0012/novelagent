@@ -364,3 +364,7 @@ Exercise first send, project switching, persisted conversation, split sizing, re
 ## SG-036 ChatGPT plan and Writer selection
 
 Exercise scoped OAuth callback and identity checks, protected local credentials, account pinning, safe refresh/revocation, no fallback on plan limits, and explicit Writer choices in preview and dispatch. Release checks must inspect outgoing Git objects and the actual signed installer.
+
+## 0.4.0 author workbench
+
+Use synthetic backend/project/account scopes for startup, title-model discovery, cross-session search, withdrawal, CAS and unsaved-editor tests. Smoke the packaged backend on a free loopback port without interrupting an installed app.

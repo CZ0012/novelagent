@@ -18,7 +18,7 @@ export async function startMainAgentProject(options: StartProjectOptions) {
 
   try {
     const session = await postAuthoringSession(apiBase, projectId, undefined, "", {
-      title, idea, source_document_ids: [], outline_proposal_ids: [], draft_ids: [],
+      title, idea, auto_title: modelReady, source_document_ids: [], outline_proposal_ids: [], draft_ids: [],
     });
     if (modelReady) {
       await postAuthoringSession(apiBase, projectId, session.id, "/turn", {

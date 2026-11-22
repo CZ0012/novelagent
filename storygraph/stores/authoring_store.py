@@ -114,6 +114,8 @@ class SQLiteAuthoringStore:
 
     def save(self, record, *, expected_version):
         """CAS append. Provider work happens outside this short write transaction."""
+        from storygraph.stores.author_context import AuthorContextStore
+        context = AuthorContextStore(self)
         payload = record.model_dump(mode="json") if hasattr(record, "model_dump") else record
         project_id, session_id = payload["project_id"], payload["id"]
         with self._lock:
@@ -136,12 +138,15 @@ class SQLiteAuthoringStore:
                     if kind == "messages" and any(key in prior and any(prior[key].get(field) != value.get(field) for field in prior[key].keys() | value.keys()) for key, value in incoming.items()):
                         raise ContractError("authoring_message_immutable")
                     prior.update(incoming)
+                    if kind == "messages":
+                        indexed_messages = list(prior.values())
                     refs[kind] = [self._blob(r) for r in prior.values()]
                 stored = {k: v for k, v in payload.items() if k not in {"workspace", "messages", "proposals", "history_counts", "history_has_more"}}
                 stored["_journal_v1"] = refs
                 self._connection.execute("INSERT INTO authoring_sessions VALUES (?,?,?,?)", (
                     project_id, session_id, payload["version"], json.dumps(stored, ensure_ascii=False),
                 ))
+                context.index_messages(project_id, session_id, indexed_messages)
                 self._connection.commit()
             except Exception:
                 self._connection.rollback()

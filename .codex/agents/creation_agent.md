@@ -372,3 +372,7 @@ Dispatch Main tools through the session-bound internal MCP. Load packaged writin
 ## SG-036 ChatGPT plan and Writer selection
 
 Use the official local OAuth and streaming Responses routes for ChatGPT plan usage. Keep protected tokens out of settings JSON, UI, logs, model prompts and release assets. Resolve the selected Writer only for the authorized prose action, preserving its visibility and review gates.
+
+## 0.4.0 author workbench
+
+The optional title request uses only the first-message excerpt on a known same-connection model and is independently claimed once. Main can record bounded source-backed local memories as part of its usual turn. The Writer and canon require their own permissions.

@@ -351,3 +351,7 @@ Maintain the Main Agent workbench section in authoring_session_v1. Keep optional
 ## SG-036 ChatGPT plan and Writer selection
 
 Preserve legacy API-key profiles and provenance. Follow agent_runtime_v1 and authoring_session_v1 for account-pinned named plan profiles, local OAuth controls, connection fingerprints, Writer selection, revocation and no automatic fallback.
+
+## 0.4.0 author workbench
+
+Maintain the targeted connection-save and independent title-preferences interfaces in agent_runtime_v1 and the author-context, notebook, search and title metadata interfaces in authoring_session_v1. Preserve historical records and stable IDs.

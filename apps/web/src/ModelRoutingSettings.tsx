@@ -7,7 +7,7 @@ import { MODEL_TASKS, removeConnection, resolvedTask, supportsExplicitThinking, 
 
 export function modelExecutionLabel(execution: ModelExecution | null | undefined): string {
   if (!execution) return uiText.modelRouting.missingAssignment;
-  return `${uiText.modelRouting.roles[execution.task]} · ${execution.profile_name || uiText.modelRouting.inherited} · ${execution.model || uiText.common.notConfigured} · ${uiText.modelRouting.protocols[execution.protocol] ?? execution.protocol}${execution.thinking_mode ? ` · ${uiText.modelRouting.thinkingModes[execution.thinking_mode]}` : ""}${execution.reasoning_effort ? ` · ${uiText.modelRouting.effort}: ${uiText.modelRouting.effortLabels[execution.reasoning_effort]}` : ""}`;
+  return `${uiText.modelRouting.roles[execution.task]} 路 ${execution.profile_name || uiText.modelRouting.inherited} 路 ${execution.model || uiText.common.notConfigured} 路 ${uiText.modelRouting.protocols[execution.protocol] ?? execution.protocol}${execution.thinking_mode ? ` 路 ${uiText.modelRouting.thinkingModes[execution.thinking_mode]}` : ""}${execution.reasoning_effort ? ` 路 ${uiText.modelRouting.effort}: ${uiText.modelRouting.effortLabels[execution.reasoning_effort]}` : ""}`;
 }
 
 function ConnectionFields({ apiBase, profile, saved, busy, onChange, defaultConnection = false }: {
@@ -36,7 +36,7 @@ function ConnectionFields({ apiBase, profile, saved, busy, onChange, defaultConn
     } catch { if (current()) setModels({ models: [], current_model: profile.model, current_model_available: null, status: "unavailable", error: null }); }
     finally { if (current()) setLoading(false); }
   }
-  if (profile.auth_mode === "chatgpt_plan") return <div className="model-connection-fields"><ChatGPTUsage active /><label><span>{uiText.modelRouting.connectionName}</span><input disabled={locked} value={profile.name} onChange={e => onChange({ name: e.target.value })} /></label><p>{profile.model} · {profile.chatgpt_account_id}</p><small>{uiText.chatgpt.save}</small></div>;
+  if (profile.auth_mode === "chatgpt_plan") return <div className="model-connection-fields"><ChatGPTUsage active /><label><span>{uiText.modelRouting.connectionName}</span><input disabled={locked} value={profile.name} onChange={e => onChange({ name: e.target.value })} /></label><p>{profile.model} 路 {profile.chatgpt_account_id}</p><small>{uiText.chatgpt.save}</small></div>;
   return <div className="model-connection-fields">
     <label><span>{uiText.modelRouting.connectionName}</span><input disabled={locked} maxLength={80} value={profile.name} onChange={(event) => onChange({ name: event.target.value })} /></label>
     <label><span>{uiText.modelRouting.protocol}</span><select disabled={locked} value={profile.protocol} onChange={(event) => onChange({ protocol: event.target.value as ModelProtocol })}>{Object.entries(uiText.modelRouting.protocols).map(([protocol, label]) => <option value={protocol} key={protocol}>{label}</option>)}</select></label>
@@ -66,7 +66,8 @@ function ConnectionFields({ apiBase, profile, saved, busy, onChange, defaultConn
   </div>;
 }
 
-export function ModelRoutingSettings({ apiBase, settings, form, onFormChange, apiKeyInput, onApiKeyChange, clearApiKey, onClearApiKeyChange, busy, onChatGPTStatus }: {
+export function ModelRoutingSettings({ apiBase, settings, form, onFormChange, apiKeyInput, onApiKeyChange, clearApiKey, onClearApiKeyChange, busy, onChatGPTStatus, backendReady = true, backendReadGeneration = 0, active = true, actionBusy = busy }: {
+  backendReady?: boolean; backendReadGeneration?: number; active?: boolean; actionBusy?: boolean;
   apiBase: string; settings: AgentSettings | null; form: AgentSettingsUpdate; onFormChange: React.Dispatch<React.SetStateAction<AgentSettingsUpdate>>;
   apiKeyInput: string; onApiKeyChange: (key: string) => void; clearApiKey: boolean; onClearApiKeyChange: (clear: boolean) => void; busy: boolean; onChatGPTStatus?: (status: ChatGPTStatus) => void;
 }) {
@@ -74,7 +75,7 @@ export function ModelRoutingSettings({ apiBase, settings, form, onFormChange, ap
   const defaultProfile: ConnectionProfileUpdate = { id: "default", name: form.provider_label, protocol: form.llm_protocol ?? "chat_completions", base_url: form.llm_base_url, model: form.llm_model, json_mode: form.llm_json_mode, thinking_mode: form.llm_thinking_mode ?? "provider_default", ...(form.llm_reasoning_effort !== undefined ? { reasoning_effort: form.llm_reasoning_effort } : {}), api_key: apiKeyInput, clear_api_key: clearApiKey };
   const savedDefault = settings ? { id: "default", name: settings.provider_label, protocol: settings.llm_protocol ?? "chat_completions", base_url: settings.llm_base_url, model: settings.llm_model, json_mode: settings.llm_json_mode, thinking_mode: settings.llm_thinking_mode ?? "provider_default", ...(settings.llm_reasoning_effort !== undefined ? { reasoning_effort: settings.llm_reasoning_effort } : {}), api_key_configured: settings.api_key_configured, api_key_preview: settings.api_key_preview } : null;
   return <>
-    <ChatGPTPlanSettings apiBase={apiBase} busy={busy} onStatus={status => onChatGPTStatus?.(status)} onAdd={profile => onFormChange(current => ({ ...current, connection_profiles: (current.connection_profiles?.length ?? 0) < 20 ? [...(current.connection_profiles ?? []), profile] : current.connection_profiles }))} />
+
     <section className="settings-block">
       <div className="settings-title"><Wand2 size={15} />{uiText.modelRouting.defaultConnection}</div><small>{uiText.modelRouting.defaultHelp}</small>
       <label><span>{uiText.settings.writerMode}</span><select disabled={busy} value={form.scene_writer} onChange={(event) => onFormChange((current) => ({ ...current, scene_writer: event.target.value as AgentSettingsUpdate["scene_writer"] }))}><option value="rule_based">{uiText.settings.ruleBasedMode}</option><option value="llm">{uiText.settings.llmMode}</option></select></label>
@@ -84,7 +85,7 @@ export function ModelRoutingSettings({ apiBase, settings, form, onFormChange, ap
         if (patch.clear_api_key !== undefined) onClearApiKeyChange(patch.clear_api_key);
       }} />
     </section>
-    <details className="settings-block settings-disclosure model-connections"><summary>{uiText.modelRouting.connections} · {profiles.length}</summary><small>{uiText.modelRouting.connectionsHelp}</small>
+    <details className="settings-block settings-disclosure model-connections"><summary>{uiText.modelRouting.connections} 路 {profiles.length}</summary><small>{uiText.modelRouting.connectionsHelp}</small>
       {profiles.map((profile) => <details key={profile.id} className="connection-profile"><summary>{profile.name || uiText.modelRouting.newConnection}<small>{profile.model || uiText.common.notConfigured}</small></summary>
         <ConnectionFields apiBase={apiBase} profile={profile} saved={settings?.connection_profiles?.find((item) => item.id === profile.id) ?? null} busy={busy} onChange={(patch) => onFormChange((current) => ({ ...current, connection_profiles: current.connection_profiles?.map((item) => item.id === profile.id ? { ...item, ...patch } : item) }))} />
         <button type="button" disabled={busy} onClick={() => onFormChange((current) => removeConnection(current, profile.id))}><Trash2 size={14} />{uiText.modelRouting.removeConnection}</button><small>{uiText.modelRouting.removeHelp}</small>
@@ -92,7 +93,7 @@ export function ModelRoutingSettings({ apiBase, settings, form, onFormChange, ap
       <button type="button" disabled={busy || profiles.length >= 20} onClick={() => onFormChange((current) => ({ ...current, connection_profiles: [...(current.connection_profiles ?? []), { id: crypto.randomUUID(), name: uiText.modelRouting.newConnection, protocol: "chat_completions", base_url: "", model: "", json_mode: true, thinking_mode: "provider_default" }] }))}><Plus size={14} />{uiText.modelRouting.addConnection}</button>
     </details>
     <details className="settings-block settings-disclosure task-model-settings"><summary>{uiText.modelRouting.taskSection}</summary><small>{uiText.modelRouting.taskHelp}</small>
-      {MODEL_TASKS.map((task) => <label key={task}><span>{uiText.modelRouting.roles[task]}</span><select disabled={busy} value={form.task_assignments?.[task] ?? ""} onChange={(event) => onFormChange((current) => ({ ...current, task_assignments: { ...current.task_assignments, [task]: event.target.value || null } }))}><option value="">{uiText.modelRouting.defaultOption}</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name || profile.id} · {profile.model || uiText.common.notConfigured}</option>)}</select><small>{modelExecutionLabel(resolvedTask(settings, task))}</small></label>)}
+      {MODEL_TASKS.map((task) => <label key={task}><span>{uiText.modelRouting.roles[task]}</span><select disabled={busy} value={form.task_assignments?.[task] ?? ""} onChange={(event) => onFormChange((current) => ({ ...current, task_assignments: { ...current.task_assignments, [task]: event.target.value || null } }))}><option value="">{uiText.modelRouting.defaultOption}</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name || profile.id} 路 {profile.model || uiText.common.notConfigured}</option>)}</select><small>{modelExecutionLabel(resolvedTask(settings, task))}</small></label>)}
       <p className="model-qa-note">{uiText.modelRouting.qaRuleBased}</p>
     </details>
   </>;

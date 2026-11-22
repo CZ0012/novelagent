@@ -23,6 +23,10 @@ from pydantic import (
 from typing import Literal
 from apps.api.chatgpt_routes import register_chatgpt_routes, login_service, require_local_plan, is_local_plan_request
 from storygraph.services.writer_routes import WriterRouteReference, available_writers, resolve_prose_connection
+from storygraph.services.author_connections import (
+    SaveConnection, TitlePreferences, TitleModelCatalog, prepare_title_call,
+    save_connection, runtime_scope, plan_scope,
+)
 from storygraph.services.scene_writer_factory import provider_ready
 from storygraph.services.llm_provider import ProviderError
 
@@ -565,7 +569,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             if cleanup is not None:
                 cleanup()
 
-    app = FastAPI(title="StoryGraph Agent", version="0.3.1", lifespan=lifespan)
+    app = FastAPI(title="StoryGraph Agent", version="0.4.0", lifespan=lifespan)
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -897,7 +901,34 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     def get_agent_settings() -> dict:
         return _agent_settings_payload(agent_config, settings)
 
-    register_chatgpt_routes(app, settings, require_permission, allowed_origins)
+    title_catalog = TitleModelCatalog(proposal_store)
+    register_chatgpt_routes(app, settings, require_permission, allowed_origins,
+                            record_models=lambda account, rows: title_catalog.record(plan_scope(account), rows))
+
+    @app.post("/settings/agent/connections")
+    def add_model_connection(request: SaveConnection, http_request: Request) -> dict:
+        with agent_config_lock:
+            if request.profile.auth_mode == "chatgpt_plan":
+                require_local_plan(http_request, allowed_origins)
+                if not login_service(settings).account_ready(request.profile.chatgpt_account_id):
+                    raise HTTPException(409, detail={"category": "plan_permission_required"})
+            try:
+                updated, profile_id = save_connection(agent_config, request)
+            except ValueError:
+                raise HTTPException(422, detail={"category": "connection_save_invalid",
+                                    "message": "请检查连接信息和可保存的连接数量。"}) from None
+            return {"settings": persist_agent_settings(updated), "profile_id": profile_id}
+
+    @app.get("/settings/agent/title-preferences")
+    def title_preferences() -> TitlePreferences:
+        return TitlePreferences(enabled=agent_config.auto_title_enabled, model=agent_config.auto_title_model)
+
+    @app.put("/settings/agent/title-preferences")
+    def update_title_preferences(request: TitlePreferences) -> TitlePreferences:
+        with agent_config_lock:
+            updated = agent_config.model_copy(update={"auto_title_enabled": request.enabled, "auto_title_model": request.model})
+            persist_agent_settings(updated)
+            return title_preferences()
 
     @app.get("/settings/agent/writers")
     def list_writers() -> dict:
@@ -928,6 +959,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             provider = create_llm_provider(runtime)
             provider.timeout_seconds = min(provider.timeout_seconds, 15)
             models = provider.list_models()
+            title_catalog.record(runtime_scope(runtime), models)
             return {
                 "models": models,
                 "model_execution": runtime.model_execution,
@@ -3122,6 +3154,9 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         sources=source_store, visibility=visibility_store, context_builder=context_builder,
         require_permission=require_permission, require_llm=_require_llm_configured,
         provider_factory=lambda runtime: create_llm_provider(runtime),
+        prepare_title_generator=lambda _project_id: prepare_title_call(
+            settings, title_catalog, create_llm_provider,
+            lambda: has_permission(agent_config.permission_level, AgentPermissionLevel.READ_GENERATE)),
         persist_snapshot=lambda snapshot: save_json_graph(snapshot, settings.graph_path)
         if use_persistent_stores else None,
     )

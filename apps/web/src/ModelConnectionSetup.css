@@ -1,0 +1,10 @@
+.model-setup { border:1px solid var(--border-color,#dfd7ca); border-radius:16px; padding:20px; background:var(--panel-bg,#fffdf8); }
+.model-setup header h2 { margin:8px 0; font-family:Georgia,serif; font-size:24px; }
+.model-setup-eyebrow { font-size:10px; letter-spacing:.15em; color:#8b7257; }
+.model-methods { display:flex; gap:8px; margin:18px 0; }
+.model-methods button { flex:1; padding:10px; }
+.model-methods button[aria-pressed=true] { background:#eee5d5; border-color:#a38a64; color:#513b24; }
+.model-api-setup { display:grid; gap:12px; }
+.model-confirmation { display:grid; gap:8px; padding:14px; margin-top:14px; background:#edf0e5; border-radius:10px; overflow-wrap:anywhere; }
+.model-setup .chatgpt-settings { border:0; padding:0; background:transparent; }
+.model-setup > details { margin-top:18px; padding-top:12px; border-top:1px solid #e4ddcf; }

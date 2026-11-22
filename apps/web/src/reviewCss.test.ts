@@ -22,7 +22,10 @@ describe("review workspace static boundaries", () => {
     for (const prop of ["onCreateProject", "onCreateScene", "onArchiveDemo"]) {
       expect(appSource).toMatch(new RegExp(`${prop}=\\{\\(\\) => requestProposalNavigation\\(`));
     }
-    expect(appSource).toMatch(/onSelectProject=\{[\s\S]*?requestProposalNavigation\(/);
+    const projectNavigationStart = appSource.indexOf("const selectWorkbenchProject");
+    const projectNavigation = appSource.slice(projectNavigationStart, appSource.indexOf("  return (", projectNavigationStart));
+    expect(appSource).toContain("onSelectProject={selectWorkbenchProject}");
+    expect(projectNavigation).toContain("requestProposalNavigation(");
     expect(appSource).toMatch(/onSelectScene=\{[\s\S]*?requestProposalNavigation\(/);
   });
 

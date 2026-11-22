@@ -391,3 +391,18 @@ routing configuration. Preview and dispatch revalidate it. The optional
 `writer_choice` request field is accepted for create, continue and revision
 actions, never for plain discussion. Omitting it preserves ordinary task
 routing. This is a local connection choice with no additional Writer permissions.
+
+## 0.4.0 targeted connection writes and optional titles
+
+`POST /settings/agent/connections` accepts one existing connection-profile input and
+`use_for_main_agent`. It atomically reuses or adds the connection and optionally
+assigns discussion, returning its canonical profile ID and redacted settings.
+Unrelated task assignments and secrets survive independent edits. A retry may
+omit the key of the same existing API-key profile at the same address/protocol.
+
+`GET/PUT /settings/agent/title-preferences` reads or saves `enabled` and an optional
+`model`. Explicit provider model discovery populates a bounded, expiring ID
+catalog scoped to the connection's payer and protocol. New-session naming
+receives only a short opening excerpt and the project language. Without an
+eligible model, the placeholder stays. Naming cannot fall through to another
+provider or to an unselected expensive model.

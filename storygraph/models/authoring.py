@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator, field_validator
 from storygraph.core.agent_config import ModelExecution
 
 from storygraph.models.common import ContractModel, JsonDict
@@ -374,8 +374,28 @@ class AuthoringCardReviewArgs(ContractModel):
         return self
 
 
+class AuthoringMemoryRecord(ContractModel):
+    operation: Literal["record", "withdraw", "replace"] = "record"
+    memory_id: str | None = Field(default=None, min_length=1, max_length=200)
+    text: str = Field(min_length=1, max_length=2000)
+    kind: Literal["preference", "decision", "tentative"]
+    status: Literal["active", "tentative"]
+    source_message_id: str = Field(min_length=1, max_length=200)
+    evidence: str = Field(min_length=1, max_length=4000)
+
+
 class AuthoringFinishArgs(ContractModel):
     message: str = Field(min_length=1, max_length=30000)
+    author_memories: list[JsonDict] = Field(default_factory=list, max_length=6,
+        json_schema_extra={"items": AuthoringMemoryRecord.model_json_schema()})
+
+    @field_validator("author_memories", mode="before")
+    @classmethod
+    def bounded_optional_memories(cls, value):
+        # Optional notebook output must never discard an otherwise valid Main reply.
+        if not isinstance(value, list):
+            return [{"invalid": True}]
+        return [item if isinstance(item, dict) else {"invalid": True} for item in value[:6]]
 
 
 class AuthoringNavigationContext(ContractModel):

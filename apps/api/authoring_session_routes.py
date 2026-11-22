@@ -5,7 +5,7 @@ import json
 from contextlib import nullcontext
 from typing import Literal
 
-from fastapi import HTTPException
+from fastapi import HTTPException, BackgroundTasks
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from storygraph.core.agent_config import AgentPermissionLevel, settings_for_task
@@ -36,6 +36,7 @@ class AuthoringCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=500)
     idea: str = Field(min_length=1, max_length=12000)
+    auto_title: bool = False
     source_document_ids: list[str] = Field(default_factory=list, max_length=40)
     outline_proposal_ids: list[str] = Field(default_factory=list, max_length=40)
     draft_ids: list[str] = Field(default_factory=list, max_length=40)
@@ -104,11 +105,33 @@ class AuthoringStructureRequest(AuthoringVersionRequest):
     rationale: str = Field(min_length=1, max_length=4000)
 
 
+class AuthorInstructionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=0, strict=True)
+    instructions: str = Field(max_length=16000)
+
+
+class AuthorMemoryEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1, strict=True)
+    text: str = Field(min_length=1, max_length=2000)
+    status: Literal["active", "tentative", "withdrawn"]
+
+
+class AuthorTitleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=0, strict=True)
+    title: str = Field(min_length=1, max_length=500)
+
+
 def register_authoring_session_routes(app, *, graph, settings, proposals, drafts, sources,
                                      visibility, context_builder, require_permission,
-                                     require_llm, provider_factory, persist_snapshot):
+                                     require_llm, provider_factory, persist_snapshot, prepare_title_generator=None):
     store = SQLiteAuthoringStore(proposals)
     app.state.authoring_store = store
+    from storygraph.stores.author_context import AuthorContextStore
+    author_context = AuthorContextStore(store)
+    app.state.author_context_store = author_context
     query = GraphQueryService(graph)
     with store._lock, store._connection:
         store._connection.execute("CREATE TABLE IF NOT EXISTS authoring_policy_bindings "
@@ -325,6 +348,9 @@ def register_authoring_session_routes(app, *, graph, settings, proposals, drafts
 
     def envelope(session):
         result = session.model_dump(mode="json")
+        result["title_metadata"] = author_context.title(session.project_id, session.id)
+        if result["title_metadata"]:
+            result["title"] = result["title_metadata"]["title"]
         for proposal in result["proposals"]:
             if proposal["status"] == "pending":
                 proposal["stale"] = (proposal["base_workspace_sha256"] != workspace_hash(session.workspace)
@@ -389,14 +415,32 @@ def register_authoring_session_routes(app, *, graph, settings, proposals, drafts
 
     base = "/projects/{project_id}/authoring-sessions"
 
+    @app.get("/projects/{project_id}/author-context")
+    def get_author_context(project_id: str):
+        return execute(project_id, AgentPermissionLevel.READ_ONLY, lambda: author_context.context(project_id))
+
+    @app.put("/projects/{project_id}/author-context")
+    def put_author_context(project_id: str, request: AuthorInstructionsRequest):
+        return execute(project_id, AgentPermissionLevel.READ_GENERATE, lambda: author_context.instructions(project_id, request.instructions, request.expected_version))
+
+    @app.get("/projects/{project_id}/author-memories")
+    def get_author_memories(project_id: str, query: str = "", include_withdrawn: bool = False, offset: int = 0, limit: int = 30):
+        return execute(project_id, AgentPermissionLevel.READ_ONLY, lambda: author_context.memories(project_id,query,include_withdrawn,offset,limit))
+
+    @app.patch("/projects/{project_id}/author-memories/{memory_id}")
+    def edit_author_memory(project_id: str, memory_id: str, request: AuthorMemoryEditRequest):
+        return execute(project_id, AgentPermissionLevel.READ_GENERATE, lambda: {"memory": author_context.edit(project_id,memory_id,**request.model_dump())})
+
+    @app.get("/projects/{project_id}/authoring-search")
+    def search_author_messages(project_id: str, query: str = "", offset: int = 0, limit: int = 40, session_id: str | None = None):
+        return execute(project_id, AgentPermissionLevel.READ_ONLY, lambda: author_context.search(project_id,query,offset,limit,session_id))
+
     @app.get(base)
-    def list_sessions(project_id: str):
-        return execute(project_id, AgentPermissionLevel.READ_ONLY, lambda: {"sessions": [
-            s.model_dump(mode="json", include={"id", "title", "version", "turn_status", "updated_at"})
-            for s in service().list(project_id)]})
+    def list_sessions(project_id: str, query: str = "", offset: int = 0, limit: int = 100):
+        return execute(project_id, AgentPermissionLevel.READ_ONLY, lambda: author_context.session_page(project_id,query,offset,limit))
 
     @app.post(base)
-    def create_session(project_id: str, request: AuthoringCreateRequest):
+    def create_session(project_id: str, request: AuthoringCreateRequest, background_tasks: BackgroundTasks):
         def operation():
             language = scope(project_id)
             pins = []
@@ -419,9 +463,26 @@ def register_authoring_session_routes(app, *, graph, settings, proposals, drafts
                     version=draft.version, text_sha256=content_hash(draft.text))
                 draft_for(project_id, pin)
                 draft_pins.append(pin)
-            return envelope(service().create(project_id=project_id, content_language=language,
-                title=request.title, idea=request.idea, source_pins=pins, draft_pins=draft_pins))
+            session = service().create(project_id=project_id, content_language=language,
+                title=request.title, idea=request.idea, source_pins=pins, draft_pins=draft_pins)
+            try:
+                callback = prepare_title_generator(project_id) if request.auto_title and prepare_title_generator is not None else None
+            except Exception:
+                callback = None  # Optional title configuration cannot discard the created conversation.
+            author_context.initialize_title(session, automatic=callback is not None)
+            if callback is not None:
+                background_tasks.add_task(author_context.generate_title, project_id, session.id,
+                    lambda _project_id, first_message, language: callback(first_message,language), scope)
+            return envelope(session)
         return execute(project_id, AgentPermissionLevel.READ_GENERATE, operation)
+
+    @app.post(base + "/{session_id}/title")
+    def rename_author_session(project_id: str, session_id: str, request: AuthorTitleRequest):
+        return execute(project_id, AgentPermissionLevel.READ_GENERATE, lambda: {"title_metadata": author_context.rename(project_id,session_id,request.title,request.expected_version)})
+
+    @app.get(base + "/{session_id}/messages/{message_id}")
+    def get_author_message(project_id: str, session_id: str, message_id: str):
+        return execute(project_id,AgentPermissionLevel.READ_ONLY,lambda: author_context.message(project_id,session_id,message_id))
 
     @app.get(base + "/{session_id}")
     def get_session(project_id: str, session_id: str):

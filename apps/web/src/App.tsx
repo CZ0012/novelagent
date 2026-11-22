@@ -167,6 +167,10 @@ import { parsePlanningBook, parsePlanningBranch, planningBookApplied } from "./p
 import { LongformRevision, type LongformRevisionMode } from "./LongformRevision";
 import { AuthoringStudio, type AuthoringNavigation } from "./AuthoringStudio";
 import { MainAgentDock, MainAgentWelcome } from "./MainAgentDock";
+import { AuthorMaterialNavigation, AuthorSidebarTabs, AuthorWorkspaceTabs, WorkbenchHeader } from "./AuthorWorkbenchChrome";
+import { readWorkbenchView, writeWorkbenchView, resolveWorkbenchProjectView } from "./workbenchView";
+import { ProjectConversations } from "./ProjectConversations";
+import { ProjectNotebook } from "./ProjectNotebook";
 import { startMainAgentProject } from "./mainAgentStart";
 import { PlanningWorkspace, LongformPreview } from "./PlanningWorkspace";
 import { parseLongformPlan, longformApplied, type BlueprintRequest, type ExpansionRequest, type LongformGenerationResult, type LongformApplyResult } from "./longformPlanning";
@@ -175,6 +179,9 @@ import { classifyDocumentFile, extractDocumentFile } from "./documentImport";
 import { importErrorCode, importFailureMessage, sourceImportFailureMessage, sourceImportWarningMessage } from "./documentImportMessages";
 import { WriterChoicePicker, effectiveWriterChoice, writerChoiceReference, writerEntryMode, writerChoiceExecution, writerChoiceReady, type SessionWriterContext, type WriterOverride } from "./WriterChoicePicker";
 import { ChatGPTUsage, CHATGPT_USAGE_URL, withPlanReadiness } from "./ChatGPTPlanSettings";
+import { ModelConnectionSetup, type ConnectionCommit } from "./ModelConnectionSetup";
+import { mergeConnectionCommit } from "./connectionCommit";
+import { connectionText } from "./connectionText";
 import { ModelRoutingSettings, modelExecutionLabel } from "./ModelRoutingSettings";
 import { modelProviderFailureKey, isPlanProviderFailure } from "./modelProviderErrors";
 import { discussionTask, resolvedTask, taskConnectionReady, settingsToForm, settingsSavePayload, settingsRequestIsCurrent } from "./modelRouting";
@@ -190,9 +197,10 @@ import { proposalCreationMethod } from "./proposalProvenance";
 import { genreLabel } from "./genreLabels";
 import { changedMetadataFields, chapterEditorMatches, chapterTitleIsDirty, chapterTitleUpdate, type ChapterTitleEditor, type ChapterEditorScope } from "./chapterEditing";
 import "./styles.css";
+import "./author-workbench.css";
 
 type InspectorTab = "agent" | "context" | "continuity" | "facts" | "settings";
-type WorkspaceTab = "write" | "sources" | "proposals" | "workflow" | "planning" | "authoring" | "checks" | "graph";
+type WorkspaceTab = "notebook" | "write" | "sources" | "proposals" | "workflow" | "planning" | "authoring" | "checks" | "graph";
 
 type LibraryTreeNode = {
   id: string;
@@ -457,6 +465,12 @@ export default function App() {
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
   const [workspaceLoadError, setWorkspaceLoadError] = useState(false);
   const [projectId, setProjectId] = useState("");
+  const [sidebarView, setSidebarView] = useState<"chapters" | "sessions">("chapters");
+  const [sessionNavigation, setSessionNavigation] = useState<{ apiBase: string; projectId: string; nonce: number; sessionId?: string; messageId?: string }>();
+  const [activeMainSession, setActiveMainSession] = useState<{ apiBase: string; projectId: string; id: string | null; version: number } | null>(null);
+  const restoredViewBackends = useRef(new Set<string>());
+  const savedView = (backend: string, targetProjectId?: string) => { try { return readWorkbenchView(window.localStorage, backend, targetProjectId); } catch { return null; } };
+  const bootstrapSessionId = useMemo(() => savedView(apiBase)?.sessions[projectId], [apiBase, projectId]);
   const [mainAgentInitialIdea, setMainAgentInitialIdea] = useState<{ apiBase: string; projectId: string; idea: string } | null>(null);
   const [sceneId, setSceneId] = useState("");
   const [chapterSelection, setChapterSelection] = useState<{ projectId: string; id: string } | null>(null);
@@ -469,8 +483,10 @@ export default function App() {
     setInspectorTab(tab);
     setInspectorOpen(true);
   }, []);
+  const [notebookScope, setNotebookScope] = useState<string | null>(null);
   const [authoringPanelHost, setAuthoringPanelHost] = useState<HTMLDivElement | null>(null);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("write");
+  useEffect(() => { if (workspaceTab === "notebook" && projectId) setNotebookScope(JSON.stringify([apiBase, projectId])); }, [workspaceTab, apiBase, projectId]);
   useEffect(() => { if (workspaceTab === "planning" || workspaceTab === "authoring" || workspaceTab === "checks") setInspectorOpen(false); }, [workspaceTab]);
   const [generationReview, setGenerationReview] = useState<GenerationReviewResult | null>(null);
   const [longformApplyRetry, setLongformApplyRetry] = useState<LongformApplyAttempt | null>(null);
@@ -522,6 +538,8 @@ export default function App() {
   const [agentForm, setAgentForm] = useState<AgentSettingsUpdate>(defaultAgentForm);
   const settingsRequestSequenceRef = useRef(0);
   const settingsEditRevisionRef = useRef(0);
+  const settingsSavedRevisionRef = useRef(0);
+  const [settingsLoadState, setSettingsLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [clearApiKey, setClearApiKey] = useState(false);
   const [projectForm, setProjectForm] = useState<ProjectForm>(defaultProjectForm);
@@ -573,6 +591,7 @@ export default function App() {
   });
   const [desktopSettings, setDesktopSettings] = useState<DesktopSettings | null>(null);
   const [desktopBackend, setDesktopBackend] = useState<DesktopBackendStatus | null>(null);
+  const [backendReadGeneration, setBackendReadGeneration] = useState(0);
   const [desktopBackendChecked, setDesktopBackendChecked] = useState(() => !isDesktopRuntime());
   const [sourceDocuments, setSourceDocuments] = useState<SourceDocumentSummary[]>([]);
   const [selectedSourceDocumentId, setSelectedSourceDocumentId] = useState<string | null>(null);
@@ -625,6 +644,7 @@ export default function App() {
 
   useEffect(() => {
     settingsRequestSequenceRef.current += 1; settingsEditRevisionRef.current += 1;
+    settingsSavedRevisionRef.current = settingsEditRevisionRef.current; setSettingsLoadState("idle");
     setApiKeyInput(""); setClearApiKey(false); setAgentSettings(null); setAgentForm(defaultAgentForm);
   }, [apiBase]);
 
@@ -893,6 +913,7 @@ export default function App() {
     );
     setDesktopBackend(status);
     setDesktopBackendChecked(true);
+    setBackendReadGeneration(current => current + 1);
     if (status.error && (!status.reachable || !status.workspaceCompatible)) {
       setError(uiText.errors.requestFailed);
       setTechnicalError(status.error);
@@ -1106,12 +1127,16 @@ export default function App() {
         return { projectId: "", sceneId: "" };
       }
 
+      const restoring = !restoredViewBackends.current.has(apiBase);
+      const restored = restoring ? savedView(apiBase) : null;
       const nextProject =
-        nextProjects.find((project) => project.id === preferredProjectId) ?? nextProjects[0];
+        nextProjects.find((project) => project.id === (preferredProjectId || restored?.projectId)) ?? nextProjects[0];
       const availableScenes = flattenScenes(nextProject);
       const nextScene =
-        availableScenes.find((scene) => scene.id === preferredSceneId) ?? availableScenes[0] ?? null;
+        availableScenes.find((scene) => scene.id === (preferredSceneId || (restored?.projectId === nextProject.id ? restored.sceneId : ""))) ?? availableScenes[0] ?? null;
       if (activeProjectIdRef.current !== nextProject.id) resetProposalScope();
+      restoredViewBackends.current.add(apiBase);
+      if (restoring && restored?.projectId === nextProject.id) setWorkspaceTab(restored.area);
       setProjectId(nextProject.id);
       setSceneId(nextScene?.id ?? "");
       return { projectId: nextProject.id, sceneId: nextScene?.id ?? "" };
@@ -1259,11 +1284,18 @@ export default function App() {
 
   const refreshAgentSettings = useCallback(async () => {
     const request = { apiBase, sequence: ++settingsRequestSequenceRef.current, revision: settingsEditRevisionRef.current };
-    const settings = await apiGet<AgentSettings>(apiBase, "/settings/agent");
-    if (activeApiBaseRef.current !== apiBase || settingsRequestSequenceRef.current !== request.sequence) return;
-    setAgentSettings(settings);
-    if (!settingsRequestIsCurrent(request, { apiBase: activeApiBaseRef.current, sequence: settingsRequestSequenceRef.current, revision: settingsEditRevisionRef.current })) return;
-    setAgentForm(settingsToForm(settings)); setApiKeyInput(""); setClearApiKey(false);
+    setSettingsLoadState("loading");
+    try {
+      const settings = await apiGet<AgentSettings>(apiBase, "/settings/agent");
+      if (activeApiBaseRef.current !== apiBase || settingsRequestSequenceRef.current !== request.sequence) return;
+      setAgentSettings(settings); setSettingsLoadState("ready");
+      // A read refresh must preserve edits made before or during this request.
+      if (request.revision !== settingsSavedRevisionRef.current || !settingsRequestIsCurrent(request, { apiBase: activeApiBaseRef.current, sequence: settingsRequestSequenceRef.current, revision: settingsEditRevisionRef.current })) return;
+      setAgentForm(settingsToForm(settings)); setApiKeyInput(""); setClearApiKey(false);
+    } catch (exc) {
+      if (activeApiBaseRef.current === apiBase && settingsRequestSequenceRef.current === request.sequence) setSettingsLoadState("error");
+      throw exc;
+    }
   }, [apiBase]);
 
   const saveAgentSettings = useCallback(async () => {
@@ -1274,8 +1306,10 @@ export default function App() {
     if (activeApiBaseRef.current !== apiBase || settingsRequestSequenceRef.current !== request.sequence) return;
     setAgentSettings(settings);
     if (settingsRequestIsCurrent(request, { apiBase: activeApiBaseRef.current, sequence: settingsRequestSequenceRef.current, revision: settingsEditRevisionRef.current })) {
+      settingsSavedRevisionRef.current = request.revision;
       setAgentForm(settingsToForm(settings)); setApiKeyInput(""); setClearApiKey(false);
     }
+    setSettingsLoadState("ready");
     setNotice(uiText.notices.settingsSaved);
   }, [agentForm, agentSettings, apiBase, apiKeyInput, clearApiKey]);
 
@@ -2909,7 +2943,24 @@ export default function App() {
     setAgentDiscussionForm((current) => ({ ...current, mode: "discuss", includeLatestDraft: false, selectedText: "", selectedStart: undefined, selectedEnd: undefined, selectedDraftId: undefined }));
   }, [apiBase, projectId, sceneId]);
 
-  useEffect(() => { setReadingChapterId(null); setAgentTarget("scene"); pendingManuscriptSelectionRef.current = null; }, [apiBase, projectId]);
+  useEffect(() => {
+    const restored = savedView(apiBase, projectId);
+    const chapterId = restored?.projectId === projectId && projects.find(project => project.id === projectId)?.chapters.some(chapter => chapter.id === restored.chapterId) ? restored.chapterId ?? null : null;
+    setReadingChapterId(chapterId); setAgentTarget(chapterId ? "composition" : "scene"); pendingManuscriptSelectionRef.current = null;
+    setSessionNavigation(undefined);
+  }, [apiBase, projectId]);
+
+  useEffect(() => {
+    if (!workspaceLoaded || !projectId || !restoredViewBackends.current.has(apiBase)) return;
+    const timer = window.setTimeout(() => {
+      if (activeApiBaseRef.current !== apiBase || activeProjectIdRef.current !== projectId) return;
+      const previous = savedView(apiBase);
+      const sessions = { ...previous?.sessions };
+      if (activeMainSession?.apiBase === apiBase && activeMainSession.projectId === projectId) sessions[projectId] = activeMainSession.id ?? "";
+      try { writeWorkbenchView(window.localStorage, apiBase, { projectId, sceneId, ...(readingChapterId ? { chapterId: readingChapterId } : {}), area: workspaceTab, sessions }); } catch { /* Preferences are optional. */ }
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [apiBase, projectId, sceneId, readingChapterId, workspaceTab, workspaceLoaded, activeMainSession]);
 
   useEffect(() => {
     if (draftLoading || !draft || !pendingManuscriptSelectionRef.current) return;
@@ -3107,9 +3158,30 @@ export default function App() {
     );
   }, [selectedProject]);
 
+  const settingsBackendReady = !isDesktopRuntime() || Boolean(desktopBackendChecked && desktopSettings?.backendUrl === apiBase && desktopBackend?.reachable && desktopBackend.workspaceCompatible);
   useEffect(() => {
-    refreshAgentSettings().catch(() => undefined);
-  }, [refreshAgentSettings]);
+    if (!settingsBackendReady) { settingsRequestSequenceRef.current += 1; setSettingsLoadState("idle"); return; }
+    void refreshAgentSettings().catch(() => undefined);
+  }, [settingsBackendReady, backendReadGeneration, refreshAgentSettings]);
+
+  // Status reads can observe a backend which finishes starting after the first probe.
+  useEffect(() => {
+    if (!isDesktopRuntime() || !desktopBackendChecked || (desktopBackend?.reachable && desktopBackend.workspaceCompatible)) return;
+    let stopped = false; let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try { await refreshDesktopBackend("status"); } catch { /* Explicit backend controls remain available. */ }
+      if (!stopped) timer = setTimeout(poll, 2000);
+    };
+    timer = setTimeout(poll, 2000);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [desktopBackendChecked, desktopBackend?.reachable, desktopBackend?.workspaceCompatible, refreshDesktopBackend]);
+
+  const settingsWasOpen = useRef(false);
+  useEffect(() => {
+    const opening = activeTab === "settings" && !settingsWasOpen.current;
+    settingsWasOpen.current = activeTab === "settings";
+    if (opening && settingsBackendReady && settingsLoadState === "error") void refreshAgentSettings().catch(() => undefined);
+  }, [activeTab, settingsBackendReady, settingsLoadState, refreshAgentSettings]);
 
   useEffect(() => {
     checkForUpdates(true).catch(() => undefined);
@@ -3237,17 +3309,39 @@ export default function App() {
   const backendStatusLabel = desktopBackend ? formatDesktopBackendLabel(desktopBackend) : workspaceLoadError ? uiText.navigation.connectionFailed : localizedTerms.fastApi;
   const backendStatusTone = desktopBackend ? desktopBackendTone(desktopBackend) : workspaceLoadError ? "danger" : workspaceLoaded ? "good" : "neutral";
 
+  const selectWorkbenchProject: (nextProjectId: string) => void = (nextProjectId) => {
+              if (nextProjectId === projectId) return;
+              const nextProject = projects.find((project) => project.id === nextProjectId);
+              if (!nextProject) return;
+              const nextView = resolveWorkbenchProjectView(nextProject, savedView(apiBase, nextProjectId));
+              requestProposalNavigation(
+                uiText.proposals.navigateProject(nextProject?.title ?? nextProjectId),
+                () => {
+                  setCreatingNewProposal(false);
+                  setProposals([]);
+                  setSelectedProposalId(null);
+                  hydrateProposalEditor(null);
+                  const previous = savedView(apiBase);
+                  const sessions = { ...previous?.sessions };
+                  if (activeMainSession?.apiBase === apiBase && activeMainSession.projectId === projectId) sessions[projectId] = activeMainSession.id ?? "";
+                  try { writeWorkbenchView(window.localStorage, apiBase, { projectId, sceneId, ...(readingChapterId ? { chapterId: readingChapterId } : {}), area: workspaceTab, sessions }); } catch { /* Optional UI preferences. */ }
+                  setProjectId(nextProjectId);
+                  setSceneId(nextView.sceneId);
+                  setReadingChapterId(nextView.chapterId);
+                  setWorkspaceTab(nextView.area);
+                  setContextPack(null);
+                  setRun(null);
+                  setRunEvents([]);
+                  setContinuityReport(null);
+                }
+              );
+            };
+
   return (
     <div className="workbench">
-      <header className="topbar">
-        <div className="brand">
-          <div className="mark"><GitBranch size={18} /></div>
-          <div>
-            <strong>{appText.brandName}</strong>
-            <span>{appText.tagline}</span>
-          </div>
-        </div>
-        <div className="command-bar" aria-label={uiText.commandBar.ariaLabel}>
+      <WorkbenchHeader title={selectedProject?.title ?? appText.brandName} statusTone={backendStatusTone}
+        navigationOpen={mobileSidebarOpen} onToggleNavigation={() => setMobileSidebarOpen(value => !value)}
+        commands={<div className="command-bar" aria-label={uiText.commandBar.ariaLabel}>
           <button type="button" onClick={() => runEditCommand("undo")} title={uiText.commandBar.undoTitle}>
             <Undo2 size={15} /> {uiText.common.undo}
           </button>
@@ -3270,25 +3364,26 @@ export default function App() {
           >
             <RefreshCw size={15} /> {uiText.common.refresh}
           </button>
-        </div>
-        <div className="top-actions">
-          <button type="button" className="mobile-workspace-toggle" aria-expanded={mobileSidebarOpen} onClick={() => setMobileSidebarOpen(value => !value)}>{uiText.mainAgentDock.projectTools}</button>
-          <select className="locale-switch" value={uiLocale} disabled={localeLoading || busy !== null}
+        </div>}
+        actions={<>{<select className="locale-switch" value={uiLocale} disabled={localeLoading || busy !== null}
             aria-label={uiText.language.uiLocaleLabel} onChange={(event) => { void changeUiLocale(normalizeAppLocale(event.target.value)); }}>
             {SUPPORTED_UI_LOCALES.map((locale) => <option key={locale} value={locale}>{localeRegistry[locale].label}</option>)}
-          </select>
-          <StatusDot label={backendStatusLabel} tone={backendStatusTone} />
+          </select>}{<button className="icon-button" title={uiText.tabs.settings} type="button" onClick={() => setActiveTab("settings")}>
+            <Settings size={17} />
+          </button>}</>}
+        diagnostics={<><StatusDot label={backendStatusLabel} tone={backendStatusTone} />
           <StatusDot label={permissionLabels[agentSettings?.permission_level ?? "full"]} tone={permissionTone(agentSettings?.permission_level)} />
           <StatusDot label={`v${APP_VERSION}`} tone="neutral" />
-          <StatusDot label={`${uiText.navigation.backendVersion}: ${backendVersion.version ?? uiText.common.notSet}`} tone={versionCompatibility === "mismatch" ? "danger" : versionCompatibility === "match" ? "good" : "warning"} />
-          <button className="icon-button" title={uiText.tabs.settings} type="button" onClick={() => setActiveTab("settings")}>
-            <Settings size={17} />
-          </button>
-        </div>
-      </header>
+          <StatusDot label={`${uiText.navigation.backendVersion}: ${backendVersion.version ?? uiText.common.notSet}`} tone={versionCompatibility === "mismatch" ? "danger" : versionCompatibility === "match" ? "good" : "warning"} /></>}
+      />
 
       <div className={`layout ${inspectorOpen ? "with-inspector" : "focus-writing"}`}>
-        <aside className={`sidebar ${mobileSidebarOpen ? "mobile-sidebar-open" : ""}`}>
+        {mobileSidebarOpen && <button className="navigation-scrim" aria-label={uiText.authorWorkspace.closeAgent} type="button" onClick={() => setMobileSidebarOpen(false)} />}
+        <aside className={`sidebar author-sidebar ${mobileSidebarOpen ? "mobile-sidebar-open" : ""}`}>
+          <div className="author-sidebar-heading"><span>{uiText.shellDesk.workspace}</span><button type="button" className="icon-button sidebar-close" aria-label={uiText.authorWorkspace.closeAgent} onClick={() => setMobileSidebarOpen(false)}><X size={15} /></button></div>
+          {hasWorkspace && <label className="author-project-picker"><span>{uiText.shellDesk.currentProject}</span><select aria-label={uiText.shellDesk.switchProject} disabled={busy !== null || !projects.length} value={projectId} onChange={event => selectWorkbenchProject(event.target.value)}>{projects.length ? projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>) : <option value="">{workspaceLoadError ? uiText.navigation.connectionFailed : uiText.common.notCreated}</option>}</select></label>}
+          {hasWorkspace && <AuthorSidebarTabs active={sidebarView} onChange={setSidebarView} />}
+          <div className={`author-project-navigation ${!hasWorkspace ? "without-project" : ""}`} hidden={hasWorkspace && sidebarView !== "chapters"}>
           <ProjectSidebar
             busy={busy}
             canReview={canReview && !workspaceLoadError}
@@ -3358,28 +3453,8 @@ export default function App() {
               )
             }
             onSceneFormChange={setSceneForm}
-            onSelectProject={(nextProjectId) => {
-              if (nextProjectId === projectId) return;
-              const nextProject = projects.find((project) => project.id === nextProjectId);
-              const firstScene = nextProject ? flattenScenes(nextProject)[0] : null;
-              requestProposalNavigation(
-                uiText.proposals.navigateProject(nextProject?.title ?? nextProjectId),
-                () => {
-                  setCreatingNewProposal(false);
-                  setProposals([]);
-                  setSelectedProposalId(null);
-                  hydrateProposalEditor(null);
-                  setProjectId(nextProjectId);
-                  setSceneId(firstScene?.id ?? "");
-                  setContextPack(null);
-                  setRun(null);
-                  setRunEvents([]);
-                  setContinuityReport(null);
-                }
-              );
-            }}
+            onSelectProject={selectWorkbenchProject}
             onSelectScene={(nextSceneId) => {
-              if (nextSceneId === sceneId) { setReadingChapterId(null); setAgentTarget("scene"); setWorkspaceTab("write"); return; }
               const nextScene = findScene(projects, projectId, nextSceneId);
               requestProposalNavigation(
                 uiText.proposals.navigateScene(nextScene?.title ?? nextSceneId),
@@ -3412,6 +3487,17 @@ export default function App() {
             workspaceLoadError={workspaceLoadError}
             worldRuleForm={worldRuleForm}
           />
+          </div>
+          <div className="author-conversation-navigation" hidden={!hasWorkspace || sidebarView !== "sessions"}>
+            <ProjectConversations apiBase={apiBase} projectId={projectId}
+              canEdit={canGenerate}
+              activeSessionId={activeMainSession?.apiBase === apiBase && activeMainSession.projectId === projectId ? activeMainSession.id : null}
+              sessionVersion={activeMainSession?.apiBase === apiBase && activeMainSession.projectId === projectId ? activeMainSession.version : 0}
+              onOpen={target => requestProposalNavigation(uiText.authoring.title, () => { setSessionNavigation({ apiBase, projectId, nonce: Date.now(), ...target }); setMobileSidebarOpen(false); setInspectorOpen(false); })}
+              onNew={() => requestProposalNavigation(uiText.authoring.title, () => { setSessionNavigation({ apiBase, projectId, nonce: Date.now() }); setMobileSidebarOpen(false); setInspectorOpen(false); })} />
+          </div>
+          {hasWorkspace && <AuthorMaterialNavigation active={workspaceTab} onNavigate={area => requestProposalNavigation(uiText.workspace.mainWorkspaceAria, () => { setWorkspaceTab(area); setMobileSidebarOpen(false); })} />}
+          {hasWorkspace && <details className="author-project-utilities"><summary><Settings size={14} />{uiText.navigation.tools}</summary>
           {selectedProject && <details className="outline-language-tools">
             <summary>{uiText.outlineLanguage.tools}</summary>
             <p>{uiText.outlineLanguage.help}</p>
@@ -3421,15 +3507,16 @@ export default function App() {
               void runAction("outline-language-generate", generateOutlineLanguageProposal);
             })}><Wand2 size={14} /> {uiText.outlineLanguage.generate}</button>
           </details>}
+          </details>}
         </aside>
 
         <main className="editor editor-with-main-agent">
-          <MainAgentDock manuscript={<>
+          <MainAgentDock scopeKey={projectId ? JSON.stringify([apiBase, projectId]) : undefined} manuscript={<>
           {hasWorkspace && <section className="scene-toolbar">
             <div>
               <h1>
-                {workspaceTab === "graph" ? uiText.graph.title : workspaceTab === "checks" ? uiText.authoring.dockChecks : workspaceTab === "authoring" ? uiText.authoring.design : workspaceTab === "planning" ? uiText.planning.title : workspaceTab === "sources" ? uiText.tabs.sources : workspaceTab === "proposals" ? uiText.tabs.proposals : workspaceTab === "workflow" ? uiText.tabs.workflow : readingChapter?.title || selectedScene?.title ||
-                  (hasWorkspace ? uiText.workspace.importedStructureTitle : uiText.navigation.welcomeTitle)}
+                {workspaceTab === "notebook" ? (uiText.shellDesk.notebook) : workspaceTab === "graph" ? uiText.graph.title : workspaceTab === "checks" ? uiText.authoring.dockChecks : workspaceTab === "authoring" ? uiText.authoring.design : workspaceTab === "planning" ? uiText.planning.title : workspaceTab === "sources" ? uiText.tabs.sources : workspaceTab === "proposals" ? uiText.tabs.proposals : workspaceTab === "workflow" ? uiText.tabs.workflow : readingChapter?.title || selectedScene?.title ||
+                  (selectedProject?.title ?? uiText.navigation.welcomeTitle)}
               </h1>
               {workspaceTab === "write" && !readingChapter && selectedScene && <button className="scene-rename-trigger" type="button" disabled={!canReview || busy !== null} onClick={() => {
                 if (sceneTitleEditor?.sceneId === sceneId) return;
@@ -3448,7 +3535,7 @@ export default function App() {
               </p>
             </div>
             {(workspaceTab === "planning" || workspaceTab === "authoring" || workspaceTab === "checks") && !inspectorOpen && <div className="toolbar-actions"><button type="button" onClick={() => setActiveTab("settings")}><Settings size={16} /> {uiText.planning.openSettings}</button></div>}
-            {workspaceTab === "write" && !readingChapter && <div className="toolbar-actions">
+            {workspaceTab === "write" && !readingChapter && hasScene && <div className="toolbar-actions">
               <button className="primary" onClick={() => runAction("save", saveDraft)} type="button" disabled={!canGenerate || !hasScene || !draftDirty || draftLoading || busy !== null}>
                 <Save size={16} /> {uiText.editor.saveButton}
               </button>
@@ -3460,31 +3547,9 @@ export default function App() {
             </div>}
           </section>}
 
-          {hasWorkspace && <details className="workspace-status-details"><summary>{uiText.authorWorkspace.workspaceDetails}</summary>
-          <section className="state-strip" aria-label={uiText.workspace.workflowStatusAria}>
-            <StatusDot
-              label={`${uiText.stateStrip.projectPrefix}: ${selectedProject?.title || uiText.common.notCreated}`}
-              tone={hasWorkspace ? "good" : "warning"}
-            />
-            <StatusDot
-              label={`${uiText.stateStrip.writerPrefix}: ${formatWriter(agentSettings)}`}
-              tone={writerNeedsKey ? "danger" : canGenerate ? "good" : "neutral"}
-            />
-            <StatusDot
-              label={writerNeedsKey ? uiText.stateStrip.llmIncomplete : uiText.stateStrip.safetyBoundary}
-              tone={writerNeedsKey ? "danger" : "neutral"}
-            />
-          </section>
-          </details>}
 
-          {hasWorkspace && <section className="workspace-tabs" aria-label={uiText.workspace.mainWorkspaceAria}>
-            <TabButton active={workspaceTab === "write"} onClick={() => setWorkspaceTab("write")} icon={<FileText size={15} />} label={uiText.tabs.write} />
-            <TabButton active={workspaceTab === "authoring"} onClick={() => setWorkspaceTab("authoring")} icon={<MessageSquare size={15} />} label={uiText.authoring.design} />
-            <TabButton active={workspaceTab === "checks"} onClick={() => setWorkspaceTab("checks")} icon={<ShieldCheck size={15} />} label={uiText.authoring.dockChecks} />
-            <TabButton active={workspaceTab === "planning"} onClick={() => setWorkspaceTab("planning")} icon={<BookOpen size={15} />} label={uiText.planning.title} />
-            <TabButton active={workspaceTab === "sources"} onClick={() => setWorkspaceTab("sources")} icon={<Library size={15} />} label={uiText.tabs.sources} />
-            <TabButton active={workspaceTab === "proposals"} onClick={() => setWorkspaceTab("proposals")} icon={<SplitSquareVertical size={15} />} label={uiText.tabs.proposals} />
-            <details className="tools-menu">
+
+          {hasWorkspace && <AuthorWorkspaceTabs active={workspaceTab} onNavigate={area => requestProposalNavigation(uiText.workspace.mainWorkspaceAria, () => setWorkspaceTab(area))} tools={<details className="tools-menu">
               <summary title={uiText.navigation.toolsHelp}><Settings size={15} /> {uiText.navigation.tools} <ChevronDown size={13} /></summary>
               <div className="tools-menu-items" onClick={(event) => { if ((event.target as HTMLElement).closest("button")) event.currentTarget.closest("details")?.removeAttribute("open"); }}>
                 <button type="button" onClick={() => setWorkspaceTab("workflow")}><Activity size={15} /> {uiText.tabs.workflow}</button>
@@ -3493,13 +3558,9 @@ export default function App() {
                 <button type="button" onClick={() => setActiveTab("facts")}><Database size={15} /> {localizedTerms.canonReview}</button>
                 <button type="button" onClick={() => setActiveTab("settings")}><Settings size={15} /> {uiText.tabs.settings}</button>
               </div>
-            </details>
-          </section>}
+            </details>} />}
 
-          <div className="workspace-guide" hidden={!hasWorkspace || workspaceTab === "planning" || workspaceTab === "authoring" || workspaceTab === "checks" || workspaceTab === "graph"}>
-            <span>{workspaceTab === "planning" ? uiText.planning.help : workspaceTab === "write" ? uiText.authorWorkspace.writingGuide : workspaceTab === "workflow" ? uiText.navigation.workflowHelp : uiText.navigation[`${workspaceTab === "sources" ? "sources" : "proposals"}Help`]}</span>
-            {!llmConfigured && <button type="button" onClick={() => setActiveTab("settings")}><KeyRound size={14} /> {uiText.navigation.setupModel}</button>}
-          </div>
+
 
           {versionCompatibility === "mismatch" && <div className="message error" role="alert"><AlertTriangle size={16} /><span>{uiText.navigation.backendVersionMismatch(APP_VERSION, backendVersion.version!)}</span></div>}
 
@@ -3520,18 +3581,23 @@ export default function App() {
 
           {workspaceLoadError && <section className="empty-workspace"><EmptyState icon={<AlertTriangle />} title={uiText.navigation.connectionFailed} text={uiText.navigation.connectionFailedHelp} /><button type="button" onClick={() => setActiveTab("settings")}><Settings size={15} /> {uiText.tabs.settings}</button></section>}
           {!hasWorkspace && workspaceLoaded && !workspaceLoadError && (
-            <section className="empty-workspace main-agent-empty-manuscript">
-              <EmptyState
-                icon={<BookOpen />}
-                title={uiText.mainAgentDock.manuscriptTitle}
-                text={uiText.mainAgentDock.manuscriptHelp}
-              />
+            <section className="empty-workspace main-agent-empty-manuscript editorial-welcome">
+              <div className="welcome-folio" aria-hidden="true"><BookOpen size={42} strokeWidth={.8} /><i /></div>
+              <h1>{uiText.shellDesk.emptyTitle}</h1>
             </section>
           )}
 
 
+          {hasWorkspace && !hasScene && workspaceTab === "write" && <section className="first-manuscript">
+            <span className="first-manuscript-kicker">{uiText.shellDesk.freshManuscript}</span>
+            <BookOpen size={36} strokeWidth={1} />
+            <h2>{uiText.shellDesk.firstSceneTitle}</h2>
+            <p>{uiText.shellDesk.firstSceneHelp}</p>
+            <div><button type="button" className="primary" disabled={!canReview || busy !== null} onClick={() => { setSidebarView("chapters"); setMobileSidebarOpen(true); window.setTimeout(() => { const panel = document.querySelector<HTMLDetailsElement>("[data-author-outline]"); if (panel) { panel.open = true; panel.scrollIntoView({ block: "nearest" }); panel.querySelector<HTMLInputElement>("input")?.focus(); } }, 0); }}><FileText size={15} />{uiText.shellDesk.firstScene}</button><button type="button" onClick={() => setWorkspaceTab("authoring")}><Wand2 size={15} />{uiText.shellDesk.openDesign}</button></div>
+          </section>}
           {workspaceTab === "graph" && <GraphPreview preview={graphPreview} selectedSceneId={readingChapter ? "" : sceneId} />}
 
+          <div hidden={workspaceTab !== "notebook"}>{notebookScope === JSON.stringify([apiBase, projectId]) && <ProjectNotebook apiBase={apiBase} projectId={projectId} canEdit={canGenerate} onOpenSource={target => requestProposalNavigation(uiText.authoring.title, () => { setSessionNavigation({ apiBase, projectId, nonce: Date.now(), ...target }); setInspectorOpen(false); })} />}</div>
           <div ref={setAuthoringPanelHost} className="authoring-panel-host" hidden={workspaceTab !== "authoring" && workspaceTab !== "checks"} />
 
           <div hidden={workspaceTab !== "planning"}>
@@ -3893,11 +3959,11 @@ export default function App() {
                 await refreshGraphPreview(id);
                 setWorkspaceTab("write");
               } });
-            }); }} /> : <AuthoringStudio key={`authoring:${apiBase}:${projectId}`} apiBase={apiBase} projectId={projectId} projectLanguage={selectedProject?.language ?? ""} active={true} layout="dock" panelHost={authoringPanelHost} activePanel={workspaceTab === "authoring" ? "design" : workspaceTab === "checks" ? "checks" : "conversation"} onWriterContext={value => setSessionWriterChoice(current => { const next = value ? { apiBase, projectId, ...value } : null; return current?.apiBase === next?.apiBase && current?.projectId === next?.projectId && current?.sessionId === next?.sessionId && current?.choice?.fingerprint === next?.choice?.fingerprint ? current : next; })} onNavigate={navigateAuthoring} initialIdea={mainAgentInitialIdea?.apiBase === apiBase && mainAgentInitialIdea.projectId === projectId ? mainAgentInitialIdea.idea : undefined} draftSelection={!draftDirty && !draftLoading && draft?.project_id === projectId && draft.scene_id === sceneId && draftSelectionRange ? { ...draftSelectionRange, draftId: draft.id } : null} currentSceneId={readingChapter ? undefined : sceneId} currentChapterId={readingChapter?.id ?? selectedProject?.chapters.find(chapter => chapter.scenes.some(scene => scene.id === sceneId))?.id} onOpenSettings={() => setActiveTab("settings")} canReview={canReview} onStructureApplied={async id => { if (activeApiBaseRef.current !== apiBase || activeProjectIdRef.current !== projectId) return; requestProposalNavigation(uiText.authoring.title, () => { void runAction("authoring-structure-refresh", async () => { await refreshWorkspace(projectId, id); await refreshGraphPreview(projectId); setContextPack(null); }); }); }} canGenerate={canGenerate && projectLanguageReady} modelReady={taskConnectionReady(agentSettings, "discussion")} usingChatGPTPlan={resolvedTask(agentSettings, "discussion")?.auth_mode === "chatgpt_plan"} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "discussion"))} sources={sourceDocuments} proposals={proposals} scenes={selectedProject?.chapters.flatMap(chapter => chapter.scenes) ?? []} names={graphPreview?.project_id === projectId ? Object.fromEntries(graphPreview.nodes.map(node => [node.id, node.label])) : {}} draft={draft} draftDirty={draftDirty || draftLoading} onHandoff={(id, savedDraft) => requestProposalNavigation(uiText.authoring.handoff, () => { setReadingChapterId(null); setChapterSelection(null); setAgentTarget("scene"); setSelectedAgentSourceIds(new Set()); setAgentDiscussionForm({ ...defaultAgentDiscussionForm, mode: savedDraft?.text.trim() ? "revise_scene" : "create_scene", instruction: savedDraft?.text.trim() ? uiText.authoring.revisionInstruction : uiText.authoring.handoffInstruction, includeLatestDraft: Boolean(savedDraft?.text.trim()) }); setSceneId(id); setWorkspaceTab("write"); setActiveTab("agent"); setContextPack(null); })} />}
+            }); }} /> : <AuthoringStudio key={`authoring:${apiBase}:${projectId}`} apiBase={apiBase} projectId={projectId} projectLanguage={selectedProject?.language ?? ""} active={true} layout="dock" bootstrapSessionId={bootstrapSessionId} sessionNavigation={sessionNavigation?.apiBase === apiBase && sessionNavigation.projectId === projectId ? sessionNavigation : undefined} onActiveSessionChange={(id, version) => setActiveMainSession(current => current?.apiBase === apiBase && current.projectId === projectId && current.id === id && current.version === version ? current : { apiBase, projectId, id, version })} panelHost={authoringPanelHost} activePanel={workspaceTab === "authoring" ? "design" : workspaceTab === "checks" ? "checks" : "conversation"} onWriterContext={value => setSessionWriterChoice(current => { const next = value ? { apiBase, projectId, ...value } : null; return current?.apiBase === next?.apiBase && current?.projectId === next?.projectId && current?.sessionId === next?.sessionId && current?.choice?.fingerprint === next?.choice?.fingerprint ? current : next; })} onNavigate={navigateAuthoring} initialIdea={mainAgentInitialIdea?.apiBase === apiBase && mainAgentInitialIdea.projectId === projectId ? mainAgentInitialIdea.idea : undefined} draftSelection={!draftDirty && !draftLoading && draft?.project_id === projectId && draft.scene_id === sceneId && draftSelectionRange ? { ...draftSelectionRange, draftId: draft.id } : null} currentSceneId={readingChapter ? undefined : sceneId} currentChapterId={readingChapter?.id ?? selectedProject?.chapters.find(chapter => chapter.scenes.some(scene => scene.id === sceneId))?.id} onOpenSettings={() => setActiveTab("settings")} canReview={canReview} onStructureApplied={async id => { if (activeApiBaseRef.current !== apiBase || activeProjectIdRef.current !== projectId) return; requestProposalNavigation(uiText.authoring.title, () => { void runAction("authoring-structure-refresh", async () => { await refreshWorkspace(projectId, id); await refreshGraphPreview(projectId); setContextPack(null); }); }); }} canGenerate={canGenerate && projectLanguageReady} modelReady={taskConnectionReady(agentSettings, "discussion")} usingChatGPTPlan={resolvedTask(agentSettings, "discussion")?.auth_mode === "chatgpt_plan"} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "discussion"))} sources={sourceDocuments} proposals={proposals} scenes={selectedProject?.chapters.flatMap(chapter => chapter.scenes) ?? []} names={graphPreview?.project_id === projectId ? Object.fromEntries(graphPreview.nodes.map(node => [node.id, node.label])) : {}} draft={draft} draftDirty={draftDirty || draftLoading} onHandoff={(id, savedDraft) => requestProposalNavigation(uiText.authoring.handoff, () => { setReadingChapterId(null); setChapterSelection(null); setAgentTarget("scene"); setSelectedAgentSourceIds(new Set()); setAgentDiscussionForm({ ...defaultAgentDiscussionForm, mode: savedDraft?.text.trim() ? "revise_scene" : "create_scene", instruction: savedDraft?.text.trim() ? uiText.authoring.revisionInstruction : uiText.authoring.handoffInstruction, includeLatestDraft: Boolean(savedDraft?.text.trim()) }); setSceneId(id); setWorkspaceTab("write"); setActiveTab("agent"); setContextPack(null); })} />}
           </MainAgentDock>
         </main>
 
-        <aside className="inspector" hidden={!inspectorOpen}>
+        <aside className={`inspector ${activeTab === "settings" ? "inspector-settings" : ""}`} hidden={!inspectorOpen}>
           <div className="inspector-heading"><strong>{activeTab === "agent" ? uiText.mainAgentDock.writerTools : uiText.authorWorkspace.settingsTitle}</strong><button className="icon-button" type="button" onClick={() => setInspectorOpen(false)} aria-label={uiText.authorWorkspace.closeAgent}><X size={16} /></button></div>
           <div className="tabs inspector-tabs" role="tablist">
             <TabButton active={activeTab === "agent"} onClick={() => setActiveTab("agent")} icon={<MessageSquare size={15} />} label={uiText.mainAgentDock.writerTools} />
@@ -3989,6 +4055,11 @@ export default function App() {
           <div hidden={activeTab !== "settings"} className="settings-inspector-host">
             <AgentSettingsInspector
               apiBase={apiBase}
+              onGoToChat={() => { setInspectorOpen(false); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".main-agent-dock .authoring-compose textarea, .main-agent-dock .first-composer-bar textarea, .main-agent-welcome textarea")?.focus()); }}
+              backendReady={settingsBackendReady}
+              backendReadGeneration={backendReadGeneration}
+              active={activeTab === "settings"}
+              settingsLoadState={settingsLoadState}
               onApiBaseChange={(value) => { const normalized = normalizeApiBase(value); if (!normalized) return; if (!isDesktopRuntime()) saveBrowserApiBase(normalized); setApiBase(normalized); }}
               connectionLocked={proposalDirty || draftDirty || chapterEditsDirty || sceneEditsDirty}
               apiKeyInput={apiKeyInput}
@@ -5408,7 +5479,7 @@ function ProjectSidebar({
           </details>
         )}
 
-        <details ref={outlineDetailsRef} className="sidebar-section seed-panel">
+        <details ref={outlineDetailsRef} data-author-outline className="sidebar-section seed-panel">
           <summary className="section-title">{uiText.sidebar.outlineTitle}</summary>
           <p className="metadata-target-label">{chapterMetadataTarget ? `${uiText.authorWorkspace.editingChapter}: ${chapterMetadataTarget.baseline.title} (${chapterMetadataTarget.chapterId})` : uiText.authorWorkspace.chapterTargetRequired}</p>
           <input
@@ -6456,7 +6527,7 @@ function DocumentReader({
 }
 
 function AgentSettingsInspector({
-  apiBase,
+  apiBase, backendReady, backendReadGeneration, active, settingsLoadState, onGoToChat,
   onApiBaseChange,
   connectionLocked,
   apiKeyInput,
@@ -6483,6 +6554,11 @@ function AgentSettingsInspector({
   backendVersion
 }: {
   apiBase: string;
+  backendReady: boolean;
+  backendReadGeneration: number;
+  active: boolean;
+  settingsLoadState: "idle" | "loading" | "ready" | "error";
+  onGoToChat: () => void;
   onApiBaseChange: (value: string) => void;
   connectionLocked: boolean;
   apiKeyInput: string;
@@ -6515,6 +6591,16 @@ function AgentSettingsInspector({
 
   return (
     <div className="settings-panel">
+      {!backendReady && <p role="status">{uiText.chatgpt.backendWaiting}</p>}
+      {settingsLoadState === "loading" && <p role="status">{uiText.chatgpt.settingsLoading}</p>}
+      {settingsLoadState === "error" && <p role="alert">{uiText.chatgpt.settingsLoadError} <button type="button" disabled={!backendReady || busy !== null} onClick={onRefresh}>{uiText.chatgpt.retrySettings}</button></p>}
+      <ModelConnectionSetup key={apiBase} apiBase={apiBase} settings={settings} backendReady={backendReady} backendReadGeneration={backendReadGeneration} active={active} busy={busy !== null} onGoToChat={onGoToChat} onStatus={status => onSettingsChange(current => withPlanReadiness(current,status))} onCommitted={(result: ConnectionCommit) => {
+        onSettingsChange(result.settings);
+        onFormChange(current => mergeConnectionCommit(current, settings, result.settings, result.profile_id));
+      }} />
+      <details className="settings-block settings-disclosure"><summary>{connectionText().advanced}</summary>
+      <ModelRoutingSettings backendReady={backendReady} backendReadGeneration={backendReadGeneration} active={active} actionBusy={busy !== null} onChatGPTStatus={status => onSettingsChange(current => withPlanReadiness(current, status))} key={apiBase} apiBase={apiBase} settings={settings} form={form} onFormChange={onFormChange} apiKeyInput={apiKeyInput} onApiKeyChange={onApiKeyChange} clearApiKey={clearApiKey} onClearApiKeyChange={onClearApiKeyChange} busy={busy !== null || !settings} />
+      </details>
       <details className="settings-block settings-disclosure"><summary>{uiText.modelRouting.presetCollapsed}</summary><AgentPresets apiBase={apiBase} settings={settings} busy={busy !== null} onChange={onSettingsChange} /></details>
       <section className="settings-block">
         <div className="settings-title"><BookOpen size={15} /> {uiText.language.uiLocaleLabel}</div>
@@ -6585,7 +6671,6 @@ function AgentSettingsInspector({
         </section>
       )}
 
-      <ModelRoutingSettings onChatGPTStatus={status => onSettingsChange(current => withPlanReadiness(current, status))} key={apiBase} apiBase={apiBase} settings={settings} form={form} onFormChange={onFormChange} apiKeyInput={apiKeyInput} onApiKeyChange={onApiKeyChange} clearApiKey={clearApiKey} onClearApiKeyChange={onClearApiKeyChange} busy={busy !== null || !settings} />
 
       <section className="settings-block">
         <div className="settings-title"><Lock size={15} /> {uiText.settings.permissionSection}</div>
@@ -6655,7 +6740,7 @@ function AgentSettingsInspector({
       </section>
 
       <div className="settings-actions">
-        <button onClick={onRefresh} type="button" disabled={busy !== null}>
+        <button onClick={onRefresh} type="button" disabled={busy !== null || !backendReady}>
           <RefreshCw size={15} /> {uiText.settings.refreshSettings}
         </button>
         <button onClick={onUpdateCheck} type="button" disabled={busy !== null || ["downloading", "awaiting_edits", "installing"].includes(updateStatus.state)}>

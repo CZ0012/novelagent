@@ -22,9 +22,7 @@ import multiprocessing
 import os
 import sys
 
-import uvicorn
-
-from apps.api.desktop import app
+from apps.api.desktop_server import main
 
 def _attach_standard_streams():
     if sys.stdout is None:
@@ -35,7 +33,7 @@ def _attach_standard_streams():
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     _attach_standard_streams()
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    main()
 '@ | Set-Content -LiteralPath $entryPath -Encoding utf8
 
 $installedPyInstallerVersion = python -m PyInstaller --version 2>$null
