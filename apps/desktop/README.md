@@ -35,7 +35,7 @@ The desktop hosts the same bilingual author workflow and preset APIs as the brow
 
 ## Current Status
 
-Windows x64 用户可从应用内检查更新，或下载 [v0.3.0 安装器](https://github.com/CZ0012/novelagent/releases/tag/v0.3.0)。
+Windows x64 用户可从应用内检查更新，或下载 [v0.3.1 安装器](https://github.com/CZ0012/novelagent/releases/tag/v0.3.1)。
 此版本包含正文下方的主 Agent、进程内 MCP 和六项内置创作 Skills。早期候选版的真实作者协作试用覆盖了
 两张场景卡、一份 659 字符已保存正文、精确引文回查及认知变更后的重新复核。
 范围、限制和本地证据见 [0.3.0 验收记录](../../docs/acceptance-0.3.0.md)。
@@ -59,7 +59,7 @@ UTF-16 原文引文，只提出有证据的读者呈现/人物获知待审记录
 
 The desktop shell is a buildable source-level Tauri project. It includes npm scripts, a Rust crate, Tauri capabilities, a sci-fi Windows icon, hidden backend sidecar packaging, backend process commands, system-tray lifecycle handling, Tauri signed-updater configuration, and NSIS bundle configuration.
 
-The [v0.3.0 release](https://github.com/CZ0012/novelagent/releases/tag/v0.3.0) distributes the Windows x64 installer, matching Tauri updater signature and `latest.json`. The updater verifies its own signature. Windows Authenticode signing is a separate process. For the previously tested installation and backend upgrade from 0.1.16 to 0.2.0, see the [0.2.0 acceptance record](../../docs/acceptance-0.2.0.md).
+The [v0.3.1 release](https://github.com/CZ0012/novelagent/releases/tag/v0.3.1) distributes the Windows x64 installer, matching Tauri updater signature and `latest.json`. The updater verifies its own signature. Windows Authenticode signing is a separate process. For the previously tested installation and backend upgrade from 0.1.16 to 0.2.0, see the [0.2.0 acceptance record](../../docs/acceptance-0.2.0.md).
 
 ## 中文优先与本地化入口
 
@@ -72,7 +72,7 @@ Use the project through one of these surfaces:
 - CLI workspace for persistent command-line authoring.
 - FastAPI + React/Vite workbench for browser-based local authoring.
 - Tauri desktop app for direct local use after a source build.
-- Published signed release channel for end users, with the v0.3.0 GitHub Release providing `latest.json`, the installer and its updater signature.
+- Published signed release channel for end users, with the v0.3.1 GitHub Release providing `latest.json`, the installer and its updater signature.
 
 GitHub Release is only the software publishing and update-delivery channel. It is not a sync mechanism for local story workspaces, Source Store documents, canon, drafts, project settings, or review state.
 
@@ -356,3 +356,9 @@ Protected continuation, whole-scene revision and selection revision use explicit
 桌面继续承载同一API后端；包含修复需重新构建捆绑后端与工作台并核验对应候选包。历史本地安装器、已发布签名更新与源码功能分别记录；GitHub仍只发布软件，不同步工作区。
 
 既有场景时间编辑的完整批准审计可作为新的内部时序依据，普通作者修改不需新增UI；旧自动边不被重写，无审计属性改动仍不可信。
+
+## 0.3.1 使用 ChatGPT 套餐
+
+在 Windows 桌面版的模型设置选择 **Continue with ChatGPT**。浏览器会在 OpenAI 官方页面请求账号和套餐权限。返回设置后，选择已授权账号、获取可用模型并添加连接，给需要的任务选择该连接后保存。多个连接可以并存，例如让主 Agent 使用 ChatGPT 套餐，让 Writer 使用另一家服务的 API Key。主 Agent 还可以在讨论中为某次写作选择已配置的 Writer。进入场景写作时核对模型和计费来源即可。
+
+开源客户端使用官方动态注册流程；作者可能看到应用未经 OpenAI 验证的提示。DPAPI 加密的本机账号存储位于当前用户的 `%LOCALAPPDATA%\StoryGraph\chatgpt`，与安装目录和作品数据分开。在设置中可断开连接或前往 ChatGPT 管理用量。网页版须连接本机 Windows 后端才能使用此登录方式。其他平台仍可配置 API Key。[官方接入说明](https://developers.openai.com/siwc/token-sharing-open-source)

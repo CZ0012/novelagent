@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { KeyRound, Plus, RefreshCw, Trash2, Wand2 } from "lucide-react";
 import { apiGet, type AgentModels, type AgentSettings, type AgentSettingsUpdate, type ConnectionProfileUpdate, type ModelExecution, type ModelProtocol, type ThinkingMode, type ReasoningEffort } from "./api";
+import { ChatGPTPlanSettings, ChatGPTUsage, type ChatGPTStatus } from "./ChatGPTPlanSettings";
 import { uiText } from "./localization";
 import { MODEL_TASKS, removeConnection, resolvedTask, supportsExplicitThinking, thinkingModePatch } from "./modelRouting";
 
@@ -35,6 +36,7 @@ function ConnectionFields({ apiBase, profile, saved, busy, onChange, defaultConn
     } catch { if (current()) setModels({ models: [], current_model: profile.model, current_model_available: null, status: "unavailable", error: null }); }
     finally { if (current()) setLoading(false); }
   }
+  if (profile.auth_mode === "chatgpt_plan") return <div className="model-connection-fields"><ChatGPTUsage active /><label><span>{uiText.modelRouting.connectionName}</span><input disabled={locked} value={profile.name} onChange={e => onChange({ name: e.target.value })} /></label><p>{profile.model} · {profile.chatgpt_account_id}</p><small>{uiText.chatgpt.save}</small></div>;
   return <div className="model-connection-fields">
     <label><span>{uiText.modelRouting.connectionName}</span><input disabled={locked} maxLength={80} value={profile.name} onChange={(event) => onChange({ name: event.target.value })} /></label>
     <label><span>{uiText.modelRouting.protocol}</span><select disabled={locked} value={profile.protocol} onChange={(event) => onChange({ protocol: event.target.value as ModelProtocol })}>{Object.entries(uiText.modelRouting.protocols).map(([protocol, label]) => <option value={protocol} key={protocol}>{label}</option>)}</select></label>
@@ -64,14 +66,15 @@ function ConnectionFields({ apiBase, profile, saved, busy, onChange, defaultConn
   </div>;
 }
 
-export function ModelRoutingSettings({ apiBase, settings, form, onFormChange, apiKeyInput, onApiKeyChange, clearApiKey, onClearApiKeyChange, busy }: {
+export function ModelRoutingSettings({ apiBase, settings, form, onFormChange, apiKeyInput, onApiKeyChange, clearApiKey, onClearApiKeyChange, busy, onChatGPTStatus }: {
   apiBase: string; settings: AgentSettings | null; form: AgentSettingsUpdate; onFormChange: React.Dispatch<React.SetStateAction<AgentSettingsUpdate>>;
-  apiKeyInput: string; onApiKeyChange: (key: string) => void; clearApiKey: boolean; onClearApiKeyChange: (clear: boolean) => void; busy: boolean;
+  apiKeyInput: string; onApiKeyChange: (key: string) => void; clearApiKey: boolean; onClearApiKeyChange: (clear: boolean) => void; busy: boolean; onChatGPTStatus?: (status: ChatGPTStatus) => void;
 }) {
   const profiles = form.connection_profiles ?? [];
   const defaultProfile: ConnectionProfileUpdate = { id: "default", name: form.provider_label, protocol: form.llm_protocol ?? "chat_completions", base_url: form.llm_base_url, model: form.llm_model, json_mode: form.llm_json_mode, thinking_mode: form.llm_thinking_mode ?? "provider_default", ...(form.llm_reasoning_effort !== undefined ? { reasoning_effort: form.llm_reasoning_effort } : {}), api_key: apiKeyInput, clear_api_key: clearApiKey };
   const savedDefault = settings ? { id: "default", name: settings.provider_label, protocol: settings.llm_protocol ?? "chat_completions", base_url: settings.llm_base_url, model: settings.llm_model, json_mode: settings.llm_json_mode, thinking_mode: settings.llm_thinking_mode ?? "provider_default", ...(settings.llm_reasoning_effort !== undefined ? { reasoning_effort: settings.llm_reasoning_effort } : {}), api_key_configured: settings.api_key_configured, api_key_preview: settings.api_key_preview } : null;
   return <>
+    <ChatGPTPlanSettings apiBase={apiBase} busy={busy} onStatus={status => onChatGPTStatus?.(status)} onAdd={profile => onFormChange(current => ({ ...current, connection_profiles: (current.connection_profiles?.length ?? 0) < 20 ? [...(current.connection_profiles ?? []), profile] : current.connection_profiles }))} />
     <section className="settings-block">
       <div className="settings-title"><Wand2 size={15} />{uiText.modelRouting.defaultConnection}</div><small>{uiText.modelRouting.defaultHelp}</small>
       <label><span>{uiText.settings.writerMode}</span><select disabled={busy} value={form.scene_writer} onChange={(event) => onFormChange((current) => ({ ...current, scene_writer: event.target.value as AgentSettingsUpdate["scene_writer"] }))}><option value="rule_based">{uiText.settings.ruleBasedMode}</option><option value="llm">{uiText.settings.llmMode}</option></select></label>

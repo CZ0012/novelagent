@@ -360,3 +360,7 @@ calls beyond normal Main commands. Omitted/empty lists do not delete anything.
 ## SG-034 Main Agent workbench
 
 Exercise first send, project switching, persisted conversation, split sizing, read-only mode enforcement, stale or foreign passages, packaged skill discovery and actual tool dispatch. Simulated provider responses cover integration separately from literary quality.
+
+## SG-036 ChatGPT plan and Writer selection
+
+Exercise scoped OAuth callback and identity checks, protected local credentials, account pinning, safe refresh/revocation, no fallback on plan limits, and explicit Writer choices in preview and dispatch. Release checks must inspect outgoing Git objects and the actual signed installer.

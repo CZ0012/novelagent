@@ -33,6 +33,8 @@ class StoryGraphSettings:
             "OPENAI_API_KEY",
             "",
         )
+        self.llm_auth_mode = "api_key"
+        self.llm_chatgpt_account_id = None
         self.llm_protocol = os.environ.get("STORYGRAPH_LLM_PROTOCOL", "chat_completions")
         self.llm_thinking_mode = os.environ.get("STORYGRAPH_LLM_THINKING_MODE", "provider_default")
         self.llm_reasoning_effort = os.environ.get("STORYGRAPH_LLM_REASONING_EFFORT") or None

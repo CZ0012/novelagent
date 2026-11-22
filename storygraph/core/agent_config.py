@@ -81,6 +81,7 @@ BUILTIN_AGENT_PRESETS = (
 )
 
 
+AuthMode = Literal["api_key", "chatgpt_plan"]
 ProviderProtocol = Literal["chat_completions", "responses", "anthropic_messages"]
 ThinkingMode = Literal["provider_default", "enabled", "disabled"]
 ReasoningEffort = Literal["low", "high", "max"]
@@ -128,6 +129,8 @@ class ConnectionProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     name: str = Field(min_length=1, max_length=80)
+    auth_mode: AuthMode = "api_key"
+    chatgpt_account_id: str | None = Field(default=None, min_length=1, max_length=200)
     protocol: ProviderProtocol = "chat_completions"
     base_url: str = Field(default="", max_length=2048)
     model: str = Field(default="", max_length=200)
@@ -140,6 +143,15 @@ class ConnectionProfile(BaseModel):
 
     @model_validator(mode="after")
     def validate_thinking(self):
+        if self.auth_mode == "chatgpt_plan":
+            if not self.chatgpt_account_id:
+                raise ValueError("ChatGPT plan profiles require an explicit account selection")
+            if self.protocol != "responses" or self.base_url or self.api_key:
+                raise ValueError("ChatGPT plan profiles require Responses without a base URL or API key")
+            if self.thinking_mode != "provider_default" or self.reasoning_effort is not None:
+                raise ValueError("ChatGPT plan profiles use model-default reasoning")
+        elif self.chatgpt_account_id is not None:
+            raise ValueError("ChatGPT account selection requires ChatGPT plan authentication")
         validate_thinking_mode(self.base_url, self.protocol, self.thinking_mode, self.reasoning_effort)
         return self
 
@@ -167,6 +179,7 @@ class TaskAssignments(BaseModel):
 
 
 class ModelExecution(BaseModel):
+    auth_mode: AuthMode = "api_key"
     profile_id: str
     profile_name: str
     protocol: ProviderProtocol
@@ -178,6 +191,8 @@ class ModelExecution(BaseModel):
     @model_serializer(mode="wrap")
     def serialize_execution(self, handler):
         serialized = handler(self)
+        if self.auth_mode == "api_key":
+            serialized.pop("auth_mode", None)
         if self.reasoning_effort is None:
             serialized.pop("reasoning_effort", None)
         return serialized
@@ -320,14 +335,14 @@ def update_agent_config(
         profiles = []
         for profile in update.connection_profiles:
             existing = old_profiles.get(profile.id)
-            secret = "" if profile.clear_api_key else (
+            secret = "" if profile.clear_api_key or profile.auth_mode == "chatgpt_plan" else (
                 profile.api_key or (existing.api_key if existing else "")
             )
             thinking_mode = profile.thinking_mode
-            if "thinking_mode" not in profile.model_fields_set and existing is not None:
+            if "thinking_mode" not in profile.model_fields_set and existing is not None and existing.auth_mode == profile.auth_mode:
                 thinking_mode = existing.thinking_mode
             effort = profile.reasoning_effort
-            if "reasoning_effort" not in profile.model_fields_set and existing is not None:
+            if "reasoning_effort" not in profile.model_fields_set and existing is not None and existing.auth_mode == profile.auth_mode:
                 effort = existing.reasoning_effort
             profiles.append({**profile.model_dump(exclude={"clear_api_key", "api_key"}),
                              "api_key": secret, "thinking_mode": thinking_mode, "reasoning_effort": effort})
@@ -342,6 +357,8 @@ def update_agent_config(
 
 
 def apply_agent_config(settings: StoryGraphSettings, config: AgentRuntimeConfig) -> None:
+    settings.llm_auth_mode = "api_key"
+    settings.llm_chatgpt_account_id = None
     settings.scene_writer = config.scene_writer
     settings.llm_base_url = config.llm_base_url
     settings.llm_api_key = config.llm_api_key
@@ -440,7 +457,7 @@ def resolve_model_execution(config: AgentRuntimeConfig, task: AgentTask, *, prof
     profile = next((item for item in config.connection_profiles if item.id == selected), None)
     if profile is None:
         raise ValueError("Unknown connection profile")
-    return ModelExecution(profile_id=profile.id, profile_name=profile.name,
+    return ModelExecution(auth_mode=profile.auth_mode, profile_id=profile.id, profile_name=profile.name,
                           protocol=profile.protocol, model=profile.model, task=task,
                           thinking_mode=profile.thinking_mode, reasoning_effort=profile.reasoning_effort)
 
@@ -453,6 +470,8 @@ def settings_for_task(settings: StoryGraphSettings, task: AgentTask, *, profile_
     apply_agent_config(snapshot, config)
     if execution.profile_id != "default":
         profile = next(item for item in config.connection_profiles if item.id == execution.profile_id)
+        snapshot.llm_auth_mode = profile.auth_mode
+        snapshot.llm_chatgpt_account_id = profile.chatgpt_account_id
         snapshot.llm_base_url, snapshot.llm_api_key = profile.base_url, profile.api_key
         snapshot.llm_model, snapshot.llm_json_mode = profile.model, profile.json_mode
         snapshot.llm_protocol = profile.protocol

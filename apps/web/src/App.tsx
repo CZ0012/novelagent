@@ -173,8 +173,10 @@ import { parseLongformPlan, longformApplied, type BlueprintRequest, type Expansi
 import { AgentPresets, presetDisplay } from "./AgentPresets";
 import { classifyDocumentFile, extractDocumentFile } from "./documentImport";
 import { importErrorCode, importFailureMessage, sourceImportFailureMessage, sourceImportWarningMessage } from "./documentImportMessages";
+import { WriterChoicePicker, effectiveWriterChoice, writerChoiceReference, writerEntryMode, writerChoiceExecution, writerChoiceReady, type SessionWriterContext, type WriterOverride } from "./WriterChoicePicker";
+import { ChatGPTUsage, CHATGPT_USAGE_URL, withPlanReadiness } from "./ChatGPTPlanSettings";
 import { ModelRoutingSettings, modelExecutionLabel } from "./ModelRoutingSettings";
-import { modelProviderFailureKey } from "./modelProviderErrors";
+import { modelProviderFailureKey, isPlanProviderFailure } from "./modelProviderErrors";
 import { discussionTask, resolvedTask, taskConnectionReady, settingsToForm, settingsSavePayload, settingsRequestIsCurrent } from "./modelRouting";
 import { exportAuthorText } from "./exportText";
 import { DEFAULT_API_BASE, loadBrowserApiBase, normalizeApiBase, saveBrowserApiBase } from "./clientPreferences";
@@ -543,6 +545,11 @@ export default function App() {
   const [characterForm, setCharacterForm] = useState<CharacterForm>(defaultCharacterForm);
   const [locationForm, setLocationForm] = useState<LocationForm>(defaultLocationForm);
   const [worldRuleForm, setWorldRuleForm] = useState<WorldRuleForm>(defaultWorldRuleForm);
+  const [writerChoiceState, setWriterChoiceState] = useState<WriterOverride | null>(null);
+  const [sessionWriterChoice, setSessionWriterChoice] = useState<SessionWriterContext | null>(null);
+  const currentWriterSession = sessionWriterChoice?.apiBase === apiBase && sessionWriterChoice.projectId === projectId ? sessionWriterChoice : null;
+  const currentSessionWriterChoice = currentWriterSession?.choice ?? null;
+  const currentWriterChoice = effectiveWriterChoice(sessionWriterChoice, writerChoiceState, { apiBase, projectId, sceneId });
   const [agentDiscussionForm, setAgentDiscussionForm] =
     useState<AgentDiscussionForm>(defaultAgentDiscussionForm);
   const [agentDiscussionResult, setAgentDiscussionResult] =
@@ -611,6 +618,7 @@ export default function App() {
   activeSceneIdRef.current = sceneId;
   const [busy, setBusy] = useState<string | null>(null);
   const actionInFlightRef = useRef(false);
+  const [planError, setPlanError] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [technicalError, setTechnicalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -846,12 +854,14 @@ export default function App() {
     if (actionInFlightRef.current) return;
     actionInFlightRef.current = true;
     setBusy(label);
+    setPlanError(false);
     setError(null);
     setTechnicalError(null);
     setNotice(null);
     try {
       await action();
     } catch (exc) {
+      setPlanError(isPlanProviderFailure(exc));
       const message = exc instanceof Error ? exc.message : String(exc);
       if (isLocalizedUserError(message)) {
         setError(message);
@@ -1961,7 +1971,7 @@ export default function App() {
 
   const [prosePreview, setProsePreview] = useState<VisibilityPreview | null>(null);
   const prosePreviewRevisionRef = useRef(0);
-  useEffect(() => { prosePreviewRevisionRef.current += 1; setProsePreview(null); }, [agentDiscussionForm, draft, draftDirty, contextPack, projectId, sceneId, apiBase, selectedAgentSourceIds, crossLanguagePolicy]);
+  useEffect(() => { prosePreviewRevisionRef.current += 1; setProsePreview(null); }, [agentDiscussionForm, draft, draftDirty, contextPack, projectId, sceneId, apiBase, selectedAgentSourceIds, crossLanguagePolicy, currentWriterChoice]);
   useEffect(() => {
     const invalidate = () => { prosePreviewRevisionRef.current += 1; setProsePreview(null); };
     window.addEventListener("storygraph-writer-visibility-changed", invalidate);
@@ -2015,6 +2025,7 @@ export default function App() {
     }
     const payload: AgentDiscussionRequest = {
       mode: agentDiscussionForm.mode,
+      writer_choice: writerChoiceReference(agentDiscussionForm.mode, currentWriterChoice),
       instruction,
       selected_text: agentDiscussionForm.includeLatestDraft ? selectedText || null : null,
       selected_start: agentDiscussionForm.includeLatestDraft && selectedText ? agentDiscussionForm.selectedStart ?? null : null,
@@ -2064,6 +2075,7 @@ export default function App() {
     );
   }, [
     agentDiscussionForm,
+    currentWriterChoice,
     apiBase,
     draft,
     draftDirty,
@@ -2250,7 +2262,13 @@ export default function App() {
       if (scene) { setReadingChapterId(null); setChapterSelection(null); setSceneId(scene.id); setAgentTarget("scene"); setContextPack(null); }
       else if (chapter && target.target === "manuscript") { setReadingChapterId(chapter.id); setChapterSelection({ projectId, id: chapter.id }); setManuscriptMode("preview"); setAgentTarget("composition"); }
       setDraftSelection(""); setDraftSelectionRange(null); setWorkspaceTab("write");
-      if (target.target === "writer") setActiveTab("agent");
+      if (target.target === "writer" && scene) {
+        setActiveTab("agent");
+        const scope = { apiBase, projectId, sceneId: scene.id };
+        const applyEntry = (saved: Draft | null) => { if (activeApiBaseRef.current !== scope.apiBase || activeProjectIdRef.current !== scope.projectId || activeSceneIdRef.current !== scope.sceneId) return; setAgentDiscussionForm(current => ({ ...current, ...writerEntryMode(saved), selectedText: "", selectedStart: undefined, selectedEnd: undefined, selectedDraftId: undefined })); };
+        if (!draftLoading && draft?.project_id === projectId && draft.scene_id === scene.id) applyEntry(draft);
+        else void apiGet<{ draft: Draft | null }>(apiBase, `/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(scene.id)}/draft`).then(result => applyEntry(result.draft)).catch(() => { if (activeApiBaseRef.current === apiBase && activeProjectIdRef.current === projectId) setNotice(uiText.chatgpt.writerMissing); });
+      }
       if (target.target === "continuity") setActiveTab("continuity");
     });
   };
@@ -3113,7 +3131,8 @@ export default function App() {
     agentSettings?.scene_writer === "llm" &&
     !taskConnectionReady(agentSettings, "writing");
   const llmConfigured = taskConnectionReady(agentSettings, "writing");
-  const discussionConfigured = taskConnectionReady(agentSettings, discussionTask(agentDiscussionForm.mode));
+  const discussionConfigured = agentDiscussionForm.mode !== "discuss" && currentWriterChoice ? writerChoiceReady(currentWriterChoice, agentSettings) : taskConnectionReady(agentSettings, discussionTask(agentDiscussionForm.mode));
+  const discussionExecution = agentDiscussionForm.mode !== "discuss" && currentWriterChoice ? writerChoiceExecution(currentWriterChoice, agentSettings, discussionTask(agentDiscussionForm.mode)) : resolvedTask(agentSettings, discussionTask(agentDiscussionForm.mode));
   const planningConfigured = taskConnectionReady(agentSettings, "planning");
   const projectLanguageReady = outputLanguageOrNull(selectedProject?.language) !== null;
   const requiresSemanticReview = selectedProject?.properties.require_semantic_review === true;
@@ -3488,7 +3507,7 @@ export default function App() {
             <div className={`message ${error ? "error" : "notice"}`}>
               {error ? <AlertTriangle size={16} /> : <Check size={16} />}
               <div>
-                <span>{error ?? notice}</span>
+                <span>{error ?? notice}</span>{error && planError && <a className="primary" href={CHATGPT_USAGE_URL} target="_blank" rel="noreferrer">{uiText.chatgpt.usage}</a>}
                 {error && technicalError && (
                   <details>
                     <summary>{uiText.errors.technicalDetails}</summary>
@@ -3874,7 +3893,7 @@ export default function App() {
                 await refreshGraphPreview(id);
                 setWorkspaceTab("write");
               } });
-            }); }} /> : <AuthoringStudio key={`authoring:${apiBase}:${projectId}`} apiBase={apiBase} projectId={projectId} projectLanguage={selectedProject?.language ?? ""} active={true} layout="dock" panelHost={authoringPanelHost} activePanel={workspaceTab === "authoring" ? "design" : workspaceTab === "checks" ? "checks" : "conversation"} onNavigate={navigateAuthoring} initialIdea={mainAgentInitialIdea?.apiBase === apiBase && mainAgentInitialIdea.projectId === projectId ? mainAgentInitialIdea.idea : undefined} draftSelection={!draftDirty && !draftLoading && draft?.project_id === projectId && draft.scene_id === sceneId && draftSelectionRange ? { ...draftSelectionRange, draftId: draft.id } : null} currentSceneId={readingChapter ? undefined : sceneId} currentChapterId={readingChapter?.id ?? selectedProject?.chapters.find(chapter => chapter.scenes.some(scene => scene.id === sceneId))?.id} onOpenSettings={() => setActiveTab("settings")} canReview={canReview} onStructureApplied={async id => { if (activeApiBaseRef.current !== apiBase || activeProjectIdRef.current !== projectId) return; requestProposalNavigation(uiText.authoring.title, () => { void runAction("authoring-structure-refresh", async () => { await refreshWorkspace(projectId, id); await refreshGraphPreview(projectId); setContextPack(null); }); }); }} canGenerate={canGenerate && projectLanguageReady} modelReady={taskConnectionReady(agentSettings, "discussion")} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "discussion"))} sources={sourceDocuments} proposals={proposals} scenes={selectedProject?.chapters.flatMap(chapter => chapter.scenes) ?? []} names={graphPreview?.project_id === projectId ? Object.fromEntries(graphPreview.nodes.map(node => [node.id, node.label])) : {}} draft={draft} draftDirty={draftDirty || draftLoading} onHandoff={(id, savedDraft) => requestProposalNavigation(uiText.authoring.handoff, () => { setReadingChapterId(null); setChapterSelection(null); setAgentTarget("scene"); setSelectedAgentSourceIds(new Set()); setAgentDiscussionForm({ ...defaultAgentDiscussionForm, mode: savedDraft?.text.trim() ? "revise_scene" : "create_scene", instruction: savedDraft?.text.trim() ? uiText.authoring.revisionInstruction : uiText.authoring.handoffInstruction, includeLatestDraft: Boolean(savedDraft?.text.trim()) }); setSceneId(id); setWorkspaceTab("write"); setActiveTab("agent"); setContextPack(null); })} />}
+            }); }} /> : <AuthoringStudio key={`authoring:${apiBase}:${projectId}`} apiBase={apiBase} projectId={projectId} projectLanguage={selectedProject?.language ?? ""} active={true} layout="dock" panelHost={authoringPanelHost} activePanel={workspaceTab === "authoring" ? "design" : workspaceTab === "checks" ? "checks" : "conversation"} onWriterContext={value => setSessionWriterChoice(current => { const next = value ? { apiBase, projectId, ...value } : null; return current?.apiBase === next?.apiBase && current?.projectId === next?.projectId && current?.sessionId === next?.sessionId && current?.choice?.fingerprint === next?.choice?.fingerprint ? current : next; })} onNavigate={navigateAuthoring} initialIdea={mainAgentInitialIdea?.apiBase === apiBase && mainAgentInitialIdea.projectId === projectId ? mainAgentInitialIdea.idea : undefined} draftSelection={!draftDirty && !draftLoading && draft?.project_id === projectId && draft.scene_id === sceneId && draftSelectionRange ? { ...draftSelectionRange, draftId: draft.id } : null} currentSceneId={readingChapter ? undefined : sceneId} currentChapterId={readingChapter?.id ?? selectedProject?.chapters.find(chapter => chapter.scenes.some(scene => scene.id === sceneId))?.id} onOpenSettings={() => setActiveTab("settings")} canReview={canReview} onStructureApplied={async id => { if (activeApiBaseRef.current !== apiBase || activeProjectIdRef.current !== projectId) return; requestProposalNavigation(uiText.authoring.title, () => { void runAction("authoring-structure-refresh", async () => { await refreshWorkspace(projectId, id); await refreshGraphPreview(projectId); setContextPack(null); }); }); }} canGenerate={canGenerate && projectLanguageReady} modelReady={taskConnectionReady(agentSettings, "discussion")} usingChatGPTPlan={resolvedTask(agentSettings, "discussion")?.auth_mode === "chatgpt_plan"} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "discussion"))} sources={sourceDocuments} proposals={proposals} scenes={selectedProject?.chapters.flatMap(chapter => chapter.scenes) ?? []} names={graphPreview?.project_id === projectId ? Object.fromEntries(graphPreview.nodes.map(node => [node.id, node.label])) : {}} draft={draft} draftDirty={draftDirty || draftLoading} onHandoff={(id, savedDraft) => requestProposalNavigation(uiText.authoring.handoff, () => { setReadingChapterId(null); setChapterSelection(null); setAgentTarget("scene"); setSelectedAgentSourceIds(new Set()); setAgentDiscussionForm({ ...defaultAgentDiscussionForm, mode: savedDraft?.text.trim() ? "revise_scene" : "create_scene", instruction: savedDraft?.text.trim() ? uiText.authoring.revisionInstruction : uiText.authoring.handoffInstruction, includeLatestDraft: Boolean(savedDraft?.text.trim()) }); setSceneId(id); setWorkspaceTab("write"); setActiveTab("agent"); setContextPack(null); })} />}
           </MainAgentDock>
         </main>
 
@@ -3904,6 +3923,7 @@ export default function App() {
           </div>
           <div className="agent-target-tabs"><button type="button" className={agentTarget === "scene" ? "active" : ""} onClick={() => { setReadingChapterId(null); setAgentTarget("scene"); }}>{uiText.manuscript.currentScene}</button><button type="button" className={agentTarget === "composition" ? "active" : ""} onClick={() => setAgentTarget("composition")}>{uiText.manuscript.newWork}</button></div>
           {agentTarget === "composition" && requiresSemanticReview && <p className="proposal-inline-warning">{uiText.semanticReview.compositionBlocked}<button type="button" onClick={() => setWorkspaceTab("planning")}>{uiText.planning.title}</button><button type="button" disabled={!hasScene || busy !== null} onClick={openReviewedSceneWriting}>{uiText.semanticReview.openReviewedWriting}</button></p>}
+          {agentTarget === "scene" && agentDiscussionForm.mode !== "discuss" && <WriterChoicePicker key={`${apiBase}:${projectId}:${sceneId}`} apiBase={apiBase} projectId={projectId} sceneId={sceneId} choice={currentWriterChoice} sessionChoice={currentSessionWriterChoice} busy={busy !== null} onChange={choice => setWriterChoiceState({ apiBase, projectId, sceneId, sessionId: currentWriterSession?.sessionId ?? null, choice })} />}
           {agentTarget === "composition" ? <CompositionComposer key={`${apiBase}:${projectId}`} sourceLabels={Array.from(selectedAgentSourceIds).map((id) => { const source = sourceDocuments.find((item) => item.id === id); return source ? `${source.title} · ${formatSourceLanguage(source.language)} · ${id}` : uiText.agentDiscussion.sourceMissing; })} sourcePolicy={crossLanguagePolicy === "explicit_reference" ? uiText.language.explicitReference : uiText.language.projectOnly} draftLabel={!readingChapter && draft?.text.trim() && !draftDirty && draft.project_id === projectId && draft.scene_id === sceneId ? `${selectedScene?.title ?? ""} · v${draft.version} · ${draft.id}` : null} busy={busy !== null} canGenerate={Boolean(projectId) && canGenerate && planningConfigured && !requiresSemanticReview} modelLabel={modelExecutionLabel(resolvedTask(agentSettings, "planning"))} onGenerate={(input) => requestProposalNavigation(uiText.manuscript.generate, () => { void runAction("composition-generate", () => generateComposition(input)); })} /> : <AgentDiscussionPanel
             busy={busy}
             canDiscuss={canDiscussWithAgent}
@@ -3913,7 +3933,7 @@ export default function App() {
             form={agentDiscussionForm}
             hasScene={hasScene}
             llmConfigured={discussionConfigured}
-            modelExecution={resolvedTask(agentSettings, discussionTask(agentDiscussionForm.mode))}
+            modelExecution={discussionExecution}
             onFormChange={setAgentDiscussionForm}
             onOpenWriting={() => setWorkspaceTab("write")}
             onOpenProposal={() => {
@@ -4183,7 +4203,7 @@ function AgentDiscussionPanel({
           <strong>{sceneTitle || uiText.agentDiscussion.noSceneTitle}</strong>
           <span>{projectLanguage ? formatArtifactLanguage(projectLanguage, false) : uiText.language.projectLanguageNeedsReview} · {uiText.agentDiscussion.sourcePickerCount(selectedSourceIds.size)}</span>
           <code>{savedDraftManifest}</code>
-          <span className="model-execution-summary">{uiText.modelRouting.effective}: {modelExecutionLabel(modelExecution)}</span>
+          <ChatGPTUsage active={modelExecution?.auth_mode === "chatgpt_plan"} /><span className="model-execution-summary">{uiText.modelRouting.effective}: {modelExecutionLabel(modelExecution)}</span>
         </div>
         {(draftDirty || (form.includeLatestDraft && includedDraft.status !== "ready" && (Boolean(draft) || draftRequired))) && <div className="agent-context-note warning">
           <span>{draftDirty ? uiText.authorWorkspace.saveBeforeSend : includedDraft.status === "blocked_scope" ? uiText.errors.agentDraftScopeMismatch : uiText.errors.agentIncludedDraftMustBeSaved}</span>
@@ -6484,7 +6504,7 @@ function AgentSettingsInspector({
   onInstallUpdate: () => void;
   onUpdateCheck: () => void;
   settings: AgentSettings | null;
-  onSettingsChange: (settings: AgentSettings) => void;
+  onSettingsChange: React.Dispatch<React.SetStateAction<AgentSettings | null>>;
   updateStatus: UpdateStatus;
   backendVersion: BackendVersion;
 }) {
@@ -6565,7 +6585,7 @@ function AgentSettingsInspector({
         </section>
       )}
 
-      <ModelRoutingSettings key={apiBase} apiBase={apiBase} settings={settings} form={form} onFormChange={onFormChange} apiKeyInput={apiKeyInput} onApiKeyChange={onApiKeyChange} clearApiKey={clearApiKey} onClearApiKeyChange={onClearApiKeyChange} busy={busy !== null || !settings} />
+      <ModelRoutingSettings onChatGPTStatus={status => onSettingsChange(current => withPlanReadiness(current, status))} key={apiBase} apiBase={apiBase} settings={settings} form={form} onFormChange={onFormChange} apiKeyInput={apiKeyInput} onApiKeyChange={onApiKeyChange} clearApiKey={clearApiKey} onClearApiKeyChange={onClearApiKeyChange} busy={busy !== null || !settings} />
 
       <section className="settings-block">
         <div className="settings-title"><Lock size={15} /> {uiText.settings.permissionSection}</div>

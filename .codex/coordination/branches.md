@@ -273,3 +273,4 @@ SG-034 uses local codex/sg-034-main-workspace from 54edbee. Shared checkout with
 SG-034 local branch codex/sg-034-main-workspace is integrated and verified. All contributors worked in the shared checkout and Main owns its local commit.
 
 SG-035 prepares the v0.3.0 release on codex/sg-034-main-workspace. Fast-forward main from its existing ancestor, publish the version tag, and verify the GitHub release assets and same-page language controls.
+SG-036 uses codex/sg-036-chatgpt-plan from 2c25345. Shared checkout and disjoint scopes; Main owns local commits, version tags and the authorized v0.3.1 GitHub Release.

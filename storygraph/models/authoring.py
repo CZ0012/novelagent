@@ -171,6 +171,20 @@ class AuthoringHistoryHasMore(ContractModel):
     proposals: bool = False
 
 
+class AuthoringWriterChoice(ContractModel):
+    profile_id: str = Field(min_length=1, max_length=80)
+    profile_name: str = Field(min_length=1, max_length=80)
+    model: str = Field(min_length=1, max_length=200)
+    auth_mode: Literal["api_key", "chatgpt_plan"] = "api_key"
+    reason: str = Field(min_length=1, max_length=2000)
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class AuthoringPickWriterArgs(ContractModel):
+    profile_id: str = Field(min_length=1, max_length=80)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
 class AuthoringSession(ContractModel):
     contract_version: Literal["authoring_session_v1"] = "authoring_session_v1"
     id: str = Field(min_length=1, max_length=200)
@@ -183,6 +197,7 @@ class AuthoringSession(ContractModel):
     turn_max_steps: int = Field(default=6, ge=1, le=8, strict=True)
     turn_error_category: str | None = Field(default=None, max_length=200)
     title: str = Field(min_length=1, max_length=500)
+    writer_choice: AuthoringWriterChoice | None = None
     source_pins: list[AuthoringSourcePin] = Field(default_factory=list, max_length=40)
     draft_pins: list[AuthoringDraftPin] = Field(default_factory=list, max_length=2000)
     messages: list[AuthoringMessage] = Field(default_factory=list, max_length=20000)
@@ -377,12 +392,14 @@ class AuthoringWorkflowArgs(AuthoringNavigationContext):
 
 
 class AuthoringToolAction(ContractModel):
-    tool: Literal["inspect_sources", "read_source", "search_source", "search_draft_quotes", "inspect_canon", "inspect_workspace", "search_history", "inspect_proposal", "character_view", "simulate_character", "impact_analysis", "propose_workspace", "revise_proposal", "propose_draft_evidence", "propose_design_changes", "propose_card_review", "discover_capabilities", "read_skill", "inspect_project", "inspect_reviews", "open_workflow", "finish"]
+    tool: Literal["list_writers", "pick_writer", "inspect_sources", "read_source", "search_source", "search_draft_quotes", "inspect_canon", "inspect_workspace", "search_history", "inspect_proposal", "character_view", "simulate_character", "impact_analysis", "propose_workspace", "revise_proposal", "propose_draft_evidence", "propose_design_changes", "propose_card_review", "discover_capabilities", "read_skill", "inspect_project", "inspect_reviews", "open_workflow", "finish"]
     args: JsonDict = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def strict_tool_arguments(self):
         schemas = {
+            "list_writers": AuthoringEmptyArgs,
+            "pick_writer": AuthoringPickWriterArgs,
             "inspect_sources": AuthoringPageArgs,
             "read_source": AuthoringReadSourceArgs,
             "search_source": AuthoringSearchSourceArgs,
@@ -417,6 +434,8 @@ AuthoringSession.model_rebuild()
 def authoring_tool_schema() -> dict:
     """Advertise the same strict tool-specific arguments enforced at runtime."""
     schemas = {
+        "list_writers": AuthoringEmptyArgs,
+        "pick_writer": AuthoringPickWriterArgs,
         "inspect_sources": AuthoringPageArgs,
         "read_source": AuthoringReadSourceArgs,
         "search_source": AuthoringSearchSourceArgs,

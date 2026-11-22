@@ -44,14 +44,22 @@ class ProviderError(RuntimeError):
 
     def __init__(self, category: str, *, outcome_known: bool, status: int | None = None):
         categories = {"invalid_response", "incomplete_response", "unsupported_output", "connection_error",
+            "plan_not_eligible", "plan_usage_limit", "plan_usage_unavailable", "plan_permission_required",
             "invalid_credentials", "rate_limit", "endpoint_not_found", "invalid_request", "provider_unavailable", "request_failed"}
         self.category = category if category in categories else "request_failed"
         self.outcome_known = outcome_known is True
+        self.allow_format_retry = True
         self.status = status if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599 else None
         guidance = ("Check the provider address, network, and timeout settings, then retry."
                     if self.category == "connection_error" else "The provider did not return complete supported text.")
         if self.status is not None:
             _, guidance = _http_error_guidance(self.status)
+        guidance = {
+            "plan_not_eligible": "ChatGPT plan usage is unavailable for this account or workspace.",
+            "plan_usage_limit": "ChatGPT plan app usage is limited. Review ChatGPT settings Usage before trying again.",
+            "plan_usage_unavailable": "ChatGPT plan usage availability could not be checked. Try again later.",
+            "plan_permission_required": "Sign in to the selected ChatGPT account and authorize ChatGPT plan usage.",
+        }.get(self.category, guidance)
         prefix = f"LLM provider HTTP {self.status}" if self.status is not None else "LLM provider"
         super().__init__(f"{prefix} [{self.category}]: {guidance}")
 

@@ -356,3 +356,38 @@ must be an integer from 1 to 65,536; every expanded result still has the total
 enabled thinking/effort. Default and disabled non-thinking review ceilings remain
 8,000, planning remains 52,768 under low effort, and the transport never rewrites
 the caller's visible request. Effort/model/configuration fingerprints are unchanged.
+
+## 0.3.1 connection and Writer selection
+
+Named connection profiles accept `auth_mode: api_key | chatgpt_plan`. Existing
+profiles and the primary connection default to API-key authentication. A plan
+profile pins a local registration ID and a model, uses the Responses protocol
+and has no configurable inference URL or API key. A task resolves one immutable
+connection before sending. Changing the active account in Settings cannot
+change an existing profile's payer. Model execution records expose the selected
+profile, model, protocol and plan mode. Credentials, email and login claims
+are excluded from those records.
+
+The Windows backend runs the official dynamic-client browser sign-in with a
+loopback callback, PKCE, state and OIDC nonce. It validates the ID token and
+checks the separately granted plan scopes. Renewable credentials are encrypted
+for the OS user outside the writing workspace. Login state, grants, cancellation,
+model discovery, welcome acknowledgement and sign-out are local controls under
+`/settings/chatgpt`. Model discovery is explicit and uses the selected
+registration. When plan profiles are configured, the backend accepts only
+loopback clients at a loopback Host and an approved local browser or desktop
+origin. Non-Windows installations retain API-key support.
+
+Subscription inference uses the fixed official Responses endpoint, streaming
+output with `store: false`, and the same isolated messages as the chosen story
+task. Quota, consent, stream and network errors fail on that connection. The
+application does not switch payer, account or model, or repeat a failed stream.
+The existing Main Agent correction for a completed, schema-invalid command is
+bounded by the original turn budget.
+
+`GET /settings/agent/writers` lists ready connections for prose. A Writer
+selection carries a profile ID and a fingerprint of the resolved non-secret
+routing configuration. Preview and dispatch revalidate it. The optional
+`writer_choice` request field is accepted for create, continue and revision
+actions, never for plain discussion. Omitting it preserves ordinary task
+routing. This is a local connection choice with no additional Writer permissions.

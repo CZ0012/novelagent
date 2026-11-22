@@ -368,3 +368,7 @@ never repair missing reply with a default or relax the parser.
 ## SG-034 Main Agent workbench
 
 Dispatch Main tools through the session-bound internal MCP. Load packaged writing skills and preserve the existing provider adapter, budgets and CAS checks. Restrict each selected-passage grant to its verified UTF-16 span; keep it out of actor and Writer requests.
+
+## SG-036 ChatGPT plan and Writer selection
+
+Use the official local OAuth and streaming Responses routes for ChatGPT plan usage. Keep protected tokens out of settings JSON, UI, logs, model prompts and release assets. Resolve the selected Writer only for the authorized prose action, preserving its visibility and review gates.

@@ -1,5 +1,5 @@
 import type { VisibilitySpec } from "./WriterVisibilityPanel";
-import { apiGet, apiPost, type Draft } from "./api";
+import { apiGet, apiPost, type Draft, type WriterChoice } from "./api";
 
 export type AuthoringSourcePin = { kind: "source_document" | "outline"; id: string; version?: number | null; sha256: string };
 export type AuthoringDraftPin = { scene_id: string; draft_id: string; version: number; text_sha256: string };
@@ -20,7 +20,7 @@ export function authoringPatchedWorkspace(workspace: AuthoringWorkspace, patch: 
   return { items: merge(workspace.items, patch.upsert_items, patch.remove_item_ids, item => item.id), character_plans: merge(workspace.character_plans, patch.upsert_character_plans, patch.remove_character_ids, item => item.character_id), scene_cards: merge(workspace.scene_cards, patch.upsert_scene_cards, patch.remove_card_ids, item => item.id), reader_records: [...workspace.reader_records.filter(record => !patch.remove_reader_records.some(removed => JSON.stringify(removed) === JSON.stringify(record))), ...patch.add_reader_records] };
 }
 export type AuthoringProposal = { id: string; base_workspace_sha256: string; supersedes_proposal_id?: string | null; stale?: boolean; patch: AuthoringPatch; summary: string; affected_card_ids: string[]; affected_scene_ids: string[]; status: "pending" | "adopted" | "rejected"; evidence: AuthoringEvidence[]; created_at: string; reviewed_by?: string | null; reviewed_at?: string | null };
-export type AuthoringSession = { contract_version: "authoring_session_v1"; id: string; project_id: string; version: number; content_language: string; turn_status: "idle" | "running" | "failed" | "unknown"; turn_id: string | null; turn_error_category: string | null; title: string; source_pins: AuthoringSourcePin[]; draft_pins: AuthoringDraftPin[]; messages: Array<{ id: string; role: "author" | "assistant" | "tool"; content: string; created_at: string; tool_name?: string | null; tool_call_id?: string | null }>; workspace: AuthoringWorkspace; proposals: AuthoringProposal[]; history_counts?: { messages: number; proposals: number }; history_has_more?: { messages: boolean; proposals: boolean }; created_at: string; updated_at: string };
+export type AuthoringSession = { writer_choice?: WriterChoice | null; contract_version: "authoring_session_v1"; id: string; project_id: string; version: number; content_language: string; turn_status: "idle" | "running" | "failed" | "unknown"; turn_id: string | null; turn_error_category: string | null; title: string; source_pins: AuthoringSourcePin[]; draft_pins: AuthoringDraftPin[]; messages: Array<{ id: string; role: "author" | "assistant" | "tool"; content: string; created_at: string; tool_name?: string | null; tool_call_id?: string | null }>; workspace: AuthoringWorkspace; proposals: AuthoringProposal[]; history_counts?: { messages: number; proposals: number }; history_has_more?: { messages: boolean; proposals: boolean }; created_at: string; updated_at: string };
 
 export function authoringChanges(before: AuthoringWorkspace, after: AuthoringWorkspace) {
   const changes: Array<{ id: string; kind: "items" | "character_plans" | "scene_cards" | "reader_records"; before: unknown; after: unknown }> = [];
@@ -70,7 +70,7 @@ export async function readAuthoringProposal(base: string, project: string, sessi
 export async function updateAuthoringSources(base: string, project: string, sessionId: string, expectedVersion: number, sourceIds: string[], outlineIds: string[]) { return postAuthoringSession(base, project, sessionId, "/sources", { expected_version: expectedVersion, source_document_ids: sourceIds, outline_proposal_ids: outlineIds }); }
 
 
-export type AuthoringNavigation = { target: "conversation" | "design" | "checks" | "manuscript" | "sources" | "graph" | "settings" | "planning" | "proposals" | "writer" | "continuity"; scene_id?: string; chapter_id?: string };
+export type AuthoringNavigation = { writer_choice?: WriterChoice | null; target: "conversation" | "design" | "checks" | "manuscript" | "sources" | "graph" | "settings" | "planning" | "proposals" | "writer" | "continuity"; scene_id?: string; chapter_id?: string };
 export function authoringToolNavigation(content: string): AuthoringNavigation | null {
   try {
     const trace = JSON.parse(content);

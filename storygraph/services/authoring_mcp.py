@@ -12,6 +12,8 @@ from storygraph.skills import SKILLS, SKILL_DESCRIPTIONS
 
 
 _TOOL_HELP = {
+    "list_writers": "List configured ready Writer models for this session without exposing connection secrets.",
+    "pick_writer": "Choose a configured Writer for this session; author execution is still required.",
     "discover_capabilities": "List tools allowed in this collaboration mode and available writing methods.",
     "read_skill": "Load one packaged writing method for the Main Agent.",
     "inspect_project": "Find chapters and scenes by title or ID in the current project outline.",
@@ -58,8 +60,9 @@ def _input_schema(arguments, definitions):
 class AuthoringMCPServer:
     """One turn owns one server and dispatcher closure. Not an HTTP endpoint."""
 
-    def __init__(self, *, dispatch, validate_context, mode="collaborate"):
+    def __init__(self, *, dispatch, validate_context, mode="collaborate", excluded_tools=()):
         self.dispatch, self.validate_context, self.mode = dispatch, validate_context, mode
+        self.excluded_tools = frozenset(excluded_tools)
         self.initialized = False
         self.ready = False
         self.failures = {}
@@ -114,7 +117,7 @@ class AuthoringMCPServer:
             result = {"tools": [{"name": v["properties"]["tool"]["const"],
                 "description": _TOOL_HELP[v["properties"]["tool"]["const"]],
                 "inputSchema": _input_schema(v["properties"]["args"], schema["$defs"])}
-                for v in schema["oneOf"] if v["properties"]["tool"]["const"] in allowed_authoring_tools(self.mode)]}
+                for v in schema["oneOf"] if v["properties"]["tool"]["const"] in allowed_authoring_tools(self.mode) - self.excluded_tools]}
         elif method == "resources/list":
             if params:
                 raise ContractError("authoring_mcp_invalid_params")
@@ -133,6 +136,8 @@ class AuthoringMCPServer:
                 raise ContractError("authoring_mcp_invalid_params")
             action = AuthoringToolAction.model_validate({"tool": params["name"], "args": params["arguments"]})
             validate_authoring_mode_tool(self.mode, action.tool)
+            if action.tool in self.excluded_tools:
+                raise ContractError("authoring_tool_not_allowed_in_mode")
             output = self.dispatch(action)
             result = {"content": [{"type": "text", "text": json.dumps(output, ensure_ascii=False)}],
                       "structuredContent": output, "isError": False}

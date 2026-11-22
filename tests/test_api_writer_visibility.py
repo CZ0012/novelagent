@@ -270,16 +270,17 @@ def test_workflow_with_current_policy_uses_isolated_messages_and_reviewable_prop
     assert pack["pov_character_id"] not in wire
 
 
-def test_strict_api_provenance_marks_configured_preset_untransmitted_and_legacy_keeps_it(environment, monkeypatch):
+def test_strict_api_provenance_marks_configured_preset_untransmitted_and_legacy_keeps_it(environment):
     from storygraph.core.agent_config import AgentPreset
     client, app, provider = environment
-    original = main.settings_for_task
-    configured = AgentPreset(id="custom_fixture_private_style", name="离线配置预设", system_prompt="PRIVATE_CONFIGURED_PRESET_NOT_WRITER_INPUT")
-    def runtime_with_preset(*args, **kwargs):
-        runtime = original(*args, **kwargs)
-        runtime.agent_preset = configured
-        return runtime
-    monkeypatch.setattr(main, "settings_for_task", runtime_with_preset)
+    created = client.post("/settings/agent/presets", json={
+        "name": "离线配置预设", "system_prompt": "PRIVATE_CONFIGURED_PRESET_NOT_WRITER_INPUT",
+    })
+    assert created.status_code == 200, created.text
+    configured = next(AgentPreset.model_validate(p) for p in created.json()["agent_presets"]
+                      if p["name"] == "离线配置预设")
+    saved = client.put("/settings/agent", json={"selected_preset_id": configured.id})
+    assert saved.status_code == 200, saved.text
     pack = client.post(f"/projects/{PROJECT_ID}/scenes/{SCENE_ID}/context-pack", json={}).json()
     policy = spec(pack)
     assert save_policy(client, policy).status_code == 200

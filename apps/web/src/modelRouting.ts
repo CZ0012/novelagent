@@ -8,7 +8,7 @@ export function settingsToForm(settings: AgentSettings): AgentSettingsUpdate {
     llm_model: settings.llm_model, llm_json_mode: settings.llm_json_mode, permission_level: settings.permission_level,
     llm_protocol: settings.llm_protocol ?? "chat_completions", llm_thinking_mode: settings.llm_thinking_mode ?? "provider_default",
     ...(settings.llm_reasoning_effort !== undefined ? { llm_reasoning_effort: settings.llm_reasoning_effort } : {}),
-    connection_profiles: settings.connection_profiles?.map((profile) => ({ id: profile.id, name: profile.name, protocol: profile.protocol, base_url: profile.base_url, model: profile.model, json_mode: profile.json_mode, thinking_mode: profile.thinking_mode ?? "provider_default", ...(profile.reasoning_effort !== undefined ? { reasoning_effort: profile.reasoning_effort } : {}) })),
+    connection_profiles: settings.connection_profiles?.map((profile) => ({ auth_mode: profile.auth_mode ?? "api_key", chatgpt_account_id: profile.chatgpt_account_id ?? null, id: profile.id, name: profile.name, protocol: profile.protocol, base_url: profile.base_url, model: profile.model, json_mode: profile.json_mode, thinking_mode: profile.thinking_mode ?? "provider_default", ...(profile.reasoning_effort !== undefined ? { reasoning_effort: profile.reasoning_effort } : {}) })),
     task_assignments: settings.task_assignments ? { ...settings.task_assignments } : undefined
   };
 }
@@ -16,7 +16,7 @@ export function settingsToForm(settings: AgentSettings): AgentSettingsUpdate {
 /** Only explicit editable fields cross the settings write boundary. Secret previews never do. */
 export function settingsSavePayload(form: AgentSettingsUpdate, key: string, clear: boolean): AgentSettingsUpdate {
   const profiles = form.connection_profiles?.map((profile): ConnectionProfileUpdate => ({
-    id: profile.id, name: profile.name, protocol: profile.protocol, base_url: profile.base_url, model: profile.model, json_mode: profile.json_mode, thinking_mode: profile.thinking_mode ?? "provider_default",
+    auth_mode: profile.auth_mode ?? "api_key", chatgpt_account_id: profile.chatgpt_account_id ?? null, id: profile.id, name: profile.name, protocol: profile.protocol, base_url: profile.base_url, model: profile.model, json_mode: profile.json_mode, thinking_mode: profile.thinking_mode ?? "provider_default",
     ...(profile.reasoning_effort !== undefined ? { reasoning_effort: profile.reasoning_effort } : {}),
     ...(profile.api_key ? { api_key: profile.api_key } : {}), ...(profile.clear_api_key ? { clear_api_key: true } : {})
   }));
@@ -44,7 +44,7 @@ export function resolvedTask(settings: AgentSettings | null, task: ModelTask): M
   const id = settings.task_assignments?.[task];
   if (id) {
     const profile = settings.connection_profiles?.find((candidate) => candidate.id === id);
-    return profile ? { task, profile_id: profile.id, profile_name: profile.name, protocol: profile.protocol, model: profile.model, ...(profile.thinking_mode ? { thinking_mode: profile.thinking_mode } : {}), ...(profile.reasoning_effort ? { reasoning_effort: profile.reasoning_effort } : {}) } : null;
+    return profile ? { task, ...(profile.auth_mode === "chatgpt_plan" ? { auth_mode: "chatgpt_plan" as const } : {}), profile_id: profile.id, profile_name: profile.name, protocol: profile.protocol, model: profile.model, ...(profile.thinking_mode ? { thinking_mode: profile.thinking_mode } : {}), ...(profile.reasoning_effort ? { reasoning_effort: profile.reasoning_effort } : {}) } : null;
   }
   return { task, profile_id: "default", profile_name: settings.provider_label, protocol: settings.llm_protocol ?? "chat_completions", model: settings.llm_model, ...(settings.llm_thinking_mode ? { thinking_mode: settings.llm_thinking_mode } : {}), ...(settings.llm_reasoning_effort ? { reasoning_effort: settings.llm_reasoning_effort } : {}) };
 }
@@ -53,7 +53,7 @@ export function taskConnectionReady(settings: AgentSettings | null, task: ModelT
   if (!settings || !execution?.model.trim()) return false;
   if (execution.profile_id === "default") return Boolean(settings.api_key_configured && settings.llm_base_url.trim());
   const profile = settings.connection_profiles?.find((item) => item.id === execution.profile_id);
-  return Boolean(profile?.api_key_configured && profile.base_url.trim());
+  return profile?.auth_mode === "chatgpt_plan" ? profile.account_ready === true : Boolean(profile?.api_key_configured && profile.base_url.trim());
 }
 
 export function settingsRequestIsCurrent(request: { apiBase: string; sequence: number; revision: number }, current: { apiBase: string; sequence: number; revision: number }): boolean {

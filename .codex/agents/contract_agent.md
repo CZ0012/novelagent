@@ -347,3 +347,7 @@ calls beyond normal Main commands. Omitted/empty lists do not delete anything.
 ## SG-034 Main Agent workbench
 
 Maintain the Main Agent workbench section in authoring_session_v1. Keep optional turn focus, collaboration mode, exact passage, the package skill registry and typed navigation consistent across API, Web and desktop. Bind permissions and author review at the existing services.
+
+## SG-036 ChatGPT plan and Writer selection
+
+Preserve legacy API-key profiles and provenance. Follow agent_runtime_v1 and authoring_session_v1 for account-pinned named plan profiles, local OAuth controls, connection fingerprints, Writer selection, revocation and no automatic fallback.

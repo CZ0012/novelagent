@@ -356,3 +356,7 @@ calls beyond normal Main commands. Omitted/empty lists do not delete anything.
 ## SG-034 Main Agent workbench
 
 Keep one live conversation per connection and project below the working document. Show focus, selected passage and proposal provenance. Preserve unsaved changes, support the resize keyboard controls and route only typed project-scoped workflow links.
+
+## SG-036 ChatGPT plan and Writer selection
+
+Show billing mode, the active registration and a Manage usage link. Carry the active session Writer into ordinary writing as well as scene handoff, preserve explicit overrides and never transmit a Writer selection as extra story context.

@@ -10,6 +10,16 @@ from storygraph.stores.draft_store import SQLiteDraftStore
 
 
 def create_llm_provider(settings: StoryGraphSettings) -> OpenAICompatibleProvider:
+    if getattr(settings, "llm_auth_mode", "api_key") == "chatgpt_plan":
+        from storygraph.services.chatgpt_plan_provider import ChatGPTPlanProvider
+        if settings.llm_base_url or settings.llm_api_key or settings.llm_protocol != "responses":
+            raise ValueError("ChatGPT plan requires isolated official Responses transport")
+        provider = ChatGPTPlanProvider(model=settings.llm_model,
+            account_id=getattr(settings, "llm_chatgpt_account_id", None),
+            timeout_seconds=settings.llm_timeout_seconds, json_mode=settings.llm_json_mode,
+            login_service=getattr(settings, "chatgpt_login", None))
+        provider.model_execution = getattr(settings, "model_execution", None)
+        return provider
     provider_class = {"chat_completions": OpenAICompatibleProvider,
                       "responses": ResponsesProvider,
                       "anthropic_messages": AnthropicMessagesProvider}.get(settings.llm_protocol)
@@ -47,3 +57,16 @@ def create_scene_writer(settings: StoryGraphSettings, draft_store: SQLiteDraftSt
             ),
         )
     raise ValueError(f"Unknown scene writer: {settings.scene_writer}")
+
+
+def provider_ready(settings: StoryGraphSettings) -> bool:
+    """Local readiness only; never infer plan access from a configured API key."""
+    if not settings.llm_model:
+        return False
+    if getattr(settings, "llm_auth_mode", "api_key") == "chatgpt_plan":
+        from storygraph.services.chatgpt_login import get_default_chatgpt_login_service
+        return (settings.llm_protocol == "responses" and not settings.llm_base_url
+                and not settings.llm_api_key
+                and (getattr(settings, "chatgpt_login", None) or get_default_chatgpt_login_service()).account_ready(
+                    getattr(settings, "llm_chatgpt_account_id", None)))
+    return bool(settings.llm_base_url and settings.llm_api_key)

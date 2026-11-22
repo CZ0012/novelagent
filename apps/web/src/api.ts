@@ -265,7 +265,9 @@ export type AgentDiscussionSource = {
 
 export type ProseInputGrants = { instruction: boolean; instruction_sha256: string; target: "none" | "draft" | "selection"; draft_id?: string; version?: number; text_sha256?: string; start?: number; end?: number; expected_text?: string; offset_unit?: "utf16" };
 
+export type WriterChoice = { profile_id: string; profile_name: string; model: string; auth_mode: "api_key" | "chatgpt_plan"; fingerprint: string; reason?: string; ready?: boolean };
 export type AgentDiscussionRequest = {
+  writer_choice?: Pick<WriterChoice, "profile_id" | "fingerprint">;
   prose_input_grants?: ProseInputGrants;
   mode: AgentDiscussionMode;
   instruction: string;
@@ -487,9 +489,9 @@ export type ModelProtocol = "chat_completions" | "responses" | "anthropic_messag
 export type ReasoningEffort = "low" | "high" | "max";
 export type ThinkingMode = "provider_default" | "enabled" | "disabled";
 export type ModelTask = "planning" | "writing" | "revision" | "discussion" | "extraction" | "continuity";
-export type ModelExecution = { task: ModelTask; profile_id: string; profile_name: string; protocol: ModelProtocol; model: string; thinking_mode?: ThinkingMode | null; reasoning_effort?: ReasoningEffort };
-export type ConnectionProfile = { id: string; name: string; protocol: ModelProtocol; base_url: string; model: string; json_mode: boolean; thinking_mode?: ThinkingMode; reasoning_effort?: ReasoningEffort | null; api_key_configured: boolean; api_key_preview?: string | null };
-export type ConnectionProfileUpdate = Pick<ConnectionProfile, "id" | "name" | "protocol" | "base_url" | "model" | "json_mode" | "thinking_mode" | "reasoning_effort"> & { api_key?: string | null; clear_api_key?: boolean };
+export type ModelExecution = { task: ModelTask; profile_id: string; profile_name: string; protocol: ModelProtocol; model: string; auth_mode?: "api_key" | "chatgpt_plan"; thinking_mode?: ThinkingMode | null; reasoning_effort?: ReasoningEffort };
+export type ConnectionProfile = { auth_mode?: "api_key" | "chatgpt_plan"; chatgpt_account_id?: string | null; account_ready?: boolean; id: string; name: string; protocol: ModelProtocol; base_url: string; model: string; json_mode: boolean; thinking_mode?: ThinkingMode; reasoning_effort?: ReasoningEffort | null; api_key_configured: boolean; api_key_preview?: string | null };
+export type ConnectionProfileUpdate = Pick<ConnectionProfile, "auth_mode" | "chatgpt_account_id" | "id" | "name" | "protocol" | "base_url" | "model" | "json_mode" | "thinking_mode" | "reasoning_effort"> & { api_key?: string | null; clear_api_key?: boolean };
 export type TaskAssignments = Partial<Record<ModelTask, string | null>>;
 
 export type AgentSettings = {

@@ -13,7 +13,7 @@ from storygraph.core.agent_config import ModelExecution
 from storygraph.models.authoring import (
     AuthoringSession, AuthoringWorkspace, AuthoringProposal, AuthoringMessage,
     AuthoringToolAction, AuthoringDraftPin, AuthoringPatch, AuthoringCharacterSimulation,
-    AuthoringEvidence, AuthoringCharacterKnowledge, authoring_tool_schema,
+    AuthoringEvidence, AuthoringCharacterKnowledge, AuthoringWriterChoice, authoring_tool_schema,
 )
 from storygraph.models.writer_visibility import ReaderPresented
 from storygraph.services.canon_snapshot import canonical_json, content_hash
@@ -127,7 +127,7 @@ def _message(role, content, tool_name=None, model_execution=None):
 class AuthoringService:
     def __init__(self, *, store, provider=None, model="", source_resolver=None,
                  character_resolver=None, canon_resolver=None, draft_resolver=None,
-                 impact_resolver=None, project_language_resolver=None, canon_query_resolver=None, model_execution=None, project_resolver=None, reviews_resolver=None, navigation_validator=None, passage_resolver=None):
+                 impact_resolver=None, project_language_resolver=None, canon_query_resolver=None, model_execution=None, project_resolver=None, reviews_resolver=None, navigation_validator=None, passage_resolver=None, writer_resolver=None):
         self.store, self.provider, self.model = store, provider, model
         self.source_resolver, self.character_resolver = source_resolver, character_resolver
         self.canon_resolver, self.draft_resolver = canon_resolver, draft_resolver
@@ -137,6 +137,7 @@ class AuthoringService:
         self.project_resolver, self.reviews_resolver = project_resolver, reviews_resolver
         self.navigation_validator = navigation_validator
         self.passage_resolver = passage_resolver
+        self.writer_resolver = writer_resolver
         self.model_execution = ModelExecution.model_validate(model_execution).model_copy(deep=True) if model_execution is not None else None
 
     def _generate(self, request):
@@ -610,7 +611,8 @@ class AuthoringService:
                 reconcile_card=reconcile_card, quote_registry=quote_registry, read_draft_ids=read_draft_ids,
                 navigation_context=navigation_context, mcp=mcp)
         mcp = AuthoringMCPClient(AuthoringMCPServer(dispatch=dispatch,
-            validate_context=validate_turn, mode=collaboration_mode))
+            validate_context=validate_turn, mode=collaboration_mode,
+            excluded_tools={"list_writers", "pick_writer"} if reconcile_pin is not None else ()))
         mcp.initialize()
         catalog = mcp.call("tools/list")
         resources = mcp.call("resources/list")
@@ -654,6 +656,8 @@ class AuthoringService:
                    "draft_pins_total": len(session.draft_pins), "draft_pins_more": len(session.draft_pins) > 10,
                    "history_counts": session.history_counts.model_dump(),
                    "history_has_more": session.history_has_more.model_dump()}
+        if session.writer_choice is not None:
+            context["writer_choice"] = session.writer_choice.model_dump(exclude={"fingerprint"})
         if selected_passage is not None:
             context["selected_passage"] = self.passage_resolver(session.project_id, (navigation_context or {}).get("scene_id"), selected_passage)
             context["selected_passage_boundary"] = "Single-turn Main-only selected excerpt. This grants no whole-Draft/tool/Writer/simulation access and is not a reconciliation read or evidence."
@@ -693,7 +697,7 @@ class AuthoringService:
                 if isinstance(exc, ContractError) and not isinstance(exc, ModelOutputError) and str(exc) not in {
                     "authoring_patch_dangling_reference", "authoring_empty_patch"}:
                     raise
-                if isinstance(exc, ProviderError) and (not exc.outcome_known or exc.category not in {
+                if isinstance(exc, ProviderError) and (not exc.allow_format_retry or not exc.outcome_known or exc.category not in {
                     "invalid_response", "incomplete_response", "unsupported_output"}):
                     raise
                 failure = exc if isinstance(exc, (ContractError, ProviderError)) else ModelOutputError("authoring_invalid_tool_output")
@@ -781,6 +785,33 @@ class AuthoringService:
         validate_generated_output_language(output_language=session.content_language, fields=fields)
         return {"character_id": args["character_id"], "noncanon": True, "simulation": simulation.model_dump(mode="json")}
 
+    def _writers(self, project_id):
+        """Resolve current runtime choices; allowlist fields before model-visible output."""
+        if self.writer_resolver is None:
+            return []
+        rows = self.writer_resolver(project_id)
+        if not isinstance(rows, list) or len(rows) > 21:
+            raise ContractError("authoring_writer_configuration_invalid")
+        writers = []
+        seen = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ContractError("authoring_writer_configuration_invalid")
+            if row.get("ready") is not True or not row.get("model"):
+                continue
+            try:
+                choice = AuthoringWriterChoice.model_validate({
+                    key: row.get(key, "api_key" if key == "auth_mode" else None)
+                    for key in ("profile_id", "profile_name", "model", "auth_mode", "fingerprint")
+                } | {"reason": "runtime"})
+            except ValidationError:
+                raise ContractError("authoring_writer_configuration_invalid") from None
+            if choice.profile_id in seen:
+                raise ContractError("authoring_writer_configuration_invalid")
+            seen.add(choice.profile_id)
+            writers.append(choice)
+        return writers
+
     def _navigation(self, project_id, navigation):
         from storygraph.models.authoring import AuthoringNavigationContext
         value = AuthoringNavigationContext.model_validate(navigation).model_dump(mode="json", exclude_none=True)
@@ -793,6 +824,21 @@ class AuthoringService:
     def _tool(self, session, action, *, reconcile_pin=None, canon_sha256=None, reconcile_card=None,
               quote_registry=None, read_draft_ids=None, navigation_context=None, mcp=None):
         args = action.args
+        if action.tool in {"list_writers", "pick_writer"}:
+            if reconcile_pin is not None:
+                raise ContractError("authoring_writer_choice_not_allowed_in_reconciliation")
+            writers = self._writers(session.project_id)
+            if action.tool == "list_writers":
+                return {"writers": [writer.model_dump(exclude={"reason", "fingerprint"}) for writer in writers],
+                        "selection_scope": "current_session", "executes_writer": False}
+            selected = next((writer for writer in writers if writer.profile_id == args["profile_id"]), None)
+            if selected is None:
+                raise ContractError("authoring_writer_not_available")
+            validate_generated_output_language(output_language=session.content_language, fields={"reason": args["reason"]})
+            session.writer_choice = selected.model_copy(update={"reason": args["reason"]})
+            return {"writer_choice": session.writer_choice.model_dump(exclude={"fingerprint"}),
+                    "selection_scope": "current_session", "executes_writer": False,
+                    "requires_author_writer_action": True}
         if action.tool == "discover_capabilities":
             return {"tools": [{"name": t["name"], "description": t["description"]} for t in mcp.call("tools/list")["tools"]],
                 "skills": mcp.call("resources/list")["resources"],

@@ -21,6 +21,7 @@ from storygraph.services.authoring import (
 )
 from storygraph.services.canon_snapshot import canonical_json, content_hash
 from storygraph.services.graph_query import GraphQueryService
+from storygraph.services.writer_routes import available_writers
 from storygraph.services.llm_provider import ProviderError
 from storygraph.services.project_language import resolve_project_output_language
 from storygraph.services.scene_writer import LLMSceneWriter
@@ -319,7 +320,8 @@ def register_authoring_session_routes(app, *, graph, settings, proposals, drafts
             character_resolver=lambda pid, cid, sid: character_for(pid, cid, sid, session_id),
             impact_resolver=impacts, project_language_resolver=language_scope,
             canon_query_resolver=canon_query, model_execution=execution, project_resolver=project_for,
-            reviews_resolver=reviews_for, navigation_validator=navigation_for, passage_resolver=passage_for)
+            reviews_resolver=reviews_for, navigation_validator=navigation_for, passage_resolver=passage_for,
+            writer_resolver=lambda _project_id: available_writers(settings))
 
     def envelope(session):
         result = session.model_dump(mode="json")

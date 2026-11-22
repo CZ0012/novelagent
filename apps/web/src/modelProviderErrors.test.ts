@@ -16,3 +16,7 @@ describe("finite provider error classification", () => {
     expect(modelProviderFailureKey(new Error("LLM provider [connection_error]: private"))).toBeNull();
   });
 });
+
+it.each(["plan_usage_limit", "plan_permission_required", "plan_not_eligible", "plan_usage_unavailable"])("localizes actual plan failure category %s without a generic fallback", category => {
+  expect(modelProviderFailureKey(new ApiRequestError(409, "safe backend guidance", category))).toMatch(/^modelPlan/);
+});

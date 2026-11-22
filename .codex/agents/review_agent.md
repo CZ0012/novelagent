@@ -352,3 +352,7 @@ calls beyond normal Main commands. Omitted/empty lists do not delete anything.
 ## SG-034 Main Agent workbench
 
 Review the empty-project and existing-manuscript journeys. Check that a discoverable action actually runs or opens its named destination, and that discussion never claims a review, novel edit or canon update on the basis of a link.
+
+## SG-036 ChatGPT plan and Writer selection
+
+Verify truthful plan-versus-key attribution, stale selection handling and absence of automatic Writer invocation or paid fallback. Separate offline synthetic checks, user-authorized real calls, packaged smoke and remote release verification.

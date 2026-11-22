@@ -586,3 +586,16 @@ and language checks. Removing a reference used by adopted design evidence or
 reader records requires revising those citations first. A fresh conversation
 can start with a different set of references. Removing other Draft references
 returns scene cards to explicit review. Repeating the same selection is a no-op.
+
+## Choosing the Writer during collaboration
+
+In collaborative turns, Main may call `list_writers` and then
+`pick_writer(profile_id, reason)`. The framework resolves the exact ready
+connection and persists `session.writer_choice` with the real profile name,
+model, auth mode, routing fingerprint and the stated reason. Selection makes
+no inference call and changes no global assignment. A new session with no
+choice follows the configured task routing. The author can override it for a
+prose action. Discussion-only, review-only and exact evidence reconciliation
+cannot select a Writer. See [agent runtime](agent_runtime_v1.md) for the
+dispatch checks. The existing visibility, proposal and canon review boundaries
+also apply to an explicitly selected Writer.

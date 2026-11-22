@@ -21,6 +21,10 @@ from pydantic import (
     model_validator,
 )
 from typing import Literal
+from apps.api.chatgpt_routes import register_chatgpt_routes, login_service, require_local_plan, is_local_plan_request
+from storygraph.services.writer_routes import WriterRouteReference, available_writers, resolve_prose_connection
+from storygraph.services.scene_writer_factory import provider_ready
+from storygraph.services.llm_provider import ProviderError
 
 from storygraph.core.agent_config import (
     AgentPermissionLevel,
@@ -427,6 +431,7 @@ class AgentDiscussionSourceRequest(BaseModel):
 
 
 class AgentDiscussionRequest(BaseModel):
+    writer_choice: WriterRouteReference | None = None
     model_config = ConfigDict(extra="forbid")
     prose_input_grants: ProseInputGrants | None = None
     mode: Literal["discuss", "revise_selection", "revise_scene", "continue_scene", "create_scene"] = "discuss"
@@ -451,6 +456,8 @@ class AgentDiscussionRequest(BaseModel):
 
     @model_validator(mode="after")
     def included_draft_requires_enabled_draft_input(self) -> "AgentDiscussionRequest":
+        if self.writer_choice is not None and self.mode == "discuss":
+            raise ValueError("A Writer connection can only be selected for a prose action.")
         if (self.selected_start is None) != (self.selected_end is None):
             raise ValueError("Selection offsets must be supplied together.")
         if self.selected_start is not None and (self.included_draft_id is None or self.selected_text is None):
@@ -558,7 +565,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             if cleanup is not None:
                 cleanup()
 
-    app = FastAPI(title="StoryGraph Agent", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="StoryGraph Agent", version="0.3.1", lifespan=lifespan)
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_request_validation_error(
@@ -593,6 +600,14 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
     agent_config = load_agent_config(settings)
     agent_config_lock = RLock()
     apply_agent_config(settings, agent_config)
+    allowed_origins = _cors_origins()
+
+    @app.middleware("http")
+    async def keep_plan_local(request: Request, call_next):
+        if any(profile.auth_mode == "chatgpt_plan" for profile in agent_config.connection_profiles):
+            if not is_local_plan_request(request, allowed_origins):
+                return JSONResponse(status_code=403, content={"detail": {"category": "chatgpt_local_only"}})
+        return await call_next(request)
     configured_graph = open_configured_graph_store(
         settings,
         default_backend="json" if use_persistent_stores else "memory",
@@ -874,21 +889,30 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             "graph_backend": configured_graph.backend,
             "workflow_runtime": settings.workflow_runtime,
             "scene_writer": settings.scene_writer,
-            "llm_configured": bool(settings.llm_base_url and settings.llm_api_key),
+            "llm_configured": provider_ready(settings_for_task(settings, "writing")),
             "permission_level": agent_config.permission_level,
         }
 
     @app.get("/settings/agent")
     def get_agent_settings() -> dict:
-        return _agent_settings_payload(agent_config)
+        return _agent_settings_payload(agent_config, settings)
+
+    register_chatgpt_routes(app, settings, require_permission, allowed_origins)
+
+    @app.get("/settings/agent/writers")
+    def list_writers() -> dict:
+        require_permission(AgentPermissionLevel.READ_GENERATE)
+        return {"writers": available_writers(settings)}
 
     @app.put("/settings/agent")
-    def put_agent_settings(request: AgentRuntimeConfigUpdate) -> dict:
+    def put_agent_settings(request: AgentRuntimeConfigUpdate, http_request: Request) -> dict:
         with agent_config_lock:
             try:
                 updated = update_agent_config(agent_config, request)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail="Agent preset, connection profile, or task assignment is invalid") from exc
+            if any(profile.auth_mode == "chatgpt_plan" for profile in updated.connection_profiles):
+                require_local_plan(http_request, allowed_origins)
             return persist_agent_settings(updated)
 
     @app.get("/settings/agent/models")
@@ -913,7 +937,10 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 "error": None,
             }
         except HTTPException:
-            error_message = "Configure the provider address, API key, and model first."
+            error_message = ("plan_permission_required" if runtime.llm_auth_mode == "chatgpt_plan"
+                             else "Configure the provider address, API key, and model first.")
+        except ProviderError as exc:
+            error_message = exc.category if runtime.llm_auth_mode == "chatgpt_plan" else str(exc)
         except (RuntimeError, ValueError) as exc:
             error_message = str(exc)
         return {
@@ -927,7 +954,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
             save_agent_config(settings, updated)
         apply_agent_config(settings, updated)
         agent_config = updated
-        return _agent_settings_payload(agent_config)
+        return _agent_settings_payload(agent_config, settings)
 
     @app.post("/settings/agent/presets")
     def create_agent_preset(request: AgentPresetInput) -> dict:
@@ -2524,6 +2551,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         """Read-only exact protected prose request, using the generation preflight/builder."""
         require_permission(AgentPermissionLevel.READ_ONLY)
         try:
+            preview_task = "revision" if request.mode in {"revise_scene", "revise_selection"} else "writing"
+            selected_runtime = resolve_prose_connection(settings, preview_task, request.writer_choice)
             graph_query.scene_node(project_id=project_id, scene_id=scene_id)
             if request.mode == "discuss":
                 raise ContractError("writer_visibility_preview_requires_prose_action")
@@ -2547,7 +2576,7 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 raise ContractError("writer_visibility_edit_preview_requires_isolated_policy")
             messages = AgentDiscussionService._isolated_messages(view, request.mode,
                 resolve_project_output_language(graph, project_id))
-            return {"mode": "isolated", "writer_view": view,
+            return {"mode": "isolated", "writer_view": view, "model_execution": selected_runtime.model_execution,
                     "messages": [{"role": m.role, "content": m.content} for m in messages]}
         except (ContractError, GraphStoreError) as exc:
             raise _contract_http_exception(exc) from exc
@@ -2561,7 +2590,10 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
         require_permission(AgentPermissionLevel.READ_GENERATE)
         task = ("revision" if request.mode in {"revise_scene", "revise_selection"} else
                 "writing" if request.mode in {"continue_scene", "create_scene"} else "discussion")
-        runtime = settings_for_task(settings, task)
+        try:
+            runtime = resolve_prose_connection(settings, task, request.writer_choice)
+        except ContractError as exc:
+            raise _contract_http_exception(exc) from None
         _require_llm_configured(runtime)
         try:
             graph_query.scene_node(project_id=project_id, scene_id=scene_id)
@@ -2697,6 +2729,8 @@ def create_app(settings: StoryGraphSettings | None = None) -> FastAPI:
                 "output_language": output_language,
                 "cross_language_policy": request.cross_language_policy,
             }
+        except ProviderError as exc:
+            raise HTTPException(502, detail={"category": exc.category, "message": str(exc)}) from None
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except (ContractError, GraphStoreError) as exc:
@@ -3720,10 +3754,15 @@ def _structure_int(value, fallback: int) -> int:
 
 
 def _llm_is_configured(settings: StoryGraphSettings) -> bool:
-    return bool(settings.llm_base_url and settings.llm_api_key and settings.llm_model)
+    return provider_ready(settings)
 
 
 def _require_llm_configured(settings: StoryGraphSettings) -> None:
+    if getattr(settings, "llm_auth_mode", "api_key") == "chatgpt_plan":
+        if not provider_ready(settings):
+            raise HTTPException(409, detail={"category": "plan_permission_required",
+                                "message": "请检查当前 ChatGPT 账号的套餐授权及所选模型。"})
+        return
     missing = []
     if not settings.llm_base_url:
         missing.append("base URL")
@@ -3769,8 +3808,11 @@ def _csv(value: str | None) -> list[str] | None:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def _agent_settings_payload(config: AgentRuntimeConfig) -> dict:
+def _agent_settings_payload(config: AgentRuntimeConfig, settings=None) -> dict:
     response = config_response(config).model_dump()
+    for profile in response["connection_profiles"]:
+        if profile.get("auth_mode") == "chatgpt_plan":
+            profile["account_ready"] = login_service(settings).account_ready(profile["chatgpt_account_id"])
     response["permission_descriptions"] = {
         "read_only": "只能读取 canon（正典）、草稿、协作草稿、上下文包、运行记录和待审事实。",
         "read_generate": "可读取并生成草稿、协作草稿、检查结果、候选事实和风格样本。",

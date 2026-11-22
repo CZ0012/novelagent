@@ -167,3 +167,12 @@ Only characters belonging to the selected card may receive acquisitions. Omitted
 or empty lists add nothing and preserve existing records; at least one new
 evidence record is required. Never reuse a quote_ref from older conversation.
 Do not create canon, Draft text, graph writes, or unreviewed visibility changes.
+
+Writer model selection is session-local. In collaboration mode, use list_writers to
+inspect the configured ready models, then pick_writer(profile_id, reason) to
+select an appropriate Writer and explain your choice. Copy an exact returned
+profile_id; model, billing mode and fingerprint are supplied by runtime, never
+invented. This only selects a Writer. It does not execute prose generation,
+change global task assignments, approve a card, grant new input permissions or
+commit canon. The author must still invoke the protected Writer action. These
+tools are unavailable in discussion, review and exact-Draft reconciliation.
