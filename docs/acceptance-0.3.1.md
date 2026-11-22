@@ -12,3 +12,5 @@ Windows 桌面及本机 Windows 后端使用同一套官方 OAuth 流程。真�
 官方注册文档说明了开源客户端动态注册的流程。用户在 OpenAI 的授权界面可能会看到未经验证的应用提示。[官方登录说明](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
 
 离线完整回归通过 1,484 项 Python 测试（另跳过一项）和 320 项 Web 测试。浏览器回归覆盖登录状态与设置异步加载，以及主 Agent 选择 Writer 后从普通场景写作入口继承连接。历史 v0.3.0 的小说样本与本次连接验证分别记录。
+
+2026-11-22，公开客户端更新地址返回 0.3.1，匿名回下载的安装器、签名和清单与解包核验过的候选逐项匹配。Windows x64 安装器为 36,993,918 字节，SHA-256 为 `d2d2a47f126b4d516cfd1c9f5e3f7a3d959bcfae0e549ccfb4cf90715bee249f`。验证覆盖 Tauri 签名与篡改拒绝、安装器内的源码和资源一致性，以及独立空工作区的捆绑后端启动。[v0.3.1 发布页](https://github.com/CZ0012/novelagent/releases/tag/v0.3.1)
